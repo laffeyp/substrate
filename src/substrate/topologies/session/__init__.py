@@ -147,6 +147,22 @@ class SessionEndRequested(Struct, frozen=True):
     source: str
 
 
+# Phase 8 item 6 (2026-09-14): the envelope the daemon writes to the record
+# when SessionRegistry.interrupt(tier="soft") is invoked while a tool
+# producer is running. The model producer is not live at that moment; it
+# has already completed the ToolCall and the tool producer is in flight.
+# The daemon cannot inject via Runtime.resume(resume_event=...) because the
+# runtime is not parked. Instead, the daemon writes this envelope directly
+# to the record (like the daemon's session-lifecycle envelopes) and item 7
+# adds a fragment producer that subscribes to it, emits a PromptFragment
+# the composer folds into the model's next prompt. The model reads the
+# fragment on the next turn and returns rather than starting a new tool.
+class InterruptRequested(Struct, frozen=True):
+    session_id: str
+    tier: str  # "soft" — hard cancels a producer and needs no envelope
+    source: str  # "daemon:interrupt-soft" or a delegate's caller
+
+
 class SessionWarning(Struct, frozen=True):
     session_id: str
     kind: str
@@ -1186,6 +1202,7 @@ __all__ = [
     "RenderedTranscript",
     "SessionEnded",
     "SessionEndRequested",
+    "InterruptRequested",
     "SessionStarted",
     "SessionWarning",
     "ToolCall",

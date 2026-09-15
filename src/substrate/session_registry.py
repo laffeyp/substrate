@@ -909,24 +909,39 @@ class SessionRegistry:
         """F14: increment the turn counter after a successful turn."""
         self._next_turn_index[session_id] = self._next_turn_index.get(session_id, 0) + 1
 
-    def interrupt(self, session_id: str) -> dict[str, Any] | None:
-        """Sprint 217d: cancel the running turn's model producer via the v0.3
-        `Runtime.cancel_producer(instance, cause="external", caller=...)`
-        substrate primitive. Reaches the worker thread's event loop through
-        `_running_handles.loop` and schedules a lookup+cancel closure via
-        `call_soon_threadsafe` so the primitive runs on the loop it belongs to
-        (the primitive's own thread-safety contract).
+    def interrupt(
+        self,
+        session_id: str,
+        *,
+        tier: str = "hard",
+    ) -> dict[str, Any] | None:
+        """Sprint 217d + Phase 8 item 5: cancel a running producer through the
+        `Runtime.cancel_producer` substrate primitive. Reaches the worker
+        thread's event loop through `_running_handles.loop` and schedules a
+        lookup+cancel closure via `call_soon_threadsafe` so the primitive runs
+        on the loop it belongs to (the primitive's own thread-safety
+        contract).
 
-        Returns the cancelled producer's `ProducerRef` dict `{kind, instance,
-        parent}` when a cancel was dispatched. Returns `None` when no turn is
-        running for this session (parked, no handle, runtime not yet live) or
-        when the model producer has already completed / never started.
+        Two tiers:
 
-        The dispatch is synchronous from the caller's view up to a 1-second
-        wait for the loop-side closure to complete; the resulting
-        `ProducerCancelled` envelope lands on the record asynchronously
-        (the CancelledError handler in `_producer_task` writes it). The
-        endpoint layer polls the record if it needs to observe the landing.
+        - `tier="hard"` (default; matches the pre-Phase-8 behavior when
+          nothing else can cancel): walks `kind_by_instance` in the order
+          `model` then `tool`. Whichever kind has a live producer, that is
+          the one cancelled. The tool arm lets a user stop a runaway tool
+          call that the model producer cannot reach.
+        - `tier="soft"`: does NOT cancel a live tool. If a model producer is
+          live, cancels it (same as hard for a model). If a tool is live,
+          returns a synthetic ref `{kind: "signal", instance: "soft",
+          parent: null}` so the caller knows the tier landed as a signal
+          rather than a cancel. The signal envelope
+          (`InterruptRequested(tier="soft")`) is recorded by items 6-7 on the
+          producer side; this method's job is to say "the request was
+          received."
+
+        Returns the cancelled producer's ProducerRef dict when a cancel was
+        dispatched, the soft-signal synthetic ref when tier=soft with a live
+        tool, or None when no producer is running for this session (parked,
+        no handle, runtime not yet live).
         """
         import concurrent.futures
 
@@ -937,6 +952,8 @@ class SessionRegistry:
         runtime = handle.runtime
         if loop is None or runtime is None:
             return None
+        if tier not in ("soft", "hard"):
+            raise ValueError(f"tier must be 'soft' or 'hard', got {tier!r}")
 
         fut: concurrent.futures.Future[dict[str, Any] | None] = concurrent.futures.Future()
 
@@ -946,16 +963,32 @@ class SessionRegistry:
                 if st is None:
                     fut.set_result(None)
                     return
-                # Find the live model instance under the loop's own view of
-                # kind_by_instance; the read is consistent because we run on
-                # the loop that mutates it.
+                # Find the live model first — if the model is running, both
+                # tiers cancel it (soft stops before the next tool by
+                # returning; hard is the same verb at the primitive layer).
+                live_model = None
+                live_tool = None
                 for inst, kind in list(st.kind_by_instance.items()):
-                    if kind == "model":
-                        ref = runtime.cancel_producer(
-                            inst, cause="external", caller="daemon:interrupt"
-                        )
+                    if kind == "model" and live_model is None:
+                        live_model = inst
+                    elif kind == "tool" and live_tool is None:
+                        live_tool = inst
+                caller = f"daemon:interrupt-{tier}"
+                if live_model is not None:
+                    ref = runtime.cancel_producer(live_model, cause="external", caller=caller)
+                    fut.set_result(ref)
+                    return
+                if live_tool is not None:
+                    if tier == "hard":
+                        ref = runtime.cancel_producer(live_tool, cause="external", caller=caller)
                         fut.set_result(ref)
                         return
+                    # Soft with a live tool: the signal is the InterruptRequested
+                    # envelope (items 6-7). Report back that the request was
+                    # received so the client can render "the model will stop
+                    # after this tool" instead of "no turn in flight."
+                    fut.set_result({"kind": "signal", "instance": "soft", "parent": None})
+                    return
                 fut.set_result(None)
             except Exception as exc:  # noqa: BLE001 — carry to the caller thread
                 fut.set_exception(exc)
