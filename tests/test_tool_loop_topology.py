@@ -503,6 +503,46 @@ def test_glob_caps_and_reports_a_huge_match(tmp_path):
 
 
 @pytest.mark.timeout(20)
+async def test_read_file_byte_cap_truncates_and_appends_the_same_pagination_marker(tmp_path):
+    # r2 spike (SPIKE-2026-09-15-r2-read-file-byte-cap.md): pre-fix, a read_file whose output
+    # exceeded _MAX_RESULT_BYTES (12 KB) fell to the generic "narrow the request" stub — no
+    # verb, no cursor, no continuation call. The model repeated the same call. r2: on read_file
+    # the outer wrap truncates to what fits and appends the SAME marker read_file emits when
+    # its own line window doesn't reach EOF. One shape for both caps.
+    from substrate.topologies.tool_loop.tools import FULL_SUITE
+
+    big = tmp_path / "big.txt"
+    # 3000 lines × ~30 bytes each ≈ 90 KB of content — the raw ToolResult (line-numbered)
+    # exceeds 12 KB many times over. read_file's own line window (_MAX_READ_LINES=2000)
+    # already can't page it in one call; the byte cap trips first.
+    big.write_text(
+        "".join(f"the quick brown fox jumped {i}\n" for i in range(3000)), encoding="utf-8"
+    )
+
+    result = await Runtime(tmp_path / "run").run(
+        tool_loop_topology(
+            tools=FULL_SUITE,
+            deterministic=False,
+            max_steps=4,
+            script=[("read_file", [str(big)])],
+        )
+    )
+    assert result.status == "finalised"
+    envs = list(read_record(tmp_path / "run"))
+    tr = next(e for e in envs if e["kind"] == "ToolResult")
+    out = tr["payload"]["output"]
+    # Must NOT be the generic stub — the whole point of the r2 change.
+    assert "too large to inline" not in out
+    assert "narrow the request" not in out
+    # Must carry the actionable pagination marker with a concrete next offset.
+    assert "read_file(" in out and "for the rest" in out
+    # Truncated content is still there (line-numbered tab prefix intact).
+    assert "1\tthe quick brown fox" in out
+    # Under the cap (with a bit of margin for the marker).
+    assert len(out.encode("utf-8")) <= 12_000
+
+
+@pytest.mark.timeout(20)
 async def test_a_huge_tool_output_cannot_wedge_the_loop(tmp_path):
     # reproduce-then-kill (seen live): glob over a big tree returned 341 KB, blob-offloading the
     # ToolResult so `step` left the frame -> the `continue` predicate KeyError('step') -> quarantine

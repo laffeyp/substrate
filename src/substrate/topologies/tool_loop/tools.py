@@ -280,7 +280,7 @@ def full_suite(root: Path | str = ".") -> dict[str, Tool]:
         **CALCULATOR,
         "read_file": Tool(
             TOOL_NAME_READ_FILE,
-            "read_file(path, offset=1, limit) -> line-numbered text ('<n>\\t<line>'); offset is a 1-based line",
+            "read_file(path, offset=1, limit) -> line-numbered text ('<n>\\t<line>'); offset is a 1-based line. Output is capped at ~12 KB inline; if the file is larger, the tail is a marker '… <N> more line(s); read_file(path, <next>) for the rest' — call it with that <next> offset to page.",
             False,
             partial(_read_file, r),
         ),

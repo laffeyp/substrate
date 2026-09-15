@@ -336,10 +336,34 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             # keep the ToolResult INLINE (under the 16 KiB blob-offload threshold). An offloaded
             # payload strips the loop-control fields (step) off the frame AND hands the model a $blob
             # ref instead of the output — wedging the loop (a live glob over a big tree hit exactly
-            # this). One general byte-cap covers every tool; the model reads a bounded notice instead.
-            output = (
-                f"[{tool} output was {len(raw)} bytes — too large to inline; narrow the request]"
-            )
+            # this). read_file has a well-defined continuation call (`read_file(path, <next_line>)`),
+            # so on read_file the wrap truncates to what fits and appends the same pagination marker
+            # read_file already emits when its own line window doesn't reach EOF — the model sees one
+            # shape for both caps. Every other tool falls back to the bounded "narrow the request"
+            # notice; those tools have no continuation and the escalation IS to narrow.
+            if tool == "read_file" and isinstance(output, str) and args:
+                lines = output.split("\n")
+                kept: list[str] = []
+                running = 0
+                for line in lines:
+                    needed = len(line) + 1  # + newline
+                    if running + needed > _MAX_RESULT_BYTES - 200:  # leave room for the marker
+                        break
+                    kept.append(line)
+                    running += needed
+                last_line_no = 0
+                if kept:
+                    head = kept[-1].split("\t", 1)[0]
+                    if head.isdigit():
+                        last_line_no = int(head)
+                remaining = max(len(lines) - len(kept), 0)
+                marker = (
+                    f"… {remaining} more line(s); "
+                    f"read_file({args[0]!r}, {last_line_no + 1}) for the rest"
+                )
+                output = "\n".join([*kept, marker])
+            else:
+                output = f"[{tool} output was {len(raw)} bytes — too large to inline; narrow the request]"
         if tool == "write_file" and args:
             state["prev_write"] = Path(str(args[0])).name  # arm the streak marker for the next call
         yield ToolResult(call_id=call_id, tool=tool, output=output, step=step, ok=True)
