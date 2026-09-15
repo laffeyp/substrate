@@ -914,6 +914,7 @@ class SessionRegistry:
         session_id: str,
         *,
         tier: str = "hard",
+        record_root: str | None = None,
     ) -> dict[str, Any] | None:
         """Sprint 217d + Phase 8 item 5: cancel a running producer through the
         `Runtime.cancel_producer` substrate primitive. Reaches the worker
@@ -949,11 +950,32 @@ class SessionRegistry:
         if handle is None:
             return None
         loop = handle.loop
-        runtime = handle.runtime
-        if loop is None or runtime is None:
+        parent_runtime = handle.runtime
+        if loop is None or parent_runtime is None:
             return None
         if tier not in ("soft", "hard"):
             raise ValueError(f"tier must be 'soft' or 'hard', got {tier!r}")
+        # Phase 8 item 9 descent-scope routing: when the caller names a
+        # `record_root`, look up the child runtime the parent's delegate
+        # spawn published on the process-global registry. The parent's
+        # SessionRegistry does not keep child handles itself — the child
+        # runs on a worker thread inside asyncio.run — so the discovery
+        # path is Runtime.find_active_runtime(record_root).
+        if record_root is not None:
+            from .kernel.runtime import find_active_runtime
+
+            child_runtime = find_active_runtime(record_root)
+            if child_runtime is None:
+                return None
+            runtime = child_runtime
+            # The child runtime lives on the tool producer's worker thread's
+            # event loop — NOT the parent's. Use the child's loop for the
+            # threadsafe scheduling.
+            loop = child_runtime._loop  # noqa: SLF001 — kernel-adjacent
+            if loop is None:
+                return None
+        else:
+            runtime = parent_runtime
 
         fut: concurrent.futures.Future[dict[str, Any] | None] = concurrent.futures.Future()
 
@@ -973,7 +995,11 @@ class SessionRegistry:
                         live_model = inst
                     elif kind == "tool" and live_tool is None:
                         live_tool = inst
-                caller = f"daemon:interrupt-{tier}"
+                caller = (
+                    f"daemon:interrupt-{tier}@{record_root}"
+                    if record_root
+                    else f"daemon:interrupt-{tier}"
+                )
                 if live_model is not None:
                     ref = runtime.cancel_producer(live_model, cause="external", caller=caller)
                     fut.set_result(ref)

@@ -92,6 +92,28 @@ class RunResult(Struct, frozen=True):
     finalisation_payload: Any | None
 
 
+# Process-global map of record_root → live Runtime, populated when a run
+# opens the record for append and cleared when the run finalises. Peer to
+# `SessionRegistry._running_handles` on the daemon side: the daemon holds
+# handles to session-level runtimes it started; this map lets ANY caller
+# on the same process reach a runtime by its record path — most importantly,
+# the parent's daemon reaching a delegate child's runtime for a descent-
+# scope interrupt. The child spawns on the tool producer's worker thread
+# via `asyncio.run(Runtime(child_root).run(...))`; the child's `_drive`
+# registers itself here on start and unregisters in the finally block,
+# so the child's runtime is reachable exactly while it is alive.
+_ACTIVE_RUNTIMES_BY_RECORD_ROOT: dict[str, "Runtime"] = {}
+
+
+def find_active_runtime(record_root: str | Path) -> "Runtime | None":
+    """Return the live Runtime for `record_root`, or `None` when no run is
+    active at that path in this process. Reads are lock-free (Python's GIL
+    covers the dict access); callers cross-thread should NOT cache the
+    reference — a run that has just finalised will be unregistered from
+    the map even if the caller still holds the object."""
+    return _ACTIVE_RUNTIMES_BY_RECORD_ROOT.get(str(Path(record_root)))
+
+
 class Runtime:
     """Executes one topology and produces one run record (single-use)."""
 
@@ -112,6 +134,12 @@ class Runtime:
         self._record_root = Path(record_root)
         self._persistent = persistent
         self._fsync = fsync
+        # Populated at `_drive` entry with the loop the run is on. Read by
+        # cross-thread daemon callers (SessionRegistry.interrupt with
+        # record_root=<child>) that need to schedule closures via
+        # loop.call_soon_threadsafe on the CHILD's loop rather than the
+        # parent's. `None` before a run and after finalisation.
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._admission_bound = admission
         self._budget_us = budget_us
         self._hysteresis_k = hysteresis_k
@@ -220,6 +248,12 @@ class Runtime:
         try:
             st = self._new_run_state(reg)
             self._st = st
+            # Publish this runtime under its record_root so a cross-thread
+            # daemon call can find it — Phase 8 item 9 descent-scope
+            # interrupt. Registered AFTER `self._st = st` so the map only
+            # ever exposes runtimes with live state.
+            _ACTIVE_RUNTIMES_BY_RECORD_ROOT[str(self._record_root)] = self
+            self._loop = asyncio.get_running_loop()
             self._cyc = AppendCycle(
                 reg,
                 record,
@@ -281,6 +315,14 @@ class Runtime:
                         pass
             if lock_fd is not None:
                 locking.release_lock(lock_fd)
+            # Unpublish under the record_root ONLY when the entry still
+            # points at this runtime — a re-entrant call at the same
+            # record_root would have overwritten it, and clobbering that
+            # entry here would strand the live re-entrant handle.
+            _key = str(self._record_root)
+            if _ACTIVE_RUNTIMES_BY_RECORD_ROOT.get(_key) is self:
+                del _ACTIVE_RUNTIMES_BY_RECORD_ROOT[_key]
+            self._loop = None
 
         status = self._status(st)
         return RunResult(
