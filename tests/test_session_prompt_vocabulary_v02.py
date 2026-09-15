@@ -106,9 +106,10 @@ def test_session_kinds_frozenset_includes_the_two_v02_names() -> None:
     assert "UserMessage" in SESSION_KINDS
 
 
-def test_prompt_source_enum_has_the_seven_v02_values() -> None:
-    """PromptSource is the StrEnum. Every v0.2 source name is a member;
-    is_prompt_source returns True for each; a bogus name returns False."""
+def test_prompt_source_enum_has_all_v02_plus_interrupt_values() -> None:
+    """PromptSource is the StrEnum. Every v0.2 source name plus the
+    Phase-8 interrupt member is present; is_prompt_source returns True
+    for each; a bogus name returns False."""
     expected = {
         PromptSource.PER_TURN,
         PromptSource.ROLE,
@@ -117,6 +118,7 @@ def test_prompt_source_enum_has_the_seven_v02_values() -> None:
         PromptSource.PARENT_CONTEXT,
         PromptSource.TOOLS_SUITE,
         PromptSource.USER_MESSAGE,
+        PromptSource.INTERRUPT,
     }
     assert PROMPT_SOURCES == expected
     for source in expected:
@@ -156,6 +158,7 @@ def test_session_open_and_turn_scoped_partition_prompt_sources() -> None:
     assert TURN_SCOPED_SOURCES == {
         PromptSource.PER_TURN,
         PromptSource.USER_MESSAGE,
+        PromptSource.INTERRUPT,
     }
     assert SESSION_OPEN_SOURCES.isdisjoint(TURN_SCOPED_SOURCES)
     assert SESSION_OPEN_SOURCES | TURN_SCOPED_SOURCES == PROMPT_SOURCES

@@ -123,6 +123,11 @@ class PromptSource(StrEnum):
     PARENT_CONTEXT = "parent_context"
     TOOLS_SUITE = "tools_suite"
     USER_MESSAGE = "user_message"
+    # Phase 8 item 7 — the daemon injects InterruptRequested via
+    # Runtime.inject_event on soft ESC; the interrupt_fragment_producer
+    # emits a PromptFragment with this source. Turn-scoped: fires once per
+    # interrupt, clears on the next PromptComposed that consumes it.
+    INTERRUPT = "interrupt"
 
 
 # Session-open sources: fire once at RunStarted, appear in every turn's
@@ -145,6 +150,7 @@ TURN_SCOPED_SOURCES: Final[frozenset[PromptSource]] = frozenset(
     {
         PromptSource.PER_TURN,
         PromptSource.USER_MESSAGE,
+        PromptSource.INTERRUPT,
     }
 )
 
@@ -173,6 +179,9 @@ PRODUCER_KIND_BUNDLE_PERSONALITY_FRAGMENT: Final[str] = "bundle_personality_frag
 PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT: Final[str] = "parent_context_fragment"
 PRODUCER_KIND_TOOLS_SUITE_FRAGMENT: Final[str] = "tools_suite_fragment"
 PRODUCER_KIND_USER_MESSAGE_FRAGMENT: Final[str] = "user_message_fragment"
+# Phase 8 item 7 — emits PromptFragment(source=interrupt) in response to an
+# InterruptRequested envelope the daemon injected via Runtime.inject_event.
+PRODUCER_KIND_INTERRUPT_FRAGMENT: Final[str] = "interrupt_fragment"
 # Also declared by the CI wrapper (ci.py); listed here so the frozenset
 # below covers every kind a session-shape topology can emit.
 PRODUCER_KIND_DRIVER_STEPPER: Final[str] = "driver_stepper"
@@ -195,6 +204,7 @@ SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
         PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT,
         PRODUCER_KIND_TOOLS_SUITE_FRAGMENT,
         PRODUCER_KIND_USER_MESSAGE_FRAGMENT,
+        PRODUCER_KIND_INTERRUPT_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
     }
 )
@@ -215,6 +225,7 @@ FRAGMENT_SOURCE_KINDS: Final[frozenset[str]] = frozenset(
         PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT,
         PRODUCER_KIND_TOOLS_SUITE_FRAGMENT,
         PRODUCER_KIND_USER_MESSAGE_FRAGMENT,
+        PRODUCER_KIND_INTERRUPT_FRAGMENT,
     }
 )
 
@@ -232,7 +243,14 @@ TRIGGER_ID_END_ON_CAP: Final[str] = "end-on-cap"
 TRIGGER_ID_END_ON_USER_END: Final[str] = "end-on-user-end"
 TRIGGER_ID_EMIT_PER_TURN_FRAGMENT: Final[str] = "emit-per-turn-fragment"
 TRIGGER_ID_EMIT_USER_MESSAGE_FRAGMENT: Final[str] = "emit-user-message-fragment"
+TRIGGER_ID_EMIT_INTERRUPT_FRAGMENT: Final[str] = "emit-interrupt-fragment"
 TRIGGER_ID_COMPOSE_ON_COHORT_COMPLETE: Final[str] = "compose-on-cohort-complete"
+# Phase 8 item 7 — fires the composer on ToolResult when the FragmentCohort
+# holds a pending interrupt fragment. Mirror of TRIGGER_ID_CONTINUE, which
+# gains a predicate refusing the same condition, so exactly one of the two
+# fires per ToolResult and the model wakes with the tool result AND the
+# interrupt directive in scope.
+TRIGGER_ID_COMPOSE_ON_INTERRUPT_TOOL_RESULT: Final[str] = "compose-on-interrupt-tool-result"
 TRIGGER_ID_WARN_ON_FRAGMENT_ERROR: Final[str] = "warn-on-fragment-error"
 TRIGGER_ID_ADVANCE_ON_PARK: Final[str] = "advance-on-park"
 
@@ -250,7 +268,9 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_END_ON_USER_END,
         TRIGGER_ID_EMIT_PER_TURN_FRAGMENT,
         TRIGGER_ID_EMIT_USER_MESSAGE_FRAGMENT,
+        TRIGGER_ID_EMIT_INTERRUPT_FRAGMENT,
         TRIGGER_ID_COMPOSE_ON_COHORT_COMPLETE,
+        TRIGGER_ID_COMPOSE_ON_INTERRUPT_TOOL_RESULT,
         TRIGGER_ID_WARN_ON_FRAGMENT_ERROR,
         TRIGGER_ID_ADVANCE_ON_PARK,
     }

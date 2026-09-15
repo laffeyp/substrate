@@ -52,11 +52,14 @@ from .vocabulary import (
     PRODUCER_KIND_SESSION_WARNING,
     PRODUCER_KIND_TOOL,
     PRODUCER_KIND_TOOLS_SUITE_FRAGMENT,
+    PRODUCER_KIND_INTERRUPT_FRAGMENT,
     PRODUCER_KIND_USER_MESSAGE_FRAGMENT,
     SESSION_END_REQUESTED,
     SESSION_ENDED,
     TRIGGER_ID_COMPOSE_ON_COHORT_COMPLETE,
+    TRIGGER_ID_COMPOSE_ON_INTERRUPT_TOOL_RESULT,
     TRIGGER_ID_CONTINUE,
+    TRIGGER_ID_EMIT_INTERRUPT_FRAGMENT,
     TRIGGER_ID_EMIT_PER_TURN_FRAGMENT,
     TRIGGER_ID_EMIT_USER_MESSAGE_FRAGMENT,
     TRIGGER_ID_END_ON_CAP,
@@ -648,6 +651,21 @@ def session_topology(
             return ""
         return str(latest.get("text", ""))
 
+    def _has_pending_interrupt(ctx: Any) -> bool:
+        """True when the FragmentCohort holds a fresh interrupt fragment
+        the composer has not yet folded. Used by CONTINUE and WRAP_UP to
+        step aside so TRIGGER_ID_COMPOSE_ON_INTERRUPT_TOOL_RESULT can fire
+        the composer and produce a fresh PromptComposed. The FragmentCohort
+        clears its turn slice on every PromptComposed emission (see
+        views.py::FragmentCohort.update), so the flag naturally deasserts
+        after the composer refires."""
+        if "fragment_cohort" not in ctx.views:
+            return False
+        for _seq, payload in ctx.views["fragment_cohort"].value():
+            if isinstance(payload, dict) and payload.get("source") == "interrupt":
+                return True
+        return False
+
     def _compose_input(ctx: Any) -> dict[str, Any]:
         """Drift-grooming pass 2026-09-02: the composer's input builder
         unpacks the FragmentCohort's [(seq, payload)] into `fragments` +
@@ -927,6 +945,20 @@ def session_topology(
             factory=user_message_fragment_producer_factory(),
             deterministic=True,
         )
+        # Phase 8 item 7: interrupt fragment source. Fires on
+        # InterruptRequested envelopes the daemon injects via
+        # Runtime.inject_event when the user presses Shift+ESC during a
+        # tool. Yields one PromptFragment(source=interrupt,
+        # precedence=95). Turn-scoped: FragmentCohort clears the entry
+        # on the next PromptComposed, so the directive fires exactly
+        # once per interrupt.
+        b.producer_kind(
+            PRODUCER_KIND_INTERRUPT_FRAGMENT,
+            schemas=[PromptFragment],
+            schema_version=1,
+            factory=interrupt_fragment_producer_factory(),
+            deterministic=True,
+        )
         # Latest UserMessage view — the user_message fragment trigger reads
         # the text from here (the chained trigger fires on ProducerCompleted,
         # which does not carry the UserMessage payload).
@@ -954,7 +986,14 @@ def session_topology(
         b.trigger(
             TRIGGER_ID_CONTINUE,
             subscription=api.Subscription(kinds=frozenset({"ToolResult"})),
-            predicate=lambda ctx: _step_of(ctx) + 1 < turn_max_steps,
+            # Phase 8 item 7: refuse when a pending interrupt fragment
+            # sits in the cohort. TRIGGER_ID_COMPOSE_ON_INTERRUPT_TOOL_RESULT
+            # (mirror below) fires the composer instead so the model wakes
+            # on a fresh PromptComposed carrying the tool result AND the
+            # interrupt directive.
+            predicate=lambda ctx: (
+                _step_of(ctx) + 1 < turn_max_steps and not _has_pending_interrupt(ctx)
+            ),
             starts=PRODUCER_KIND_MODEL,
             input_builder=lambda ctx: _continue_input(ctx, final=False),
             policy=api.PerEvent(),
@@ -962,9 +1001,23 @@ def session_topology(
         b.trigger(
             TRIGGER_ID_WRAP_UP,
             subscription=api.Subscription(kinds=frozenset({"ToolResult"})),
-            predicate=lambda ctx: _step_of(ctx) + 1 >= turn_max_steps,
+            predicate=lambda ctx: (
+                _step_of(ctx) + 1 >= turn_max_steps and not _has_pending_interrupt(ctx)
+            ),
             starts=PRODUCER_KIND_MODEL,
             input_builder=lambda ctx: _continue_input(ctx, final=True),
+            policy=api.PerEvent(),
+        )
+        # Phase 8 item 7: fires the composer on ToolResult when the
+        # cohort holds a pending interrupt fragment. Mirror of CONTINUE /
+        # WRAP_UP (both refuse the same condition). Exactly one of the
+        # three fires per ToolResult.
+        b.trigger(
+            TRIGGER_ID_COMPOSE_ON_INTERRUPT_TOOL_RESULT,
+            subscription=api.Subscription(kinds=frozenset({"ToolResult"})),
+            predicate=lambda ctx: _has_pending_interrupt(ctx),
+            starts=PRODUCER_KIND_PROMPT_COMPOSER,
+            input_builder=lambda ctx: _compose_input(ctx),
             policy=api.PerEvent(),
         )
         b.trigger(
@@ -1055,6 +1108,22 @@ def session_topology(
             input_builder=lambda ctx: {
                 "text": (ctx.views["latest_user_message"].value() or {}).get("text", ""),
                 "turn_index": _turn_index(ctx),
+            },
+            policy=api.PerEvent(),
+        )
+        # Phase 8 item 7: fires the interrupt fragment producer on an
+        # InterruptRequested envelope the daemon injected via
+        # Runtime.inject_event. Off the per-turn chain — this is a
+        # side-emission the composer refire (below) folds into the next
+        # PromptComposed on the next ToolResult boundary.
+        b.trigger(
+            TRIGGER_ID_EMIT_INTERRUPT_FRAGMENT,
+            subscription=api.Subscription(kinds=frozenset({"InterruptRequested"})),
+            predicate=lambda ctx: True,
+            starts=PRODUCER_KIND_INTERRUPT_FRAGMENT,
+            input_builder=lambda ctx: {
+                "tier": ctx.event.payload.get("tier", ""),
+                "source": ctx.event.payload.get("source", ""),
             },
             policy=api.PerEvent(),
         )
@@ -1179,6 +1248,9 @@ from .bundle_producer import (  # noqa: E402  # sprint 062
     bundle_personality_producer_factory,
 )
 from .composer import composer_factory  # noqa: E402  # sprint 059
+from .interrupt_fragment_producer import (  # noqa: E402  # phase 8 item 7
+    interrupt_fragment_producer_factory,
+)
 from .parent_context_producer import parent_context_producer_factory  # noqa: E402  # sprint 063
 from .per_turn_producer import per_turn_producer_factory  # noqa: E402  # sprint 060
 from .role_producer import role_producer_factory  # noqa: E402  # sprint 061

@@ -20,6 +20,7 @@ from substrate.topologies.session.vocabulary import (
     PRODUCER_KIND_BUNDLE_PERSONALITY_FRAGMENT,
     PRODUCER_KIND_DRIVER_STEPPER,
     PRODUCER_KIND_FRAGMENT_ERROR_WARNING,
+    PRODUCER_KIND_INTERRUPT_FRAGMENT,
     PRODUCER_KIND_MODEL,
     PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT,
     PRODUCER_KIND_PARK,
@@ -137,6 +138,7 @@ def test_session_producer_kinds_frozenset_covers_all() -> None:
         PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT,
         PRODUCER_KIND_TOOLS_SUITE_FRAGMENT,
         PRODUCER_KIND_USER_MESSAGE_FRAGMENT,
+        PRODUCER_KIND_INTERRUPT_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
     }
     assert SESSION_PRODUCER_KINDS == expected
@@ -144,9 +146,10 @@ def test_session_producer_kinds_frozenset_covers_all() -> None:
 
 def test_fragment_source_kinds_is_subset_of_producer_kinds() -> None:
     """Sprint 068's FRAGMENT_SOURCE_KINDS is composed from named
-    constants; must be a subset of the full producer-kind set."""
+    constants; must be a subset of the full producer-kind set. Phase 8
+    item 7 added interrupt_fragment as the eighth entry."""
     assert FRAGMENT_SOURCE_KINDS <= SESSION_PRODUCER_KINDS
-    assert len(FRAGMENT_SOURCE_KINDS) == 7
+    assert len(FRAGMENT_SOURCE_KINDS) == 8
 
 
 def test_trigger_id_final_strs() -> None:
@@ -169,5 +172,6 @@ def test_trigger_id_final_strs() -> None:
 
 
 def test_session_trigger_ids_frozenset_covers_all() -> None:
-    """SESSION_TRIGGER_IDS holds every declared trigger id."""
-    assert len(SESSION_TRIGGER_IDS) == 15
+    """SESSION_TRIGGER_IDS holds every declared trigger id. Phase 8
+    item 7 added emit-interrupt-fragment and compose-on-interrupt-tool-result."""
+    assert len(SESSION_TRIGGER_IDS) == 17

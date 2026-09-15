@@ -140,11 +140,11 @@ def test_session_warning_struct_carries_source_name() -> None:
     assert new_shape.source_name == "role_fragment"
 
 
-def test_fragment_source_kinds_frozenset_covers_seven_sources() -> None:
+def test_fragment_source_kinds_frozenset_covers_all_sources() -> None:
     """FRAGMENT_SOURCE_KINDS covers every producer_kind in
     session_topology that emits PromptFragment. Locks the set against
     drift when a future sprint adds a fragment source without updating
-    the vocabulary."""
+    the vocabulary. Phase 8 item 7 added interrupt_fragment."""
     from substrate.topologies.session.vocabulary import FRAGMENT_SOURCE_KINDS
 
     expected = {
@@ -155,5 +155,6 @@ def test_fragment_source_kinds_frozenset_covers_seven_sources() -> None:
         "parent_context_fragment",
         "tools_suite_fragment",
         "user_message_fragment",
+        "interrupt_fragment",
     }
     assert FRAGMENT_SOURCE_KINDS == expected
