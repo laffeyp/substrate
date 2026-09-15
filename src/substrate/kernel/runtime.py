@@ -853,6 +853,52 @@ class Runtime:
         task.cancel()
         return {"kind": kind, "instance": instance, "parent": None}
 
+    def inject_event(self, event: Any) -> None:
+        """Inject an APPLICATION event onto a live run's inbox from OUTSIDE any Producer.
+
+        Peer to `cancel_producer` for the daemon-facing surface. Where `cancel_producer`
+        stops a live Producer, `inject_event` records an external decision on the run's
+        record so triggers subscribed to its kind fire. The frame appends with
+        `producer=null` (externally supplied, same as the resume path — see
+        `_resume_bootstrap`). Seq continues the same sequence.
+
+        Same discipline as `Runtime.resume`'s external-event surface: reserved-kind
+        refused (a `substrate.*` kind would forge a lifecycle frame), payload
+        canonicalized. The event is canonical-checked here, not schema-typed-validated
+        the way a Producer EMISSION is (there is no registered producer_kind to
+        validate an external injection against — same as `resume_event`).
+
+        Thread safety: call from the event-loop thread. From another thread use
+        `loop.call_soon_threadsafe(runtime.inject_event, event)`. The event lands on
+        the inbox and the main loop cycles it on its next iteration; the caller
+        cannot wait for the effect (fire-and-forget by design).
+
+        Returns `None`. Raises `RegistrationError` on a reserved kind or a
+        non-canonical payload. Raises `RuntimeError` if the run is not live.
+
+        Not for lifecycle events. Lifecycle emissions (`substrate.ProducerStarted`,
+        `substrate.ProducerCompleted`, `substrate.ProducerCancelled`,
+        `substrate.ProducerFailed`, `substrate.RunStarted`, `substrate.RunFinalised`)
+        are the runtime's — a caller cannot forge one.
+        """
+        # Config-time refusals BEFORE state consultation (same shape as
+        # Runtime.resume): a reserved kind or a non-canonical payload is a
+        # RegistrationError regardless of whether a run is live.
+        kind = type(event).__name__
+        if is_reserved(kind):
+            raise RegistrationError(
+                f"inject_event kind {kind!r} uses the reserved 'substrate.' namespace; "
+                f"external injections must be APPLICATION events, never lifecycle frames."
+            )
+        try:
+            payload = to_canonical_builtins(event)
+        except Exception as exc:
+            raise RegistrationError(f"inject_event event is not canonical: {exc!r}") from exc
+        st = getattr(self, "_st", None)
+        if st is None:
+            raise RuntimeError("inject_event called before Runtime.run/.resume; no live state")
+        st.inbox.put_nowait(_Lifecycle(kind, payload))
+
 
 # ── resume helpers (fold the existing record into the registered Views, §4 Level-1) ──────
 def _resume_view_matches(sub: Any, env: dict[str, Any]) -> bool:
