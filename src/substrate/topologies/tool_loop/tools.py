@@ -100,6 +100,39 @@ _MAX_GLOB_HITS = (
 )
 
 
+import contextvars as _contextvars  # noqa: E402  # kept adjacent to the _BASH_PROGRESS_CTX below
+
+# Phase 8 item 8: the tool_loop's run_tool wrapper sets this before entering
+# asyncio.to_thread with the tool body; _bash reads it to emit ToolProgress
+# per stdout line. The ctx is a small tuple (call_id, tool_name, step) —
+# everything ToolProgress needs beyond the chunk + offset. Absent when a
+# tool runs outside a substrate runtime (direct entry.run test call); the
+# tool then behaves exactly as before (no progress, full ToolResult).
+_BASH_PROGRESS_CTX: _contextvars.ContextVar[tuple[str, str, int] | None] = _contextvars.ContextVar(
+    "_BASH_PROGRESS_CTX", default=None
+)
+
+
+def _emit_bash_progress(ctx: tuple[str, str, int], *, chunk: str, offset: int, eof: bool) -> None:
+    """Post one ToolProgress envelope through the module-level helper in
+    tool_loop/__init__.py (which reads the current Runtime from the
+    kernel's _CURRENT_RUNTIME contextvar and enqueues via
+    call_soon_threadsafe on the runtime's loop). Keeping the wrapper
+    here lets _bash stay ignorant of the substrate helper's import
+    path — a future non-bash streaming tool imports the same helper."""
+    from . import emit_tool_progress
+
+    call_id, tool, step = ctx
+    emit_tool_progress(
+        call_id=call_id,
+        tool=tool,
+        step=step,
+        chunk=chunk,
+        offset=offset,
+        eof=eof,
+    )
+
+
 class Tool(NamedTuple):
     name: str
     describe: str  # one line for the model's prompt — its available tool surface
@@ -259,10 +292,59 @@ def _write_file(root: Path, a: list[Any]) -> str:
 
 
 def _bash(root: Path, a: list[Any]) -> dict[str, Any]:
-    proc = subprocess.run(  # noqa: S602 — explicit agent shell tool (opt-in, not CI)
-        str(a[0]), shell=True, capture_output=True, text=True, timeout=60, cwd=str(root)
+    """Bash tool. Phase 8 item 8 landed streaming: subprocess.Popen replaces
+    subprocess.run so the tool_loop can emit ToolProgress chunks mid-execution
+    for the client's tool card. The final ToolResult carries the full
+    stdout / stderr / exit as before — subscribers who ignore ToolProgress
+    read the same shape they did before the refactor.
+
+    Progress emission is opt-in via the module-level `_BASH_PROGRESS_CTX`
+    (call_id + tool + step, threaded through by tool_loop's run_tool
+    wrapper). When absent — a direct unit-test call to _bash([...]) — no
+    progress fires; the tool still returns the full result."""
+    proc = subprocess.Popen(  # noqa: S602 — explicit agent shell tool (opt-in, not CI)
+        str(a[0]),
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(root),
+        bufsize=1,  # line-buffered so the read loop sees progress promptly
     )
-    return {"exit": proc.returncode, "stdout": proc.stdout[:8000], "stderr": proc.stderr[:2000]}
+    ctx = _BASH_PROGRESS_CTX.get()
+    stdout_chunks: list[str] = []
+    offset = 0
+    # Read stdout in a loop; stderr is captured at the end (line-interleaving
+    # both cleanly needs threads or select; stderr is smaller and rarely used
+    # for progress by well-behaved commands).
+    if proc.stdout is not None:
+        for line in iter(proc.stdout.readline, ""):
+            stdout_chunks.append(line)
+            if ctx is not None:
+                try:
+                    _emit_bash_progress(ctx, chunk=line, offset=offset, eof=False)
+                except Exception:  # noqa: BLE001 — progress is advisory; a broken emitter must NOT sink the tool
+                    ctx = None
+            offset += len(line)
+    try:
+        _stdout_tail, stderr_text = proc.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise
+    if _stdout_tail:
+        stdout_chunks.append(_stdout_tail)
+    if ctx is not None:
+        try:
+            _emit_bash_progress(ctx, chunk="", offset=offset, eof=True)
+        except Exception:  # noqa: BLE001 — see above
+            pass
+    stdout_full = "".join(stdout_chunks)
+    return {
+        "exit": proc.returncode,
+        "stdout": stdout_full[:8000],
+        "stderr": (stderr_text or "")[:2000],
+    }
 
 
 CALCULATOR: dict[str, Tool] = {

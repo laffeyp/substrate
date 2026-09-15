@@ -101,6 +101,61 @@ class FinalAnswer(Struct, frozen=True):
     steps: int
 
 
+class ToolProgress(Struct, frozen=True):
+    """Phase 8 item 8 — a chunk of a running tool's output. Emitted by the
+    tool_loop mid-execution via `Runtime.inject_event` from the tool
+    body's worker thread. The envelope lands with `producer=null` (same
+    shape as `InterruptRequested`; external injection, not producer
+    emission). The client's tool card renders these chunks under the
+    open row's output pane; on `eof=True` (or on the paired ToolResult)
+    the pane seals.
+
+    call_id + step pair the progress to the originating ToolCall.
+    offset is a monotonic byte offset within this tool call's stream
+    (starts at 0, grows by len(chunk) per emit). eof marks the last
+    chunk; on any tool that does not stream, no ToolProgress ever
+    lands and the ToolResult carries the full output as today."""
+
+    call_id: str
+    tool: str
+    step: int
+    chunk: str
+    offset: int
+    eof: bool = False
+
+
+def emit_tool_progress(
+    *,
+    call_id: str,
+    tool: str,
+    step: int,
+    chunk: str,
+    offset: int,
+    eof: bool = False,
+) -> None:
+    """From inside a tool body (running in `asyncio.to_thread`), post a
+    `ToolProgress` envelope to the runtime's inbox. Reads the current
+    Runtime from the `_CURRENT_RUNTIME` contextvar set at `_drive`
+    entry (kernel/runtime.py); if the tool runs outside a substrate
+    runtime (a direct unit-test call to `entry.run`), this is a silent
+    no-op — the tool's output still returns normally.
+
+    Cross-thread safe: uses `loop.call_soon_threadsafe(runtime.inject_event, ...)`
+    the same shape `SessionRegistry.interrupt` uses for its cancel and
+    signal closures.
+    """
+    from ...kernel.runtime import _CURRENT_RUNTIME
+
+    runtime = _CURRENT_RUNTIME.get()
+    if runtime is None:
+        return
+    loop = runtime._loop  # noqa: SLF001 — kernel-adjacent
+    if loop is None:
+        return
+    event = ToolProgress(call_id=call_id, tool=tool, step=step, chunk=chunk, offset=offset, eof=eof)
+    loop.call_soon_threadsafe(runtime.inject_event, event)
+
+
 def _last_bash_nonzero(results: list[dict[str, Any]]) -> bool:
     """True if the most recent `bash` the agent RAN exited non-zero — the last thing it ran FAILED.
     Externalizes the verify POLICY the model may not hold (R-11a: deepseek-v4-pro ran its code, got
@@ -316,7 +371,19 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             # synchronous; nothing about the tool contract changes.
             import asyncio as _asyncio
 
-            output = await _asyncio.to_thread(entry.run, args)
+            # Phase 8 item 8 · progress emission for streaming tools.
+            # _BASH_PROGRESS_CTX is a contextvar tools.py reads to know
+            # who to attribute chunks to; asyncio.to_thread copies the
+            # caller's Context so the value flows into the worker
+            # thread. Set for every tool call (cost is negligible); a
+            # non-streaming tool never reads it. Cleared after the run.
+            from .tools import _BASH_PROGRESS_CTX
+
+            _progress_token = _BASH_PROGRESS_CTX.set((call_id, tool, step))
+            try:
+                output = await _asyncio.to_thread(entry.run, args)
+            finally:
+                _BASH_PROGRESS_CTX.reset(_progress_token)
             # pre-validate encodability so a non-RFC-8785-encodable return becomes a typed failure
             # HERE, not an emit-time crash (the yield's encode runs in the runtime, outside this try).
             raw = canonical_bytes(output)

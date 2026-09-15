@@ -105,6 +105,20 @@ class RunResult(Struct, frozen=True):
 _ACTIVE_RUNTIMES_BY_RECORD_ROOT: dict[str, "Runtime"] = {}
 
 
+# ContextVar set at _drive entry; readable from any coroutine or worker
+# thread the runtime spawns. Phase 8 item 8 uses this so a tool body
+# running in `asyncio.to_thread` can emit `ToolProgress` mid-execution
+# without threading a runtime handle through every producer-body layer.
+# asyncio.to_thread copies the caller's context, so a body called via
+# `await asyncio.to_thread(entry.run, args)` reads the same value set
+# on the coroutine that started the thread.
+import contextvars  # noqa: E402  # kept adjacent to the ContextVar definition
+
+_CURRENT_RUNTIME: contextvars.ContextVar["Runtime | None"] = contextvars.ContextVar(
+    "substrate._CURRENT_RUNTIME", default=None
+)
+
+
 def find_active_runtime(record_root: str | Path) -> "Runtime | None":
     """Return the live Runtime for `record_root`, or `None` when no run is
     active at that path in this process. Reads are lock-free (Python's GIL
@@ -254,6 +268,7 @@ class Runtime:
             # ever exposes runtimes with live state.
             _ACTIVE_RUNTIMES_BY_RECORD_ROOT[str(self._record_root)] = self
             self._loop = asyncio.get_running_loop()
+            _ctx_token = _CURRENT_RUNTIME.set(self)
             self._cyc = AppendCycle(
                 reg,
                 record,
@@ -323,6 +338,14 @@ class Runtime:
             if _ACTIVE_RUNTIMES_BY_RECORD_ROOT.get(_key) is self:
                 del _ACTIVE_RUNTIMES_BY_RECORD_ROOT[_key]
             self._loop = None
+            try:
+                _CURRENT_RUNTIME.reset(_ctx_token)
+            except (LookupError, NameError):
+                # ctx_token may not exist if we hit the try before st was set;
+                # NameError guards that path. The `except LookupError` covers
+                # a reset from a different Context than the one that set it
+                # (e.g. run() called from inside a spawned task).
+                pass
 
         status = self._status(st)
         return RunResult(
