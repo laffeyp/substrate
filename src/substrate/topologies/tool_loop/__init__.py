@@ -303,7 +303,20 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             )
             return
         try:
-            output = entry.run(args)
+            # Phase 8 item 5 · unblock the interrupt path. Tool bodies do
+            # blocking work — subprocess.run for `bash`, filesystem walks
+            # for `read_file`/`grep`. Calling them on the loop pins it for
+            # the duration; while pinned, `SessionRegistry.interrupt` cannot
+            # reach `runtime.cancel_producer` because its
+            # `call_soon_threadsafe` closure never gets a slice, its 1s
+            # future times out, and the daemon returns `{interrupted:
+            # false}`. Running the body in a worker thread through
+            # `asyncio.to_thread` releases the loop so the interrupt
+            # closure lands within its 1s window. `entry.run` remains
+            # synchronous; nothing about the tool contract changes.
+            import asyncio as _asyncio
+
+            output = await _asyncio.to_thread(entry.run, args)
             # pre-validate encodability so a non-RFC-8785-encodable return becomes a typed failure
             # HERE, not an emit-time crash (the yield's encode runs in the runtime, outside this try).
             raw = canonical_bytes(output)
