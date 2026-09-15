@@ -983,10 +983,28 @@ class SessionRegistry:
                         ref = runtime.cancel_producer(live_tool, cause="external", caller=caller)
                         fut.set_result(ref)
                         return
-                    # Soft with a live tool: the signal is the InterruptRequested
-                    # envelope (items 6-7). Report back that the request was
-                    # received so the client can render "the model will stop
-                    # after this tool" instead of "no turn in flight."
+                    # Soft with a live tool (Phase 8 item 7 wiring): inject
+                    # InterruptRequested onto the record via the daemon-facing
+                    # Runtime.inject_event primitive. The topology's
+                    # emit-interrupt-fragment trigger spawns the fragment
+                    # producer, which emits a PromptFragment(source=interrupt).
+                    # On the next ToolResult boundary,
+                    # compose-on-interrupt-tool-result fires the composer
+                    # (CONTINUE and WRAP_UP refuse the mirror condition), a
+                    # fresh PromptComposed lands, and the model wakes with the
+                    # tool result AND the interrupt directive in scope. The
+                    # synthetic ref reports "the request was received" so the
+                    # client renders "the model will stop after this tool"
+                    # instead of "no turn in flight."
+                    from .topologies.session import InterruptRequested
+
+                    runtime.inject_event(
+                        InterruptRequested(
+                            session_id=session_id,
+                            tier="soft",
+                            source=caller,
+                        )
+                    )
                     fut.set_result({"kind": "signal", "instance": "soft", "parent": None})
                     return
                 fut.set_result(None)
