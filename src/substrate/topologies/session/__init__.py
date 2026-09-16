@@ -138,6 +138,14 @@ class Park(Struct, frozen=True):
     awaiting: str
     turn_index: int
     reason: str
+    # Optional operator-visible detail on non-happy park reasons. On
+    # `reason=model_error` the park-on-model-error trigger threads the
+    # ProducerFailed envelope's `error` field through here, so a real
+    # cause (a network hiccup, a 502 from the provider, a schema error)
+    # surfaces in the transcript instead of a bare `parked (model_error)`.
+    # Empty on `reason=final_answer` and `reason=interrupt` — those
+    # carry their meaning in the reason alone.
+    detail: str = ""
 
 
 class SessionEnded(Struct, frozen=True):
@@ -236,7 +244,8 @@ def _park_factory() -> Callable[[], Any]:
             if hasattr(inp, "get")
             else str(ParkReason.FINAL_ANSWER)
         )
-        yield Park(awaiting=USER_MESSAGE, turn_index=turn_index, reason=reason)
+        detail = str(inp.get("detail", "")) if hasattr(inp, "get") else ""
+        yield Park(awaiting=USER_MESSAGE, turn_index=turn_index, reason=reason, detail=detail)
 
     return lambda: _park
 
@@ -1039,6 +1048,12 @@ def session_topology(
             input_builder=lambda ctx: {
                 "turn_index": _turn_index(ctx),
                 "reason": ParkReason.MODEL_ERROR,
+                # ProducerFailed's payload carries the exception text under
+                # `error` (kernel/runtime.py; see the _producer_task handler
+                # that emits ProducerFailed on unhandled body exceptions).
+                # Thread it through so `parked (model_error)` names its
+                # cause on the transcript instead of the bare reason.
+                "detail": str((ctx.event.payload or {}).get("error", "")),
             },
             policy=api.PerEvent(),
         )
