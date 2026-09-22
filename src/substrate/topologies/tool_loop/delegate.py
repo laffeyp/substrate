@@ -40,7 +40,9 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import uuid
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +150,8 @@ def _default_child_factory(
     depth: int,
     max_depth: int,
     max_children: int,
+    max_total_children: int,
+    tree_budget: dict[str, int],
     child_max_steps: int,
     timeout_seconds: float,
 ) -> ChildFactory:
@@ -170,6 +174,8 @@ def _default_child_factory(
                     depth=depth + 1,
                     max_depth=max_depth,
                     max_children=max_children,
+                    max_total_children=max_total_children,
+                    tree_budget=tree_budget,
                     child_max_steps=child_max_steps,
                     timeout_seconds=timeout_seconds,
                 ),
@@ -329,6 +335,189 @@ def _with_baseline(
     return wrapped
 
 
+def _run_fanout(
+    *,
+    children_spec: Any,
+    spawned: dict[str, int],
+    tree_budget: dict[str, int],
+    max_children: int,
+    depth: int,
+    r: Path,
+    session_registry: "SessionRegistry | None",
+    parent_session_id: str | None,
+    parent_record_root: Path | None,
+    model_resolver: Callable[[str], Any] | None,
+    per_call_timeout: float,
+) -> dict[str, Any]:
+    """Fan-out execution: mint N sessions in parallel through
+    SessionRegistry.create + turn_sync, wait for all to Park or End,
+    fold the answers into one ToolResult shape.
+
+    Every child is a session. No new topology. Per
+    delegation-research-r5. Partial fold: answers and failed are disjoint
+    maps keyed by child name; ok:false only when every child failed.
+    """
+    if session_registry is None:
+        raise ValueError(
+            "delegate: children requires session_registry — the daemon injects one "
+            "(substrate-ui/server.py); no registry was bound"
+        )
+    if not isinstance(children_spec, (list, tuple)) or not children_spec:
+        raise ValueError("delegate: children must be a non-empty list of session specs")
+    # Normalise and name every child; validate name uniqueness.
+    normalised: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for idx, entry in enumerate(children_spec):
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"delegate: children[{idx}] must be a dict of session spec fields")
+        spec = dict(entry)
+        name = str(spec.get("name") or f"c{idx}")
+        if name in seen_names:
+            raise ValueError(
+                f"delegate: children carry duplicate name {name!r}; names must be unique"
+            )
+        seen_names.add(name)
+        spec["_name"] = name
+        normalised.append(spec)
+    n_children = len(normalised)
+    # Cap checks — per-parent AND tree-wide.
+    if spawned["n"] + n_children > max_children:
+        raise ValueError(
+            f"delegate: fan-out of {n_children} would exceed max_children={max_children} "
+            f"(already spawned {spawned['n']}); refuse"
+        )
+    if tree_budget["remaining"] < n_children:
+        raise ValueError(
+            f"delegate: fan-out of {n_children} exceeds tree budget "
+            f"(remaining={tree_budget['remaining']})"
+        )
+    spawned["n"] += n_children
+    tree_budget["remaining"] -= n_children
+
+    from ..session import UserMessage
+
+    # Kick off N sessions in parallel via SessionRegistry.create + turn_sync.
+    def _run_one(spec: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        name = spec["_name"]
+        task = str(spec.get("task", ""))
+        driver = str(spec.get("driver") or "deterministic")
+        workspace = spec.get("workspace")
+        workspace_shape = str(spec.get("workspace_shape") or "flat")
+        bundle = spec.get("bundle", "session")
+        tools_raw = spec.get("tools")
+        tools = tuple(str(t) for t in tools_raw) if tools_raw else None
+        # Session_id fresh per child; workspace defaults to a child of the
+        # delegation dir so records live where prior delegate calls did.
+        session_id = f"s_{uuid.uuid4().hex[:24]}"
+        if workspace is None:
+            workspace = str(r / "delegate-runs" / f"fan-{session_id}" / "workspace")
+            Path(workspace).mkdir(parents=True, exist_ok=True)
+        try:
+            manifest = session_registry.create(
+                session_id=session_id,
+                name=str(spec.get("session_name")) if spec.get("session_name") else None,
+                driver=driver,
+                workspace=str(workspace),
+                workspace_shape=workspace_shape,
+                bundle=str(bundle) if bundle is not None else None,
+                seed="",
+                role="default",
+                tools=tools,
+                driver_params=None,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as a per-child failure
+            return name, {
+                "error": f"session_create_failed: {type(exc).__name__}: {exc}",
+                "child_root": "",
+                "steps": -1,
+                "ok": False,
+            }
+        resume_event = UserMessage(
+            text=task,
+            turn_index=0,
+            assembled_prompt=task,
+            slash_source="delegate",
+        )
+        try:
+            _final_manifest, record_root = session_registry.turn_sync(
+                session_id, resume_event, timeout_seconds=per_call_timeout
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as a per-child failure
+            return name, {
+                "error": f"turn_failed: {type(exc).__name__}: {exc}",
+                "child_root": str(Path(manifest.record_root)),
+                "steps": -1,
+                "ok": False,
+            }
+        # Read the tail FinalAnswer off this child's record.
+        finals = [e for e in _iter_record(Path(record_root)) if e.get("kind") == "FinalAnswer"]
+        if not finals:
+            return name, {
+                "error": "no_final_answer",
+                "child_root": str(record_root),
+                "steps": -1,
+                "ok": False,
+            }
+        answer = str((finals[-1].get("payload") or {}).get("text", ""))
+        return name, {"answer": answer, "child_root": str(record_root), "steps": -1, "ok": True}
+
+    results: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=n_children) as executor:
+        futures = [executor.submit(_run_one, spec) for spec in normalised]
+        for fut in futures:
+            name, entry = fut.result()
+            results[name] = entry
+
+    answers: dict[str, str] = {}
+    failed: dict[str, dict[str, Any]] = {}
+    child_roots: dict[str, str] = {}
+    steps: dict[str, int] = {}
+    for name, entry in results.items():
+        child_roots[name] = entry["child_root"]
+        steps[name] = entry["steps"]
+        if entry.get("ok"):
+            answers[name] = entry["answer"]
+        else:
+            failed[name] = {
+                "error": entry.get("error", "unknown"),
+                "failure_class": _classify_failure(entry.get("error")),
+            }
+
+    ok = len(answers) > 0
+    result: dict[str, Any] = {
+        "ok": ok,
+        "answers": answers,
+        "child_roots": child_roots,
+        "steps": steps,
+    }
+    if failed:
+        result["failed"] = failed
+    result["via"] = f"fanout:{n_children}"
+    return result
+
+
+def _iter_record(record_root: Path) -> Any:
+    """Read a record's events. Small wrapper so _run_fanout does not
+    couple directly to api.read_record; keeps testing easier."""
+    from ... import api
+
+    return list(api.read_record(record_root))
+
+
+def _classify_failure(error: Any) -> str:
+    """Cheap classification of a fan-out child's failure string. Any
+    'no_final_answer' → 'no_answer'; anything else → 'error'."""
+    if not isinstance(error, str):
+        return "error"
+    if "no_final_answer" in error:
+        return "no_answer"
+    if "session_create_failed" in error:
+        return "create_failed"
+    if "turn_failed" in error:
+        return "turn_failed"
+    return "error"
+
+
 def _unique_child_root(base: Path, depth: int, start: int) -> tuple[Path, int]:
     """A delegation dir (holding the child's `workspace/` + `record/`) that does not already exist on
     disk. Probing disk (not just an in-memory counter) is what prevents a FRESH delegate instance in a
@@ -350,8 +539,21 @@ def make_delegate(
     child_suite_factory: SuiteFactory | None = None,
     child_record_root: Callable[[int], Path] | None = None,
     depth: int = 0,
-    max_depth: int = 2,
-    max_children: int = 4,
+    # Sprint 245: defaults bumped from the old delegation-conservative values
+    # (max_depth=2, max_children=4) to values that support real fan-out
+    # orchestration per delegation-research-r5. max_depth=5 matches Claude
+    # Code's built-in subagent cap and shell direction section 20f's five-level
+    # illustration. max_children=16 is four times the vertical cap per the
+    # Architect's steer that horizontal should be looser. max_total_children
+    # is new: a tree-wide budget shared by every descendant delegate call
+    # under the same root, refuses when exhausted regardless of per-parent
+    # fan-out or chain depth. All three caps: any one firing refuses.
+    max_depth: int = 5,
+    max_children: int = 16,
+    max_total_children: int = 64,
+    # Tree budget counter; when None (root call), a fresh dict is made and
+    # inherited down through _default_child_factory to every descendant.
+    tree_budget: dict[str, int] | None = None,
     child_max_steps: int = 6,
     timeout_seconds: float = 600.0,
     # Sprint 212 added the daemon-injected fields; sprint 213a wires paths 2/3/4
@@ -389,6 +591,11 @@ def make_delegate(
     if child_factory is None and responder is None:
         raise ValueError("make_delegate requires either a responder or a child_factory")
     suite_factory: SuiteFactory = child_suite_factory or full_suite
+    # Sprint 245: shared tree budget. Root call mints one; descendant delegate
+    # calls inherit the same dict so `remaining` decrements from a single
+    # counter across the whole delegation tree. When it hits zero, refuse.
+    if tree_budget is None:
+        tree_budget = {"remaining": max_total_children}
     if child_factory is not None:
         factory: ChildFactory = child_factory
     else:
@@ -399,6 +606,8 @@ def make_delegate(
             depth,
             max_depth,
             max_children,
+            max_total_children,
+            tree_budget,
             child_max_steps,
             timeout_seconds,
         )
@@ -428,6 +637,7 @@ def make_delegate(
         per_call_session_name = args_dict.get("child_session_name")
         per_call_context = args_dict.get("context")
         per_call_baseline = args_dict.get("baseline")
+        per_call_children = args_dict.get("children")
         per_call_timeout_raw = args_dict.get("timeout_seconds")
         per_call_timeout = (
             float(per_call_timeout_raw) if per_call_timeout_raw is not None else timeout_seconds
@@ -437,10 +647,31 @@ def make_delegate(
             raise ValueError(
                 f"delegate: max delegation depth ({max_depth}) reached — solve it directly"
             )
+        # Sprint 245: fan-out path branches here.
+        if per_call_children is not None:
+            return _run_fanout(
+                children_spec=per_call_children,
+                spawned=spawned,
+                tree_budget=tree_budget,
+                max_children=max_children,
+                depth=depth,
+                r=r,
+                session_registry=session_registry,
+                parent_session_id=parent_session_id,
+                parent_record_root=parent_record_root,
+                model_resolver=model_resolver,
+                per_call_timeout=per_call_timeout,
+            )
         if spawned["n"] >= max_children:
             raise ValueError(
                 f"delegate: max children ({max_children}) already spawned by this agent"
             )
+        if tree_budget["remaining"] <= 0:
+            raise ValueError(
+                f"delegate: tree budget exhausted (max_total_children={max_total_children}) — "
+                "the whole delegation tree cannot spawn another child"
+            )
+        tree_budget["remaining"] -= 1
 
         # Compute the parent record's seq at delegate-call time. `parent_seq_at_call`
         # is the seq of the LAST envelope on the parent record at this moment — the
@@ -553,6 +784,8 @@ def make_delegate(
                 depth,
                 max_depth,
                 max_children,
+                max_total_children,
+                tree_budget,
                 child_max_steps,
                 per_call_timeout,
             )
@@ -673,6 +906,54 @@ def make_delegate(
                 "timeout_seconds": {
                     "type": "number",
                     "description": "optional per-call wall-clock cap (seconds); default 600.0",
+                },
+                "children": {
+                    "type": "array",
+                    "description": (
+                        "optional fan-out. When present, spawn each entry as a "
+                        "session in parallel; wait for all to Park or End; fold "
+                        "one ToolResult with answers keyed by child name (partial "
+                        "fold: successful children in answers, errored children "
+                        "in failed). When children is set, ignore the single-child "
+                        "fields above."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task": {"type": "string", "description": "the child's task"},
+                            "driver": {
+                                "type": "string",
+                                "description": "optional model tag for this child",
+                            },
+                            "workspace": {
+                                "type": "string",
+                                "description": "optional workspace path",
+                            },
+                            "workspace_shape": {
+                                "type": "string",
+                                "description": "flat | worktree; default flat",
+                            },
+                            "bundle": {
+                                "type": "string",
+                                "description": "optional session bundle; default session",
+                            },
+                            "tools": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "optional tools allowlist",
+                            },
+                            "isolate": {
+                                "type": "boolean",
+                                "description": "optional isolation flag",
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "optional stable name for this child; "
+                                "defaults to c0, c1, ... by index",
+                            },
+                        },
+                        "required": ["task"],
+                    },
                 },
             },
             "required": ["task"],
