@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "substrate-kernel"
-version = "1.0.1"
+version = "1.1.0"
 description = "A Python runtime that coordinates models and anything else you want through a single append-only log. Replay, diff, and trace every run."
 requires-python = ">=3.12"          # D-6: 3.12+ only (msgspec C ext, per-task eager exec)
 license = "PolyForm-Noncommercial-1.0.0"  # D-1: relicensed 2026-09-01 per publish-bundle-2026-08-31/README.md
