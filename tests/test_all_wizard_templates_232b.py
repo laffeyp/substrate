@@ -94,7 +94,7 @@ def test_wizard_writes_valid_bundle_for_each_template(
     from substrate import cli
     from substrate.bundles import load_bundle
 
-    monkeypatch.setattr(cli, "_BUNDLES_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_bundles_root_cli", lambda: tmp_path)
     bundle_name = f"{template_name}-wizard-test"
     piped = "\n".join(piped_answers)
     result = CliRunner().invoke(

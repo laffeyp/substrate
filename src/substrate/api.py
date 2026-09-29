@@ -20,6 +20,9 @@ truly needed."""
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from .constants import (
     INJECTION_APPLIED,
     INPUT_BUILD_FAILED,
@@ -218,4 +221,18 @@ __all__ = [
     "assert_event",
     "assert_no_event",
     "assert_sequence",
+    # configuration — the per-user state root (config-externalization, sprint 246)
+    "substrate_home",
 ]
+
+
+def substrate_home() -> Path:
+    """The root of substrate's per-user state tree.
+
+    Returns ``Path(os.environ["SUBSTRATE_HOME"])`` when set,
+    else ``Path.home() / ".substrate"``.
+    """
+    raw = os.environ.get("SUBSTRATE_HOME")
+    if raw:
+        return Path(raw)
+    return Path.home() / ".substrate"

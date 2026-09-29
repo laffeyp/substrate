@@ -46,7 +46,7 @@ def _stub_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
 def config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the CLI at a tmp config file."""
     p = tmp_path / "config.toml"
-    monkeypatch.setattr(cli, "_CONFIG_PATH_DEFAULT", p)
+    monkeypatch.setattr(cli, "_config_path_default", lambda: p)
     return p
 
 

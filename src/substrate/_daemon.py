@@ -57,9 +57,9 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
 
 
 def _uds_path() -> Path:
-    return Path(
-        os.environ.get("SUBSTRATE_DAEMON_SOCK", str(Path.home() / ".substrate" / "daemon.sock"))
-    )
+    from substrate.api import substrate_home
+
+    return Path(os.environ.get("SUBSTRATE_DAEMON_SOCK", str(substrate_home() / "daemon.sock")))
 
 
 def _tcp_host_port() -> tuple[str, int]:

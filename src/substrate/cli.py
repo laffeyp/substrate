@@ -877,7 +877,11 @@ def score(root: str, rule_name: str) -> None:
 
 # ── piece D (sprint 218): chat + daemon verbs; config loader ────────────────────
 
-_CONFIG_PATH_DEFAULT = Path.home() / ".substrate" / "config.toml"
+
+def _config_path_default() -> Path:
+    from substrate.api import substrate_home
+
+    return substrate_home() / "config.toml"
 
 
 def _load_config(path: Path | None = None) -> dict[str, Any]:
@@ -886,7 +890,7 @@ def _load_config(path: Path | None = None) -> dict[str, Any]:
     defaults on top of whatever this returns."""
     import tomllib
 
-    p = path if path is not None else _CONFIG_PATH_DEFAULT
+    p = path if path is not None else _config_path_default()
     if not p.exists():
         return {}
     try:
@@ -957,7 +961,7 @@ def _ensure_daemon_running() -> None:
     if not server_path:
         _err.print(
             "[config] daemon not running and [daemon] server_path is empty in "
-            f"{_CONFIG_PATH_DEFAULT} — set it to the absolute path of "
+            f"{_config_path_default()} — set it to the absolute path of "
             "substrate-ui/server.py, or start the daemon manually."
         )
         raise SystemExit(EXIT_CONFIG)
@@ -1430,7 +1434,7 @@ def daemon(foreground: bool) -> None:
     server_path = _daemon_server_path()
     if not server_path:
         _err.print(
-            f"[config] [daemon] server_path not set in {_CONFIG_PATH_DEFAULT}; "
+            f"[config] [daemon] server_path not set in {_config_path_default()}; "
             "set it to the absolute path of substrate-ui/server.py"
         )
         raise SystemExit(EXIT_CONFIG)
@@ -1587,7 +1591,10 @@ def session_set_name(session_id: str, new_name: str) -> None:
 # ── bundle subverbs (CLI-side filesystem only; piece H owns the loader) ──
 
 
-_BUNDLES_ROOT = Path.home() / ".substrate" / "bundles"
+def _bundles_root_cli() -> Path:
+    from substrate.api import substrate_home
+
+    return substrate_home() / "bundles"
 
 
 _BUNDLE_TEMPLATE_TOML = """# bundle.toml — see the tech spec for slot semantics.
@@ -1634,7 +1641,7 @@ def bundle_create(name: str, template: str | None) -> None:
     click.prompt, interpolates the answers, writes the rendered
     bundle.toml + prose files (sprint 232).
     """
-    target = _BUNDLES_ROOT / name
+    target = _bundles_root_cli() / name
     if target.exists():
         _err.print(f"[bundle] {target} already exists")
         raise SystemExit(EXIT_CONFIG)
@@ -1723,9 +1730,9 @@ def _write_rendered_bundle(target: Path, rendered: str) -> None:
 @bundle_group.command("ls")
 def bundle_ls() -> None:
     """List directories under `~/.substrate/bundles/`."""
-    if not _BUNDLES_ROOT.exists():
+    if not _bundles_root_cli().exists():
         return
-    for entry in sorted(_BUNDLES_ROOT.iterdir()):
+    for entry in sorted(_bundles_root_cli().iterdir()):
         if entry.is_dir():
             click.echo(entry.name)
 
@@ -1734,7 +1741,7 @@ def bundle_ls() -> None:
 @click.argument("name")
 def bundle_show(name: str) -> None:
     """Print bundle.toml + methodology + corpus tree for a bundle."""
-    target = _BUNDLES_ROOT / name
+    target = _bundles_root_cli() / name
     if not target.exists():
         _err.print(f"[bundle] no bundle named {name!r} at {target}")
         raise SystemExit(EXIT_CONFIG)
@@ -1761,7 +1768,7 @@ def bundle_edit(name: str) -> None:
     import os as _os
     import subprocess
 
-    target = _BUNDLES_ROOT / name
+    target = _bundles_root_cli() / name
     if not target.exists():
         _err.print(f"[bundle] no bundle named {name!r} at {target}")
         raise SystemExit(EXIT_CONFIG)
@@ -1782,7 +1789,9 @@ def builder() -> None:
     import subprocess
     import sys as _sys
 
-    studio = Path.home() / ".substrate" / "studio.html"
+    from substrate.api import substrate_home
+
+    studio = substrate_home() / "studio.html"
     if studio.exists():
         opener = "open" if _sys.platform == "darwin" else "xdg-open"
         subprocess.run([opener, str(studio)], check=False)

@@ -109,7 +109,9 @@ def _cli_context_from_config(driver_name: str, config_path: Path | None = None) 
     the fallback is documented as user-settable in the tech spec. `config_path` is
     injectable for tests.
     """
-    path = config_path or (Path.home() / ".substrate" / "config.toml")
+    from substrate.api import substrate_home
+
+    path = config_path or (substrate_home() / "config.toml")
     if not path.exists():
         return _CLI_CONTEXT_DEFAULT_TOKENS
     try:

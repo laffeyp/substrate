@@ -77,7 +77,7 @@ def wizard_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point _BUNDLES_ROOT at tmp so the CLI writes into isolation."""
     from substrate import cli
 
-    monkeypatch.setattr(cli, "_BUNDLES_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_bundles_root_cli", lambda: tmp_path)
     return tmp_path
 
 

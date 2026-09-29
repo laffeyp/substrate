@@ -87,7 +87,12 @@ class WorkspaceShape(StrEnum):
     ISOLATE = "isolate"
 
 
-_SESSIONS_BASE_DEFAULT = Path.home() / ".substrate" / "sessions"
+def _sessions_base_default() -> Path:
+    from substrate.api import substrate_home
+
+    return substrate_home() / "sessions"
+
+
 _BY_NAME_FILENAME = "by-name.json"
 _BY_NAME_LOCK_FILENAME = ".by-name.lock"
 _MANIFEST_FILENAME = "manifest.json"
@@ -270,7 +275,7 @@ class SessionRegistry:
         turn_queue_cap: int = 4,
         auto_boot: bool = True,
     ) -> None:
-        self._base = Path(base) if base is not None else _SESSIONS_BASE_DEFAULT
+        self._base = Path(base) if base is not None else _sessions_base_default()
         self._by_name: dict[str, str] = {}
         self._manifests: dict[str, SessionManifest] = {}
         # Sprint 216: per-session queued-turn counter for the /turn queue cap.

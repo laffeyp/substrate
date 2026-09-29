@@ -29,7 +29,9 @@ def _shipped_prompts_dir() -> Path:
 
 
 def _user_prompts_dir() -> Path:
-    return Path.home() / ".substrate" / "prompts"
+    from substrate.api import substrate_home
+
+    return substrate_home() / "prompts"
 
 
 def _read_folder(folder: Path) -> str:

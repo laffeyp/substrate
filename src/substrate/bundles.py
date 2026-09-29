@@ -52,11 +52,16 @@ class BundleChainTooDeepError(BundleError):
 
 _MAX_EXTENDS_DEPTH = 8
 _PROSE_SLOTS: tuple[str, ...] = ("methodology", "personality", "per_turn")
-_DEFAULT_BUNDLES_ROOT = Path.home() / ".substrate" / "bundles"
+
+
+def _default_bundles_root() -> Path:
+    from substrate.api import substrate_home
+
+    return substrate_home() / "bundles"
 
 
 def _bundles_root(override: Path | None) -> Path:
-    return override if override is not None else _DEFAULT_BUNDLES_ROOT
+    return override if override is not None else _default_bundles_root()
 
 
 def _shipped_bundle_dir(name: str) -> Path | None:

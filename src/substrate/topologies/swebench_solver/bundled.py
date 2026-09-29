@@ -30,7 +30,9 @@ def _fixture_root() -> Path:
     override = os.environ.get("SUBSTRATE_CI_FIXTURE_ROOT")
     if override:
         return Path(override) / "swebench_repair"
-    return Path.home() / ".substrate" / "ci-fixtures" / "swebench_repair"
+    from substrate.api import substrate_home
+
+    return substrate_home() / "ci-fixtures" / "swebench_repair"
 
 
 def _ensure_fixture(root: Path) -> None:

@@ -19,7 +19,7 @@ from click.testing import CliRunner
 def bundles_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from substrate import cli
 
-    monkeypatch.setattr(cli, "_BUNDLES_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "_bundles_root_cli", lambda: tmp_path)
     return tmp_path
 
 

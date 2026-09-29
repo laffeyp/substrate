@@ -76,7 +76,9 @@ def _fanout_review_ci() -> _Topo:
     seeded with one file + two commits (initial + a diff)."""
     import subprocess
 
-    fixture = Path.home() / ".substrate" / "ci-fixtures" / "fanout_review_repo"
+    from substrate.api import substrate_home
+
+    fixture = substrate_home() / "ci-fixtures" / "fanout_review_repo"
     if not (fixture / ".git").is_dir():
         fixture.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init", "-q", str(fixture)], check=True)
