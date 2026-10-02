@@ -54,6 +54,7 @@ from typing import Any
 from unittest.mock import patch
 
 from substrate.topologies.tool_loop.tools import (
+    FULL_SUITE,
     Tool,
     _edit_file,
     _glob,
@@ -137,37 +138,37 @@ def sandboxed_fs_tools(root: Path) -> dict[str, Tool]:
     return {
         "read_file": Tool(
             "read_file",
-            "read_file(path, offset=1, limit) -> line-numbered text",
+            FULL_SUITE["read_file"].describe,  # the product tool's own text (UI sprint 097)
             False,
             partial(_sandboxed_read_file, root),
         ),
         "list_dir": Tool(
             "list_dir",
-            "list_dir(path) -> directory entries",
+            FULL_SUITE["list_dir"].describe,  # the product tool's own text (UI sprint 097)
             False,
             partial(_sandboxed_list_dir, root),
         ),
         "glob": Tool(
             "glob",
-            "glob(pattern, root='.') -> file paths matching a glob (sorted)",
+            FULL_SUITE["glob"].describe,  # the product tool's own text (UI sprint 097)
             False,
             partial(_sandboxed_glob, root),
         ),
         "grep": Tool(
             "grep",
-            "grep(pattern, root='.', glob='**/*', case_insensitive=False) -> matches",
+            FULL_SUITE["grep"].describe,  # the product tool's own text (UI sprint 097)
             False,
             partial(_sandboxed_grep, root),
         ),
         "edit_file": Tool(
             "edit_file",
-            "edit_file(path, search, replace, unique=True) -> ok / count",
+            FULL_SUITE["edit_file"].describe,  # the product tool's own text (UI sprint 097)
             False,
             partial(_sandboxed_edit_file, root),
         ),
         "write_file": Tool(
             "write_file",
-            "write_file(path, content) -> bytes written",
+            FULL_SUITE["write_file"].describe,  # the product tool's own text (UI sprint 097)
             False,
             partial(_sandboxed_write_file, root),
         ),

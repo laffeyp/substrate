@@ -124,6 +124,13 @@ class ToolProgress(Struct, frozen=True):
     eof: bool = False
 
 
+# Event kinds this topology writes through `Runtime.inject_event` without registering a schema
+# or a subscription for them. The registration cannot see them, so they are declared here: a
+# reader that derives the record's vocabulary from the registration (substrate-ui's
+# scripts/gen_kinds.py, Sprint 096) adds these.
+INJECTED_EVENT_KINDS: tuple[type[Struct], ...] = (ToolProgress,)
+
+
 def emit_tool_progress(
     *,
     call_id: str,
@@ -324,6 +331,18 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
                 step=step,
                 ok=False,
                 error=f"unknown tool '{tool}'",
+            )
+            return
+        from .tools import ARG_ERROR_KEY
+
+        if len(args) == 1 and isinstance(args[0], dict) and ARG_ERROR_KEY in args[0]:
+            yield ToolResult(
+                call_id=call_id,
+                tool=tool,
+                output="",
+                step=step,
+                ok=False,
+                error=str(args[0][ARG_ERROR_KEY]),
             )
             return
         missing = required_params(tool, tools)[len(args) :]

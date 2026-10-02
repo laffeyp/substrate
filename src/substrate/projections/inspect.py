@@ -80,9 +80,9 @@ class Divergence(Struct, frozen=True):
     hash_b: str | None
 
 
-def _load(record: Any) -> list[dict[str, Any]]:
+def _load(record: Any, *, resolve_blobs: bool = False) -> list[dict[str, Any]]:
     if isinstance(record, (str, Path)):
-        return list(read_record(record))
+        return list(read_record(record, resolve_blobs=resolve_blobs))
     if isinstance(record, Iterable):
         return list(record)
     raise TypeError(
@@ -190,8 +190,11 @@ def view_at(record: Any, seq: int, view: View) -> Any:
     the caller supplies the View whose update()/subscription define the fold. (Spec §16
     signature is `view_at(record, seq, view: str)` assuming the topology's View code is
     available by name; the instance form is the honest dependency — flagged as a spec
-    flow-back in BLACKBOARD.) The View should be fresh; folding is not idempotent."""
-    envelopes = _load(record)
+    flow-back in BLACKBOARD.) The View should be fresh; folding is not idempotent.
+
+    Blob Claim Checks are redeemed before folding (Sprint 095), so view_at at a seq equals the
+    live View value at that seq. An already-loaded envelope iterable is folded as given."""
+    envelopes = _load(record, resolve_blobs=True)
     max_seq = max((int(e["seq"]) for e in envelopes if "seq" in e), default=-1)
     if seq < 0 or seq > max_seq:
         raise SequenceOutOfRange(

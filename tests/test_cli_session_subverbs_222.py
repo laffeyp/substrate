@@ -24,7 +24,7 @@ def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
     base_dir = tmp_path_factory.mktemp("cli-session-222")
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
     import server
-    from session_registry import SessionRegistry
+    from substrate.session_registry import SessionRegistry
 
     server._SESSION_REGISTRY = SessionRegistry(
         base=base_dir,
@@ -62,7 +62,7 @@ def test_session_ls_shows_a_created_session(daemon_base: str) -> None:
 def test_session_end_by_name(daemon_base: str) -> None:
     import server
     from substrate import cli
-    from session_registry import SessionStatus
+    from substrate.session_registry import SessionStatus
 
     sid = _create("end-me")
     result = CliRunner().invoke(cli.main, ["session", "end", "end-me"])

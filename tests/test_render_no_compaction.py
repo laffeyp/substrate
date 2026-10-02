@@ -55,7 +55,7 @@ def _three_turns() -> list[dict[str, Any]]:
 def test_no_compaction_when_k_covers_all_turns(monkeypatch: pytest.MonkeyPatch) -> None:
     events = _three_turns()
     monkeypatch.setattr(
-        "substrate.topologies.session.transcript.read_record", lambda root: iter(events)
+        "substrate.topologies.session.transcript.read_record", lambda root, **_kw: iter(events)
     )
     # driver_context_tokens=200_000; K well above 3.
     result = render_transcript(
@@ -74,7 +74,7 @@ def test_no_compaction_when_k_covers_all_turns(monkeypatch: pytest.MonkeyPatch) 
 
 def test_no_compaction_on_empty_record(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "substrate.topologies.session.transcript.read_record", lambda root: iter([])
+        "substrate.topologies.session.transcript.read_record", lambda root, **_kw: iter([])
     )
     result = render_transcript(
         record_root="/nowhere",
@@ -109,7 +109,7 @@ def test_no_compaction_on_single_turn(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     ]
     monkeypatch.setattr(
-        "substrate.topologies.session.transcript.read_record", lambda root: iter(events)
+        "substrate.topologies.session.transcript.read_record", lambda root, **_kw: iter(events)
     )
     result = render_transcript(
         record_root="/nowhere",

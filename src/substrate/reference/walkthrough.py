@@ -32,6 +32,12 @@ from .r3_codesynth import _complete_defs, codesynth_composed_topology
 
 _WEAK = "llama3.2:1b"
 _STRONG = "huihui_ai/qwen2.5-coder-abliterate:7b"
+# Token caps bound a demo's cost; the system prompts ask for the short answer. A reply that
+# reaches its cap fails the producer (OllamaResponder raises on done_reason "length" since UI
+# sprint 097), so each cap sits well above the answer asked for. The old 12/16/24-token caps
+# left no room for a model that adds one word; 160 could cut R-3's code mid-function.
+_SHORT_CAP = 64
+_CODE_CAP = 1024
 
 
 async def _run_r1(root: Path) -> None:
@@ -44,7 +50,7 @@ async def _run_r1(root: Path) -> None:
     fast = {
         f"m{i}": OllamaResponder(
             _WEAK,
-            max_tokens=12,
+            max_tokens=_SHORT_CAP,
             temperature=0.9,
             system="Answer with ONE short word. No explanation.",
         )
@@ -53,7 +59,7 @@ async def _run_r1(root: Path) -> None:
     slow = {
         name: OllamaResponder(
             _WEAK,
-            max_tokens=12,
+            max_tokens=_SHORT_CAP,
             temperature=0.9,
             system="Answer with ONE short word. No explanation.",
         )
@@ -61,7 +67,7 @@ async def _run_r1(root: Path) -> None:
     }
     adj = OllamaResponder(
         _STRONG,
-        max_tokens=24,
+        max_tokens=_SHORT_CAP,
         system="Given candidate answers labelled by member id, pick the single best one. "
         "Reply with JUST the member id (e.g. m0).",
     )
@@ -98,7 +104,7 @@ async def _run_r2(root: Path) -> None:
     # override and the run finalises.
     tx = OllamaResponder(
         _WEAK,
-        max_tokens=16,
+        max_tokens=_SHORT_CAP,
         system="Uppercase the input word. Reply with ONLY the uppercased word.",
     )
     topo = pipeline_topology(
@@ -153,7 +159,9 @@ async def _run_r2(root: Path) -> None:
 
 async def _run_r3(root: Path, inner_root: Path) -> None:
     writer = OllamaResponder(
-        _STRONG, max_tokens=160, system="Write ONLY Python code, no prose, no markdown fences."
+        _STRONG,
+        max_tokens=_CODE_CAP,
+        system="Write ONLY Python code, no prose, no markdown fences.",
     )
     code = writer.respond(
         "Write two functions: add(a,b) returning a+b, and mul(a,b) returning a*b."

@@ -100,3 +100,37 @@ async def test_cancel_others_records_cancellation(tmp_path):
     tm = [e for e in envs if e["kind"] == "substrate.TerminationMatched"]
     assert any(e["payload"]["decision"] == "cancel-others" for e in tm)
     assert envs[-1]["kind"] == "substrate.RunFinalised"
+
+
+class _VerdictJudge(DeterministicResponder):
+    """A judge whose reply names a verdict, as the walkthrough prompt asks a real model to."""
+
+    def __init__(self, reply: str) -> None:
+        super().__init__(seed=0)
+        self._reply = reply
+
+    def respond(self, prompt: str) -> str:
+        return self._reply
+
+    async def arespond(self, prompt: str) -> str:
+        return self._reply
+
+
+@pytest.mark.timeout(15)
+@pytest.mark.parametrize(
+    ("reply", "decision"),
+    [
+        ("The injection is the most serious. Verdict: block", "block"),
+        ("Nothing here would block a merge; approve", "approve"),
+        ("Style nits only, but not approve as is: request-changes", "request-changes"),
+    ],
+)
+async def test_judge_decision_comes_from_the_model_reply(tmp_path, reply, decision):
+    # UI sprint 099: the judge discarded the model's reply and decided from a hash of the
+    # critique text. The reply's last verdict word now decides.
+    topo = code_review_topology(
+        CODE, responders=_responders(), judge=_VerdictJudge(reply), quorum=3
+    )
+    await Runtime(tmp_path / "run").run(topo)
+    verdict = next(e for e in read_record(tmp_path / "run") if e["kind"] == "VerdictRendered")
+    assert verdict["payload"]["decision"] == decision

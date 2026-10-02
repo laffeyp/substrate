@@ -121,6 +121,11 @@ class DeterministicResponder:
         return self.respond(prompt)
 
 
+# Output cap for every OllamaResponder request when the caller sets none: half the default
+# 32768-token context, room for a long tool call (write_file content) and the prompt.
+DEFAULT_MAX_TOKENS = 16384
+
+
 class OllamaResponder:
     """A real local-LLM responder over Ollama's native `/api/chat` (walkthrough mode).
 
@@ -148,7 +153,7 @@ class OllamaResponder:
         base_url: str | None = None,
         api_key: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 0,  # 0 = uncapped; generation is bounded by num_ctx and timeout
+        max_tokens: int = 0,  # 0 = DEFAULT_MAX_TOKENS; never uncapped (see below)
         num_ctx: int = 32768,
         think: bool = False,
         timeout: float = 300.0,
@@ -168,7 +173,11 @@ class OllamaResponder:
         self._model = model
         self._api_key = api_key
         self._temperature = temperature
-        self._max_tokens = max_tokens
+        # Ollama's own default is NumPredict=-1, unlimited (ollama api/types.go DefaultOptions).
+        # Uncapped, a looping small model generates until the read timeout: 2026-10-01,
+        # llama3.2:1b on a 117-byte prompt took 3 x 300 s ReadTimeout. Every request is capped;
+        # a reply that hits the cap fails loud in _content.
+        self._max_tokens = max_tokens if max_tokens > 0 else DEFAULT_MAX_TOKENS
         self._num_ctx = num_ctx
         self._think = think
         self._timeout = timeout
@@ -182,9 +191,11 @@ class OllamaResponder:
         if self._system:
             messages.append({"role": "system", "content": self._system})
         messages.append({"role": "user", "content": prompt})
-        options: dict[str, object] = {"num_ctx": self._num_ctx, "temperature": self._temperature}
-        if self._max_tokens > 0:
-            options["num_predict"] = self._max_tokens
+        options: dict[str, object] = {
+            "num_ctx": self._num_ctx,
+            "temperature": self._temperature,
+            "num_predict": self._max_tokens,
+        }
         payload: dict[str, object] = {
             "model": self._model,
             "messages": messages,
@@ -199,8 +210,12 @@ class OllamaResponder:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers, payload
 
-    @staticmethod
-    def _content(data: dict[str, object]) -> str:
+    def _content(self, data: dict[str, object]) -> str:
+        if data.get("done_reason") == "length":
+            raise RuntimeError(
+                f"OllamaResponder({self._model}) reply hit the {self._max_tokens}-token cap "
+                "(num_predict); the output is truncated. Raise max_tokens or ask for less."
+            )
         message = data.get("message")
         text = message.get("content", "") if isinstance(message, dict) else ""
         return str(text).strip()

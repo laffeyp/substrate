@@ -279,7 +279,7 @@ def _session_started_factory(
 
     Fires exactly once on `substrate.RunStarted`, yields one SessionStarted
     envelope with every field the topology's caller passed in (the daemon
-    at `substrate-ui/session_registry.py::SessionRegistry.turn_sync`, or a
+    at `substrate/session_registry.py::SessionRegistry.turn_sync`, or a
     delegate-side callable). The `session_id`, `seed`, and driver identity
     are all present at topology build time — the closure captures them.
 

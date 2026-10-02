@@ -192,3 +192,20 @@ async def test_walkthrough_ensemble_closes_the_loop(tmp_path) -> None:
     assert _kinds(events, "Verdict"), "each candidate was really gate-validated"
     out = _outcome(events)
     assert out is not None and out["kind"] in ("Solved", "Exhausted")
+
+
+async def test_a_failing_drafter_still_closes_the_loop(tmp_path) -> None:
+    """UI sprint 097: a model call that raises (truncation cap, timeout, network) is a failed
+    candidate for its slot, so the round completes and the run reaches Exhausted, not the watchdog."""
+
+    class _Boom:
+        def respond(self, prompt: str) -> str:
+            raise RuntimeError("reply hit the token cap")
+
+    topo = coding_flow_topology(kvstore_task(), responders=[_Boom()], n=2, max_rounds=1, timeout=60)
+    await Runtime(tmp_path / "run").run(topo)
+    events = list(read_record(tmp_path / "run"))
+    assert [e for e in events if e["kind"] == "Exhausted"], "the loop must close on Exhausted"
+    assert not [e for e in events if e["kind"] == "substrate.ProducerFailed"]
+    cands = [e["payload"]["response"] for e in events if e["kind"] == "Candidate"]
+    assert len(cands) == 2 and all("model call failed" in c for c in cands)

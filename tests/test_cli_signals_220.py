@@ -32,7 +32,7 @@ def daemon(tmp_path: Path):
     """Spin the daemon in-process. Point the CLI's _daemon client at its TCP."""
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
     import server  # type: ignore[import-not-found]
-    from session_registry import SessionRegistry  # type: ignore[import-not-found]
+    from substrate.session_registry import SessionRegistry
 
     from substrate import _daemon
 

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ..record import framing
+from ..record.record import resolve_blob_payload
 from ..constants import POLL_INTERVAL_MS, RUN_FINALISED
 
 
@@ -59,9 +60,14 @@ class LiveRecord:
     no lock, and never writes — F-PERS-4 by construction.
     """
 
-    def __init__(self, root: Path | str, *, poll_ms: int = POLL_INTERVAL_MS) -> None:
+    def __init__(
+        self, root: Path | str, *, poll_ms: int = POLL_INTERVAL_MS, resolve_blobs: bool = False
+    ) -> None:
         self.root = Path(root)
         self._poll_s = poll_ms / 1000.0
+        # Sprint 095: True redeems blob Claim Checks (`resolve_blob_payload`) for readers
+        # that consume payload contents; False yields frames exactly as stored.
+        self._resolve_blobs = resolve_blobs
         # per-segment byte cursor, keyed by ROLL-STABLE segment INDEX (not basename): the
         # bytes of each segment we have already yielded. Keying on the index means a segment
         # tailed while hot keeps its cursor when it seals (`.open` dropped, index unchanged),
@@ -99,6 +105,11 @@ class LiveRecord:
         self._cursors[idx] = start + consumed
         yield from frames
 
+    def _redeem(self, env: dict[str, Any]) -> dict[str, Any]:
+        payload = env.get("payload")
+        resolved = resolve_blob_payload(payload, self.root)
+        return env if resolved is payload else {**env, "payload": resolved}
+
     def read_new(self) -> list[dict[str, Any]]:
         """Every complete frame appended since the last call, in seq order: all sealed
         segments (newly-appearing ones are picked up), then the recoverable prefix of the
@@ -109,6 +120,8 @@ class LiveRecord:
         hot = _hot_segment(self.root)
         if hot is not None:
             out.extend(self._read_segment_new(hot))
+        if self._resolve_blobs:
+            out = [self._redeem(env) for env in out]
         return out
 
     def follow(self, *, until_finalised: bool = True) -> Iterator[dict[str, Any]]:
@@ -125,10 +138,13 @@ class LiveRecord:
             time.sleep(self._poll_s)
 
 
-def attach(root: Path | str, *, poll_ms: int = POLL_INTERVAL_MS) -> LiveRecord:
+def attach(
+    root: Path | str, *, poll_ms: int = POLL_INTERVAL_MS, resolve_blobs: bool = False
+) -> LiveRecord:
     """Open a read-only follower over a run record that may still be growing (technical
-    §13, F-PERS-4). Read-only, lock-free, signal-free by construction."""
-    return LiveRecord(root, poll_ms=poll_ms)
+    §13, F-PERS-4). Read-only, lock-free, signal-free by construction. `resolve_blobs=True`
+    redeems blob Claim Checks for readers that consume payload contents (Sprint 095)."""
+    return LiveRecord(root, poll_ms=poll_ms, resolve_blobs=resolve_blobs)
 
 
 def _read_all(fd: int) -> bytes:

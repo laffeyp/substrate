@@ -36,6 +36,10 @@ from .instruments.repair import (
 _Factory = Callable[[], Any]
 
 
+# Output cap for one conversational turn (see speakers()).
+TURN_MAX_TOKENS = 1024
+
+
 def speakers(
     systems: list[str], *, walkthrough: bool, model: str, ci_menu: list[str] | None = None
 ) -> list[Responder]:
@@ -45,7 +49,10 @@ def speakers(
     with a typed outcome, `ci_menu` makes the stub emit a real decision-bearing phrase so the
     speaker's outcome function parses a genuine (deterministic) choice — no stand-in fabrication."""
     if walkthrough:
-        return [OllamaResponder(model, system=s) for s in systems]
+        # One speaker reply is one conversational turn: 1024 tokens (~750 words) is far above any
+        # real turn and bounds a looping small model to seconds, not the 300 s read timeout x3
+        # that hung test_instrument_ablation_delta for 900 s (UI sprint 097).
+        return [OllamaResponder(model, system=s, max_tokens=TURN_MAX_TOKENS) for s in systems]
     return [DeterministicResponder(seed=i, menu=ci_menu) for i, _ in enumerate(systems)]
 
 

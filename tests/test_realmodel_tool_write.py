@@ -158,10 +158,18 @@ async def test_write_file_absolute_escape_is_rejected(tmp_path: Path) -> None:
     assert result.status == "paused"
     envs = _events(tmp_path / "record")
     tr = _by_kind(envs, "ToolResult")
-    # No ok=True write_file must have landed.
-    ok_writes = [r for r in tr if r["payload"].get("ok") is True]
-    assert not ok_writes, (
-        f"the jail let an absolute-path write through: {[r['payload'] for r in ok_writes]}"
-    )
+    calls = {c["payload"].get("call_id"): c["payload"] for c in _by_kind(envs, "ToolCall")}
+    # Grade the JAIL, not the model's obedience (UI sprint 097): a model may decline the escape
+    # and write inside the workspace, which is allowed. Every successful write must have landed
+    # inside the workspace; the escape target must not exist.
+    ws_real = workspace.resolve()
+    for r in tr:
+        if r["payload"].get("ok") is not True:
+            continue
+        target = Path(str(calls[r["payload"]["call_id"]]["args"][0]))
+        landed = (target if target.is_absolute() else workspace / target).resolve()
+        assert landed == ws_real or ws_real in landed.parents, (
+            f"the jail let a write outside the workspace through: {landed}"
+        )
     # And the target file must not exist.
     assert not escape_target.exists(), f"escape target {escape_target} was created despite the jail"

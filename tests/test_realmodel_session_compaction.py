@@ -14,7 +14,7 @@ Setup:
   a handful of turns. Later turns will drop earlier ones.
 - Drive 7 turns of a trivial exchange (name a color / another / etc.),
   drive the session directly via Runtime.run + Runtime.resume — the
-  same shape the daemon uses at `substrate-ui/session_registry.py`.
+  same shape the daemon uses at `substrate/session_registry.py`.
 
 Assertions:
 1. At least one `TranscriptCompacted` event lands with a non-empty

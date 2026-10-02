@@ -113,8 +113,10 @@ class AppendCycle:
             return
         st.in_cycle = True
         try:
-            kind, schema, env_producer, payload = self._resolve(pending)  # step 1
-            event = self._emit(kind, schema, env_producer, payload)  # step 2
+            kind, schema, env_producer, disk_payload, memory_payload = self._resolve(
+                pending
+            )  # step 1
+            event = self._emit(kind, schema, env_producer, disk_payload, memory_payload)  # step 2
             self._track_lifecycle(event)
             for vname, view in self._reg.views.items():  # step 3
                 if not subscribed(view.subscription, event):
@@ -132,13 +134,20 @@ class AppendCycle:
             self.cycle(st.control.popleft())
 
     def _emit(
-        self, kind: str, schema: str, env_producer: dict[str, Any] | None, payload: Any
+        self,
+        kind: str,
+        schema: str,
+        env_producer: dict[str, Any] | None,
+        disk_payload: Any,
+        memory_payload: Any,
     ) -> Event:
-        """Assign the next dense seq, frame+append the envelope, build the typed Event ONCE
-        (envelope dict and Event no longer hand-built in parallel), update counts and the
-        last/final-event pointers. Returns the Event. The single append point for the
-        normal cycle (the view-failure and kernel-error terminals append directly because
-        they must run after the cycle's reentrancy/terminal accounting)."""
+        """Assign the next dense seq, frame+append the envelope, build the typed Event ONCE,
+        update counts and the last/final-event pointers. Returns the Event.
+
+        disk_payload goes into the envelope written to the record — it may be a BlobRef
+        stub for oversized payloads.  memory_payload goes into the Event object fed to
+        views, routes, and triggers — it is always the full inline data, so downstream
+        consumers never see a blob stub where they expect real fields."""
         st = self._st
         seq = st.next_seq
         st.next_seq += 1
@@ -149,7 +158,7 @@ class AppendCycle:
             "schema": schema,
             "producer": env_producer,
             "t": now,
-            "payload": payload,
+            "payload": disk_payload,
         }
         self._record.append(envelope)
         event = Event(
@@ -158,7 +167,7 @@ class AppendCycle:
             schema=schema,
             producer=ProducerRef(**env_producer) if env_producer else None,
             t=now,
-            payload=payload,
+            payload=memory_payload,
         )
         st.counts[kind] = st.counts.get(kind, 0) + 1
         st.last_event = event
@@ -167,9 +176,14 @@ class AppendCycle:
 
     def _resolve(
         self, pending: _Emission | _Lifecycle
-    ) -> tuple[str, str, dict[str, Any] | None, Any]:
+    ) -> tuple[str, str, dict[str, Any] | None, Any, Any]:
+        """Returns (kind, schema, env_producer, disk_payload, memory_payload).
+        disk_payload goes into the envelope on the record; memory_payload goes into the
+        Event object fed to views, routes, and triggers.  They differ only when the
+        payload exceeds the blob threshold — the disk side gets a BlobRef stub, the
+        memory side keeps the full inline data."""
         if isinstance(pending, _Lifecycle):
-            return pending.kind, f"{pending.kind}@1", None, pending.payload
+            return pending.kind, f"{pending.kind}@1", None, pending.payload, pending.payload
         # a Producer emission — validate at the bus boundary (technical §8.1)
         ref = pending.producer
         obj = pending.obj
@@ -188,10 +202,11 @@ class AppendCycle:
             if sc.ok:
                 version = reg.schemas[event_kind][1]  # type: ignore[union-attr]
                 # Blob-offload oversized payloads BEFORE framing (technical §3.7 / §3.3):
-                # write-ahead the blob, replace the payload with a BlobRef. Frames stay
-                # bounded; the citable identity (the hash) is unchanged.
-                payload = self._maybe_offload(sc)
-                return event_kind, f"{event_kind}@{version}", ref, payload
+                # write-ahead the blob, replace the disk payload with a BlobRef. Frames
+                # stay bounded; the in-memory payload keeps the full data so triggers and
+                # views always see the real fields.
+                disk_payload, memory_payload = self._maybe_offload(sc)
+                return event_kind, f"{event_kind}@{version}", ref, disk_payload, memory_payload
             invalid, at_path = sc.reason, sc.at_path
             raw = sc.raw
         else:
@@ -204,16 +219,19 @@ class AppendCycle:
             f"{PRODUCER_EMITTED_INVALID}@1",
             None,
             wrapper,
+            wrapper,
         )
 
-    def _maybe_offload(self, sc: SafeCanonical) -> Any:
-        """If a canonical payload exceeds BLOB_THRESHOLD_BYTES, write it write-ahead to the
-        blob store and return a BlobRef builtins ({"$blob":..,"bytes":n}); else return the
-        inline builtins (technical §3.7)."""
+    def _maybe_offload(self, sc: SafeCanonical) -> tuple[Any, Any]:
+        """Returns (disk_payload, memory_payload).  When the canonical payload fits under
+        BLOB_THRESHOLD_BYTES both are sc.builtins.  When it exceeds the threshold the disk
+        payload is a BlobRef stub ({"$blob":..,"bytes":n}) written write-ahead to the blob
+        store, while the memory payload stays as sc.builtins so triggers, views, and routes
+        always see the real fields (technical §3.7)."""
         if sc.nbytes <= BLOB_THRESHOLD_BYTES:
-            return sc.builtins
+            return sc.builtins, sc.builtins
         blob_ref = self._record.put_blob(sc.raw_bytes)
-        return {"$blob": blob_ref.sha256, "bytes": blob_ref.bytes}
+        return {"$blob": blob_ref.sha256, "bytes": blob_ref.bytes}, sc.builtins
 
     def _resolved_input_fields(self, resolved: Any) -> dict[str, Any]:
         """The TriggerFired input field(s): per D-5, EXACTLY ONE of `resolved_input`

@@ -87,7 +87,18 @@ def _drafter_factory(task: CodingTask, responders: list[Responder]) -> _Factory:
         # drafting is the ONLY model work — meter it: emit the provider's token/latency accounting as
         # a ModelUsage on the record (inert — no Trigger subscribes to it), so the harness can sum
         # per-run tokens/inference instead of reading zeros.
-        response, usage = await call_responder_metered(responders[slot % len(responders)], prompt)
+        try:
+            response, usage = await call_responder_metered(
+                responders[slot % len(responders)], prompt
+            )
+        except Exception as exc:  # noqa: BLE001 — a failed model call is a failed CANDIDATE
+            # A drafter that raised left its slot without a Verdict; the round never reached n
+            # verdicts and the run ended on the watchdog with no Solved/Exhausted (UI sprint 097:
+            # deepseek-r1 hit its token cap). The same rule run_gate follows — a crashing candidate
+            # must not take the run down — applies to drafting: the slot gets a Candidate with no
+            # files, the gate grades it "no artifacts", and the round completes.
+            yield Candidate(round=rnd, slot=slot, response=f"[model call failed: {exc!r}]")
+            return
         yield usage
         yield Candidate(round=rnd, slot=slot, response=response)
 
@@ -231,10 +242,9 @@ def coding_flow_topology(
             },
             policy=api.PerEvent(),
         )
-        # Solved / Exhausted are the clean terminals; the watchdog is the SAFETY net. If a drafter or
-        # validator dies (a transient model failure, or a gate guard tripping) the round never reaches
-        # n verdicts, so the judge never fires — without this the run wedges in RunStuckQuiescent. The
-        # watchdog finalises a truly-idle run, which the Oracle then reads as not-solved (honest).
+        # Solved / Exhausted are the clean terminals; the watchdog is the SAFETY net for a run that
+        # goes idle anyway. A failed model call no longer starves a round (the drafter turns it into
+        # a failed Candidate, UI sprint 097), so the watchdog should not be what ends a run.
         b.termination(
             api.any_of(
                 api.threshold_count("Solved", 1),
@@ -257,7 +267,7 @@ def ci_responders(task: CodingTask, n: int = 3) -> list[Responder]:
 
 
 def walkthrough_responders(
-    models: list[str] | str, *, temperature: float = 0.6, max_tokens: int = 900
+    models: list[str] | str, *, temperature: float = 0.6, max_tokens: int = 4096
 ) -> list[Responder]:
     """Best-of-N over an ENSEMBLE — one drafter per model. The real diversity in best-of-N comes from
     N DIFFERENT models (each family has its own strengths + failure modes), not just N samples of one;
@@ -265,4 +275,6 @@ def walkthrough_responders(
     The topology hands slot i to `models[i]`. A single name (or a name repeated) still works — that is
     degenerate best-of-N, sampling-temperature diversity only — but the point is heterogeneity."""
     names = [models] if isinstance(models, str) else list(models)
+    # 4096: three small files plus a reasoning model's preamble. 900 truncated deepseek-r1 routinely
+    # (UI sprint 097); a truncated reply now fails loud and becomes a failed candidate.
     return [OllamaResponder(m, temperature=temperature, max_tokens=max_tokens) for m in names]

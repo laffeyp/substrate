@@ -72,7 +72,7 @@ async def test_ensemble_real_disagreement_and_cancel(tmp_path):
     fast = {
         f"m{i}": OllamaResponder(
             _FAST,
-            max_tokens=12,
+            max_tokens=64,
             temperature=0.9,
             system="Answer with ONE short word. No explanation.",
         )
@@ -81,7 +81,7 @@ async def test_ensemble_real_disagreement_and_cancel(tmp_path):
     slow = {
         n: OllamaResponder(
             _FAST,
-            max_tokens=12,
+            max_tokens=64,
             temperature=0.9,
             system="Answer with ONE short word. No explanation.",
         )
@@ -89,7 +89,7 @@ async def test_ensemble_real_disagreement_and_cancel(tmp_path):
     }
     adj = OllamaResponder(
         _SMART,
-        max_tokens=24,
+        max_tokens=64,
         system="Given candidate answers labelled by member id, pick the single best one. Reply with JUST the member id (e.g. m0).",
     )
     topo = ensemble_topology(
@@ -128,8 +128,8 @@ async def test_code_review_role_divergence_and_cancel(tmp_path):
     )
     topo = code_review_topology(
         code,
-        responders={r: OllamaResponder(_SMART, max_tokens=60) for r in DEFAULT_ROLES},
-        judge=OllamaResponder(_SMART, max_tokens=40),
+        responders={r: OllamaResponder(_SMART, max_tokens=256) for r in DEFAULT_ROLES},
+        judge=OllamaResponder(_SMART, max_tokens=256),
         quorum=3,
         # linger LONGER than the fast reviewers' real call latency so the lingerers are reliably still
         # running when the quorum fires the judge -> cancel-others has live victims. 0.4s worked only
@@ -285,9 +285,9 @@ async def test_adversarial_pair_real_findings_and_bounded_loop(tmp_path):
     _require(_SMART)
     topo = adversarial_pair_topology(
         writer_model=OllamaResponder(
-            _SMART, max_tokens=80, temperature=0.7, system="You write a short artifact."
+            _SMART, max_tokens=256, temperature=0.7, system="You write a short artifact."
         ),
-        finder_model=OllamaResponder(_SMART, max_tokens=40, system="You find one flaw."),
+        finder_model=OllamaResponder(_SMART, max_tokens=256, system="You find one flaw."),
         max_attempts=2,
         deterministic=False,
     )
@@ -354,7 +354,7 @@ async def test_pipeline_cascade_halt_and_resume(tmp_path):
 async def test_codesynth_concurrent_checker_isolation(tmp_path):
     _require(_SMART)
     writer = OllamaResponder(
-        _SMART, max_tokens=160, system="Write ONLY Python code, no prose, no markdown fences."
+        _SMART, max_tokens=1024, system="Write ONLY Python code, no prose, no markdown fences."
     )
     code = writer.respond(
         "Write two functions: add(a,b) returning a+b, and mul(a,b) returning a*b."

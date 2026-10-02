@@ -125,15 +125,6 @@ ignore_missing_imports = true
 module = "datasets"
 ignore_missing_imports = true
 
-# `session_registry` lives in the sibling substrate-ui/ repo. Sprint 225c's
-# pair_coding_composite.py imports SessionManifest / SessionRegistry under
-# TYPE_CHECKING for annotations; mypy on the substrate side cannot resolve
-# the top-level module because substrate-ui/ is not on the package path.
-# Declaring it untyped here is the same pattern swebench uses (above).
-[[tool.mypy.overrides]]
-module = "session_registry"
-ignore_missing_imports = true
-
 # F-API-6: the CLI is the standing proof that the public API suffices — `substrate.cli` may
 # import `substrate.api` (and stdlib / third-party) but NO other `substrate.*` module. Enforced
 # by `uv run lint-imports` (import-linter), run in CI. The src layout means the package must be

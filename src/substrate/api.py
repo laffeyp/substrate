@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .constants import (
     INJECTION_APPLIED,
@@ -85,9 +86,18 @@ from .kernel.policies import (
     threshold_count,
 )
 from .protocols import Producer, ProducerFactory, Responder, TriggerContext, View
-from .record.record import Always, Interval, NoFsync, read_record, recover_open_segment
+from .record.record import (
+    Always,
+    Interval,
+    NoFsync,
+    read_first_envelope,
+    read_record,
+    recover_open_segment,
+    resolve_blob_payload,
+)
 from .projections.replay import HashMismatch, ReplayError, ReplayResult, assert_replayable, replay
-from .kernel.runtime import Runtime, RunResult
+from .bundles import list_bundles, load_bundle
+from .kernel.runtime import Runtime, RunResult, find_active_runtime
 from .record.sidecar import read_sidecar
 from .testing import assert_event, assert_no_event, assert_sequence
 from .kernel.topology import (
@@ -101,6 +111,20 @@ from .kernel.topology import (
 from .kernel.triggers import Logical, Once, PerEvent, PerKey, WallClock, WhileTrue
 from .types import BlobRef, Event, ProducerRef, Subscription
 from .kernel.views import BufferView, KindBuffer, KindCount, PerKindLatest, StartedCompletedCounts
+
+if TYPE_CHECKING:
+    from .session_registry import (
+        FreshSessionRequiresUserMessage,
+        NameCollision,
+        SessionEndedMidTurn,
+        SessionManifest,
+        SessionRegistry,
+        SessionStatus,
+        SessionTopologyFactory,
+        TornRecordOnResume,
+        manifest_from_dict,
+        scan_record_status,
+    )
 
 __all__ = [
     # lifecycle kind constants (the locked vocabulary)
@@ -158,6 +182,11 @@ __all__ = [
     "RunResult",
     # records
     "read_record",
+    "read_first_envelope",
+    "resolve_blob_payload",
+    "list_bundles",
+    "load_bundle",
+    "find_active_runtime",
     "recover_open_segment",
     "Interval",
     "Always",
@@ -223,6 +252,18 @@ __all__ = [
     "assert_sequence",
     # configuration — the per-user state root (config-externalization, sprint 246)
     "substrate_home",
+    # standing sessions — the name index + manifest catalog the daemon serves (UI sprint 099:
+    # one registry, here; substrate-ui's private copy had drifted from it)
+    "FreshSessionRequiresUserMessage",
+    "NameCollision",
+    "SessionEndedMidTurn",
+    "SessionManifest",
+    "SessionRegistry",
+    "SessionStatus",
+    "SessionTopologyFactory",
+    "TornRecordOnResume",
+    "manifest_from_dict",
+    "scan_record_status",
 ]
 
 
@@ -236,3 +277,29 @@ def substrate_home() -> Path:
     if raw:
         return Path(raw)
     return Path.home() / ".substrate"
+
+
+# The session-registry names resolve on first access (PEP 562). session_registry imports this
+# module, so an eager import here would cycle whichever of the two loaded first.
+_SESSION_REGISTRY_NAMES = frozenset(
+    {
+        "FreshSessionRequiresUserMessage",
+        "NameCollision",
+        "SessionEndedMidTurn",
+        "SessionManifest",
+        "SessionRegistry",
+        "SessionStatus",
+        "SessionTopologyFactory",
+        "TornRecordOnResume",
+        "manifest_from_dict",
+        "scan_record_status",
+    }
+)
+
+
+def __getattr__(name: str) -> object:
+    if name in _SESSION_REGISTRY_NAMES:
+        from . import session_registry
+
+        return getattr(session_registry, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

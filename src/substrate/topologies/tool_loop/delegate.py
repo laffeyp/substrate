@@ -106,7 +106,7 @@ def _run_child_to_answer(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            task = loop.create_task(api.Runtime(root).run(topology))
+            task = loop.create_task(api.Runtime(root).run(topology, name="tool_loop"))
             handle["loop"], handle["task"] = loop, task
             ready.set()
             box["result"] = loop.run_until_complete(task)
@@ -136,7 +136,9 @@ def _run_child_to_answer(
         raise TimeoutError(f"delegate child at {root} was cancelled")
     if "error" in box:
         raise box["error"]
-    events = list(api.read_record(root))
+    events = list(
+        api.read_record(root, resolve_blobs=True)
+    )  # Sprint 095: a FinalAnswer may exceed 16 KiB
     answer = next((e for e in events if e["kind"] == "FinalAnswer"), None)
     if answer is None:
         raise ValueError(f"delegate child at {root} produced no FinalAnswer")
@@ -226,7 +228,7 @@ def _extract_context_slice(
     lo, hi = parent_seq_range
     kinds_set = set(kinds) if kinds else None
     matching: list[dict[str, Any]] = []
-    for env in api.read_record(record_root):
+    for env in api.read_record(record_root, resolve_blobs=True):  # Sprint 095
         seq = int(env.get("seq", -1))
         if seq < lo or seq > hi:
             continue
@@ -501,7 +503,7 @@ def _iter_record(record_root: Path) -> Any:
     couple directly to api.read_record; keeps testing easier."""
     from ... import api
 
-    return list(api.read_record(record_root))
+    return list(api.read_record(record_root, resolve_blobs=True))  # Sprint 095
 
 
 def _classify_failure(error: Any) -> str:
@@ -751,7 +753,7 @@ def make_delegate(
             # even if the reviewer's record already carries older ones.
             this_turn_finals = [
                 e
-                for e in api.read_record(Path(reviewer_root))
+                for e in api.read_record(Path(reviewer_root), resolve_blobs=True)  # Sprint 095
                 if e["kind"] == "FinalAnswer"
                 and int(e.get("seq", -1)) > reviewer_tail_seq_before_turn
             ]

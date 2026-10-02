@@ -28,7 +28,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Final, Protocol
 
-from .tools import Tool
+from .tools import Tool, positive_int
 
 
 # Sprint 072 named this file as a target for TOOL_NAME_* constants; the
@@ -269,7 +269,7 @@ _INSPECT_RECORD_SCHEMA: dict[str, Any] = {
                 },
             },
         },
-        "limit": {"type": "integer"},
+        "limit": {"type": "integer", "minimum": 1},
         "continue_from": {"type": "string"},
         "compare_record": {"type": "string"},
     },
@@ -347,32 +347,23 @@ def _verify_cursor(cursor: str, hmac_key: bytes) -> dict[str, Any] | None:
 
 
 def _extract_application_name(record_root: str) -> str | None:
-    """Read `substrate.RunStarted.payload.topology` (or `.config.topology`
-    depending on version) so the `application` filter can compare
-    against the record's own manifest section."""
+    """The record's topology/application name: RunStarted.payload.name, written by the caller of
+    `Runtime.run(..., name=...)` (UI sprint 097). This used to read payload.topology as a string;
+    payload.topology is the topology's STRUCTURE (a dict), so it never matched any real record.
+    Reads only the record's first line (api.read_first_envelope)."""
     from pathlib import Path
 
     from ... import api
 
     try:
-        envelopes = list(api.read_record(Path(record_root)))
-    except Exception:  # noqa: BLE001 — torn record: application filter treats as no-match rather than propagating.
+        env = api.read_first_envelope(Path(record_root))
+    except Exception:  # noqa: BLE001 — unreadable record: the filter treats it as no-match.
         return None
-    for env in envelopes:
-        if env.get("kind") == api.RUN_STARTED:
-            payload = env.get("payload") or {}
-            if not isinstance(payload, dict):
-                return None
-            topology = payload.get("topology")
-            if isinstance(topology, str):
-                return topology
-            config = payload.get("config") or {}
-            if isinstance(config, dict):
-                config_topology = config.get("topology")
-                if isinstance(config_topology, str):
-                    return config_topology
-            return None
-    return None
+    if env is None or env.get("kind") != api.RUN_STARTED:
+        return None
+    payload = env.get("payload") or {}
+    name = payload.get("name") if isinstance(payload, dict) else None
+    return name if isinstance(name, str) else None
 
 
 def _filter_events(envelopes: list[dict[str, Any]], filt: dict[str, Any]) -> list[dict[str, Any]]:
@@ -427,6 +418,9 @@ def _inspect_record_impl(
         raise ValueError(f"{TOOL_NAME_INSPECT_RECORD}: `filter` must be an object")
     continue_from = payload.get("continue_from")
     cap_tokens = _cap_tokens(driver_context_tokens)
+    # `limit` caps events per page (format="events"). The schema advertised it and the code
+    # never read it until UI sprint 097.
+    page_limit = positive_int(payload.get("limit"), "limit", 10**9)
 
     if continue_from is not None:
         cursor_data = _verify_cursor(str(continue_from), hmac_key)
@@ -445,6 +439,11 @@ def _inspect_record_impl(
         start_seq = -1
 
     record_root = Path(record_root_str)
+    # UI sprint 099: a path with no record read as an empty one, so a model that
+    # mistyped the path got ok=True, total_events=0, finalised=False and reported
+    # a real, finished record as unfinished. An absent record is an error.
+    if not record_root.is_dir() or api.read_first_envelope(record_root) is None:
+        raise ValueError(f"{TOOL_NAME_INSPECT_RECORD}: no record at {record_root_str}")
 
     if format_name == "summary":
         summary = api.narration_summary(record_root)
@@ -519,7 +518,9 @@ def _inspect_record_impl(
             record_app = _extract_application_name(record_root_str)
             if record_app != filt["application"]:
                 return {"format": "events", "events": [], "has_more": False}
-        envelopes = list(api.read_record(record_root))
+        envelopes = list(
+            api.read_record(record_root, resolve_blobs=True)
+        )  # Sprint 095: the model reads payloads
         filtered = _filter_events(envelopes, filt)
         if start_seq > 0:
             filtered = [env for env in filtered if int(env.get("seq", -1)) >= start_seq]
@@ -527,7 +528,9 @@ def _inspect_record_impl(
         running_tokens = 0
         for env in filtered:
             env_tokens = _estimate_tokens(str(env))
-            if running_tokens + env_tokens > cap_tokens and collected:
+            if (
+                running_tokens + env_tokens > cap_tokens or len(collected) >= page_limit
+            ) and collected:
                 cursor = _sign_cursor(
                     {
                         "record": record_root_str,
@@ -596,7 +599,7 @@ def make_inspect_record(
 
 
 class _SessionRegistryLike(Protocol):
-    """The subset of substrate-ui/session_registry.SessionRegistry
+    """The subset of substrate.session_registry.SessionRegistry
     substrate_tools reaches. Duck-typed for testability."""
 
     def list_all(self) -> list[Any]: ...
@@ -609,7 +612,7 @@ _LIST_RECORDS_SCHEMA: dict[str, Any] = {
         "since_ts": {"type": "number"},
         "topology": {"type": "string"},
         "session_name": {"type": "string"},
-        "limit": {"type": "integer"},
+        "limit": {"type": "integer", "minimum": 1},
     },
     "x-args-passthrough": True,  # sprint 049 — the impl reads args[0] as a dict.
 }
@@ -638,7 +641,7 @@ def _make_list_records_impl(records_root: Path, args: list[Any]) -> dict[str, An
     since_ts = float(filt["since_ts"]) if "since_ts" in filt else None
     topology_want = filt.get("topology")
     session_name_want = filt.get("session_name")
-    limit = int(filt.get("limit", 20))
+    limit = positive_int(filt.get("limit"), "limit", 20)
 
     rows: list[dict[str, Any]] = []
     if not records_root.is_dir():
@@ -648,6 +651,7 @@ def _make_list_records_impl(records_root: Path, args: list[Any]) -> dict[str, An
             continue
         manifest_path = entry / "manifest.json"
         record_root_path = entry / "record" if (entry / "record").exists() else entry
+        manifest_topology: Any = None
         row: dict[str, Any] = {
             "session_id": entry.name,
             "record_root": str(record_root_path) if record_root_path.exists() else None,
@@ -662,6 +666,7 @@ def _make_list_records_impl(records_root: Path, args: list[Any]) -> dict[str, An
                 row["created_at"] = manifest.get("created_at")
                 row["status"] = manifest.get("status")
                 row["name"] = manifest.get("name")
+                manifest_topology = manifest.get("topology")
             except (OSError, ValueError):
                 continue
         if row["created_at"] is None:
@@ -671,6 +676,8 @@ def _make_list_records_impl(records_root: Path, args: list[Any]) -> dict[str, An
                 row["created_at"] = 0.0
         if record_root_path.exists():
             row["topology"] = _extract_application_name(str(record_root_path))
+        if row["topology"] is None and isinstance(manifest_topology, str):
+            row["topology"] = manifest_topology
         rows.append(row)
 
     def _include(row: dict[str, Any]) -> bool:

@@ -24,6 +24,7 @@ def test_repo_layer_wins_over_user_and_shipped(
     (repo / ".substrate" / "prompts").mkdir(parents=True)
     (repo / ".substrate" / "prompts" / "default.md").write_text("REPO PROMPT", encoding="utf-8")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.delenv("SUBSTRATE_HOME", raising=False)  # state root follows the patched home
     text = resolve_role_prompt("default", repo_root=repo)
     assert text == "REPO PROMPT"
 
@@ -32,6 +33,7 @@ def test_user_layer_wins_over_shipped(tmp_path: Path, monkeypatch: pytest.Monkey
     (tmp_path / ".substrate" / "prompts").mkdir(parents=True)
     (tmp_path / ".substrate" / "prompts" / "default.md").write_text("USER PROMPT", encoding="utf-8")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("SUBSTRATE_HOME", raising=False)  # state root follows the patched home
     text = resolve_role_prompt("default")
     assert text == "USER PROMPT"
 
@@ -45,6 +47,7 @@ def test_folder_shape_concatenates_in_lexical_order(
     (role_dir / "a.md").write_text("FIRST", encoding="utf-8")
     (role_dir / "c.md").write_text("THIRD", encoding="utf-8")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("SUBSTRATE_HOME", raising=False)  # state root follows the patched home
     text = resolve_role_prompt("reviewer")
     assert text == "FIRST\n\nSECOND\n\nTHIRD"
 
@@ -58,11 +61,13 @@ def test_file_and_folder_at_same_layer_raises(
     (base / "reviewer").mkdir()
     (base / "reviewer" / "a.md").write_text("FOLDER", encoding="utf-8")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("SUBSTRATE_HOME", raising=False)  # state root follows the patched home
     with pytest.raises(RegistrationError, match="both"):
         resolve_role_prompt("reviewer")
 
 
 def test_missing_at_every_layer_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("SUBSTRATE_HOME", raising=False)  # state root follows the patched home
     with pytest.raises(RegistrationError, match="no role prompt found"):
         resolve_role_prompt("nonexistent-role-xyz")

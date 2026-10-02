@@ -119,7 +119,7 @@ def test_ollama_usage_parse_reads_the_discarded_fields():
     assert usage.wall_ms == 2400  # (0.4 + 2.0)s inference, NOT the 7.4s that includes load
     assert usage.estimated is False  # provider truth, not a stand-in
     # the content extractor still works on the same dict (refactor preserved it).
-    assert OllamaResponder._content(data) == "20"
+    assert OllamaResponder("m")._content(data) == "20"
 
 
 def test_ollama_usage_parse_falls_back_to_total_duration_without_eval_phases():

@@ -184,8 +184,8 @@ def _read_file(root: Path, a: list[Any]) -> str:
     # the window doesn't reach EOF, a trailing marker says how to page the rest (old code cut at 8000
     # chars mid-content and said nothing).
     path = _resolve(root, a[0])
-    offset = int(a[1]) if len(a) > 1 and a[1] is not None else 1
-    limit = int(a[2]) if len(a) > 2 and a[2] is not None else _MAX_READ_LINES
+    offset = positive_int(a[1] if len(a) > 1 else None, "offset", 1)
+    limit = positive_int(a[2] if len(a) > 2 else None, "limit", _MAX_READ_LINES)
     lines = path.read_text(encoding="utf-8").splitlines()
     if not lines:
         # an empty read must say so — a bare "" reads as "the read failed" to the model, which then
@@ -207,6 +207,29 @@ def _read_file(root: Path, a: list[Any]) -> str:
     return "\n".join(out)
 
 
+# A tool-call argument list whose only element is {ARG_ERROR_KEY: message} means the model's
+# named arguments could not be mapped; the tool runner reports the message as ok=False.
+ARG_ERROR_KEY: Final[str] = "__arg_error__"
+
+
+def positive_int(value: Any, name: str, default: int) -> int:
+    """A count argument a model supplied (`limit`, `offset`): absent means `default`; anything
+    below 1 is an error the model can read and correct (errors-as-observations). Silently
+    honoring `limit: 0` returned an empty result as a success; a real model sent exactly
+    that to list_records on 2026-10-01 (UI sprint 097 / real-model tier)."""
+    if value is None:
+        return default
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"{name} must be a whole number >= 1 (got {value!r}); omit it for {default}"
+        ) from None
+    if n < 1:
+        raise ValueError(f"{name} must be >= 1 (got {n}); omit it for {default}")
+    return n
+
+
 def _list_dir(root: Path, a: list[Any]) -> list[str]:
     p = _resolve(root, a[0]) if a else root
     return sorted(e.name + ("/" if e.is_dir() else "") for e in p.iterdir())
@@ -216,7 +239,7 @@ def _glob(root: Path, a: list[Any]) -> list[str]:
     # canonical `glob`: fast pattern file-find (e.g. "**/*.py"), sorted + CAPPED. Uncapped, a match
     # over a big tree ("**/*.py" in a repo) returns 100s of KB, which blob-offloads the whole ToolResult
     # payload and strips the loop-control fields off the frame — wedging the loop. Cap + report instead.
-    pattern, where = str(a[0]), (_resolve(root, a[1]) if len(a) > 1 else root)
+    pattern, where = str(a[0]), (_resolve(root, a[1]) if len(a) > 1 and a[1] is not None else root)
     hits = sorted(str(p) for p in where.glob(pattern) if p.is_file())
     if len(hits) > _MAX_GLOB_HITS:
         return [
@@ -229,7 +252,7 @@ def _glob(root: Path, a: list[Any]) -> list[str]:
 def _grep(root: Path, a: list[Any]) -> list[str]:
     # canonical `grep`: a real REGEX, not a substring test. An invalid pattern is a typed failure the
     # model reads, not a crash. Files walked in sorted order so the hit list is stable across runs.
-    pat_s, where = str(a[0]), (_resolve(root, a[1]) if len(a) > 1 else root)
+    pat_s, where = str(a[0]), (_resolve(root, a[1]) if len(a) > 1 and a[1] is not None else root)
     try:
         pat = re.compile(pat_s)
     except re.error as e:
@@ -437,8 +460,8 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "object",
         "properties": {
             "path": {"type": "string"},
-            "offset": {"type": "integer"},
-            "limit": {"type": "integer"},
+            "offset": {"type": "integer", "minimum": 1},
+            "limit": {"type": "integer", "minimum": 1},
         },
         "required": ["path"],
     },
@@ -583,12 +606,20 @@ def _named_to_positional(
     schema = _schema_for(name, suite) or {}
     if schema.get("x-args-passthrough"):
         return [dict(args)]
-    out: list[Any] = []
-    for p in schema.get("properties", {}):
-        if p not in args:
-            break
-        out.append(args[p])
-    return out
+    props = list(schema.get("properties", {}))
+    # UI sprint 097: arguments the mapping cannot place are reported, not dropped. A real model
+    # called grep(pattern=...) because a prompt described `pattern`; the schema names `regex`,
+    # the old loop dropped the unknown key, and the tool saw [] three times in a row.
+    unknown = sorted(k for k in args if k not in props)
+    if props and unknown:
+        return [
+            {ARG_ERROR_KEY: f"{name}: unknown argument(s) {unknown}; it takes {', '.join(props)}"}
+        ]
+    # A later argument given without an earlier optional one keeps its place: the gap is None,
+    # which every tool reads as "use the default" (the old loop stopped at the gap and silently
+    # dropped e.g. read_file's `limit` when `offset` was omitted).
+    last = max((i for i, p in enumerate(props) if p in args), default=-1)
+    return [args.get(p) for p in props[: last + 1]]
 
 
 def parse_tool_call(message: dict[str, Any], suite: dict[str, Tool]) -> tuple[str, Any]:

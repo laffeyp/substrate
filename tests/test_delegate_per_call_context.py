@@ -44,7 +44,7 @@ def test_slice_filters_by_seq_range(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter(envs),
+        lambda root, **_kw: iter(envs),
     )
     text, elided_count, _elided_bytes, single_oversize = _extract_context_slice(
         Path("/nowhere"), (1, 2), ()
@@ -63,7 +63,7 @@ def test_slice_filters_by_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter(envs),
+        lambda root, **_kw: iter(envs),
     )
     text, _elided_count, _elided_bytes, _single_oversize = _extract_context_slice(
         Path("/nowhere"), (0, 10), ("FinalAnswer",)
@@ -81,7 +81,7 @@ def test_slice_drops_at_event_boundary_when_over_cap(monkeypatch: pytest.MonkeyP
     envs = [_envelope(i, "ModelReply", {"text": big_text, "turn_index": i}) for i in range(3)]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter(envs),
+        lambda root, **_kw: iter(envs),
     )
     text, elided_count, elided_bytes, single_oversize = _extract_context_slice(
         Path("/nowhere"), (0, 10), ()
@@ -116,7 +116,7 @@ def test_slice_includes_single_oversize_event_with_note(monkeypatch: pytest.Monk
     ]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter(envs),
+        lambda root, **_kw: iter(envs),
     )
     text, elided_count, elided_bytes, single_oversize = _extract_context_slice(
         Path("/nowhere"), (0, 10), ()
@@ -139,7 +139,7 @@ def test_slice_single_oversize_alone_reports_zero_elided(monkeypatch: pytest.Mon
     envs = [_envelope(0, "ModelReply", {"text": huge})]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter(envs),
+        lambda root, **_kw: iter(envs),
     )
     text, elided_count, elided_bytes, single_oversize = _extract_context_slice(
         Path("/nowhere"), (0, 10), ()
@@ -154,7 +154,7 @@ def test_slice_empty_when_no_events_match(monkeypatch: pytest.MonkeyPatch) -> No
     envs = [_envelope(0, "UserMessage", {})]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter(envs),
+        lambda root, **_kw: iter(envs),
     )
     text, elided_count, _elided_bytes, single_oversize = _extract_context_slice(
         Path("/nowhere"), (5, 10), ("FinalAnswer",)
@@ -171,7 +171,7 @@ def test_prefix_context_slice_wraps_task_with_header(monkeypatch: pytest.MonkeyP
     envs = [_envelope(0, "FinalAnswer", {"text": "the answer is 42"})]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter(envs),
+        lambda root, **_kw: iter(envs),
     )
     prefixed = _prefix_context_slice(
         Path("/nowhere"),
@@ -188,7 +188,7 @@ def test_prefix_context_slice_wraps_task_with_header(monkeypatch: pytest.MonkeyP
 def test_prefix_returns_task_unchanged_when_slice_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
-        lambda root: iter([]),
+        lambda root, **_kw: iter([]),
     )
     prefixed = _prefix_context_slice(
         Path("/nowhere"),

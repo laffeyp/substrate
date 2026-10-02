@@ -299,7 +299,9 @@ def render_transcript(
             f"render_transcript: strategy={strategy!r} unsupported in v1; "
             "only 'rolling_window' ships ."
         )
-    events = list(read_record(record_root))
+    events = list(
+        read_record(record_root, resolve_blobs=True)
+    )  # Sprint 095: the model reads payloads
     seed_tokens = _est_tokens(seed)
     per_turn_tokens = _est_tokens(per_turn)
     k = _compute_k(driver_context_tokens, seed_tokens, per_turn_tokens, driver_headroom_frac)

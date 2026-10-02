@@ -253,7 +253,74 @@ def _read_bytes_nofollow(path: Path) -> bytes:
         os.close(fd)
 
 
-def read_record(root: Path | str) -> Iterator[dict[str, Any]]:
+def read_first_envelope(root: Path | str) -> dict[str, Any] | None:
+    """The record's first envelope (seq 0, normally `substrate.RunStarted`), reading and CRC-checking
+    only its first line. None when the record has no complete first frame. For catalog-style
+    readers that need one fact per record across thousands of records; `read_record` loads and
+    verifies whole segments (UI sprint 097: list_records took 7.8 s over 4,394 sessions)."""
+    root = Path(root)
+    segs = _sealed_segments(root)
+    first = segs[0] if segs else _hot_segment(root)
+    if first is None:
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(first, flags)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as f:
+        line = f.readline()
+    if not line.endswith(b"\n"):
+        return None
+    try:
+        env = framing.verify_line(line[:-1])
+    except (CRCMismatchError, TornFrameError):
+        return None
+    return env if int(env.get("seq", -1)) == 0 else None
+
+
+def _is_blob_stub(payload: Any) -> bool:
+    return isinstance(payload, dict) and set(payload) == {"$blob", "bytes"}
+
+
+def resolve_blob_payload(payload: Any, root: Path | str) -> Any:
+    """Redeem a blob Claim Check (technical §3.7). A payload over BLOB_THRESHOLD_BYTES is stored
+    in the record as `{"$blob": "sha256:<hex>", "bytes": n}`; this returns the payload it stands
+    for, read from the run's blob store with its hash verified. Any other payload is returned
+    unchanged.
+
+    The ONE place a stub is redeemed (Hohpe & Woolf, Claim Check + Content Enricher). Every
+    reader that consumes payload contents goes through it — live views get the inline payload
+    from the sequencer, resumed views, replayed views, followers and record tools get it here —
+    so the same event carries the same payload for every reader (Sprint 095). A missing or
+    corrupt blob raises: it is data loss, as a seq gap is."""
+    if not _is_blob_stub(payload):
+        return payload
+    ref = BlobRef(sha256=str(payload["$blob"]), bytes=int(payload["bytes"]))
+    return json.loads(BlobStore(Path(root)).get(ref))
+
+
+def _resolved(env: dict[str, Any], root: Path) -> dict[str, Any]:
+    payload = env.get("payload")
+    if not _is_blob_stub(payload):
+        return env
+    return {**env, "payload": resolve_blob_payload(payload, root)}
+
+
+def read_record(root: Path | str, *, resolve_blobs: bool = False) -> Iterator[dict[str, Any]]:
+    """Every recoverable envelope in seq order, exactly as stored. With `resolve_blobs=True`,
+    a blob-stub payload is replaced by the payload it stands for (`resolve_blob_payload`):
+    readers that consume payload CONTENTS pass True; integrity readers (replay, conformance,
+    byte comparisons) keep the default and see the record as written."""
+    if not resolve_blobs:
+        yield from _read_record_raw(root)
+        return
+    root = Path(root)
+    for env in _read_record_raw(root):
+        yield _resolved(env, root)
+
+
+def _read_record_raw(root: Path | str) -> Iterator[dict[str, Any]]:
     """Yield every recoverable envelope in seq order: sealed segments (by filename),
     then the recoverable prefix of the hot segment. Does not depend on the manifest
     (segments are authoritative, §3.5). Read-only, symlink-not-followed (§17); does not

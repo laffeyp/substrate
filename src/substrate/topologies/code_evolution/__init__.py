@@ -379,7 +379,7 @@ def ci_responders(genome: str, n: int = 4) -> list[Responder]:
 
 
 def walkthrough_responders(
-    models: list[str] | str, *, temperature: float = 0.8, max_tokens: int = 900
+    models: list[str] | str, *, temperature: float = 0.8, max_tokens: int = 4096
 ) -> list[Responder]:
     """Best-of-N mutation over an ENSEMBLE — one mutation operator per model (heterogeneous variation:
     different families explore the search space differently). Higher temperature than coding_flow: an

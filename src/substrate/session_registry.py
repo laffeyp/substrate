@@ -390,11 +390,10 @@ class SessionRegistry:
                 manifest = _replace(manifest, status=true_status)
                 _atomic_write_json(manifest_path, _manifest_to_dict(manifest))
             self._manifests[manifest.session_id] = manifest
-            # F14: derive the next turn_index from the record so _session_turn
-            # does not need to scan the whole record on every POST /turn.
-            self._next_turn_index[manifest.session_id] = _next_turn_index_from_record(
-                Path(manifest.record_root)
-            )
+            # Sprint 094: the next turn_index is NOT derived here. Scanning
+            # every record at boot cost 6.9 of 7.1 s over 3,079 sessions
+            # (measured 2026-10-01) for a number only a session that takes
+            # another turn needs. `next_turn_index` derives it on first use.
         # Prune stale by-name entries whose manifests dropped off disk.
         self._by_name = {name: sid for name, sid in self._by_name.items() if sid in self._manifests}
         self._write_by_name_index()
@@ -423,17 +422,6 @@ class SessionRegistry:
         If `name` is set and already in the index, raises `NameCollision` with
         the existing session_id. The caller shapes the 409 response.
         """
-        if seed:
-            import warnings
-
-            warnings.warn(
-                "SessionManifest.seed is deprecated. The prompt-composition arc "
-                "(sprints 058-067) moved every real prompt source to a "
-                "PromptFragment producer; seed has no consumer inside the "
-                "topology. Pass empty string; a future sprint drops the field.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         manifest = SessionManifest(
             session_id=session_id,
             name=name,
@@ -560,6 +548,7 @@ class SessionRegistry:
           - "max_tokens" (int ≥ 0)          — cap; 0 = uncapped
           - "timeout"    (float > 0.0)      — request timeout, seconds
           - "num_ctx"    (int ≥ 1)          — Ollama context window override
+          - "driver_version" (str)          — CLI model chosen in the version picker
 
         None clears every override — the resolver builds Responders with
         pure defaults again. An unknown key or wrong type raises
@@ -590,6 +579,7 @@ class SessionRegistry:
                 DriverParamKey.MAX_TOKENS: int,
                 DriverParamKey.TIMEOUT: (int, float),
                 DriverParamKey.NUM_CTX: int,
+                DriverParamKey.DRIVER_VERSION: str,
             }
             allowed_names = {k.value for k in allowed}
             unknown = set(params.keys()) - allowed_names
@@ -608,7 +598,11 @@ class SessionRegistry:
                     raise ValueError(
                         f"driver_params.think must be a bool; got {type(value).__name__}"
                     )
-                if key_enum is not DriverParamKey.THINK and isinstance(value, bool):
+                if (
+                    expected is not str
+                    and key_enum is not DriverParamKey.THINK
+                    and isinstance(value, bool)
+                ):
                     raise ValueError(f"driver_params.{key} must be numeric, not bool")
                 if not isinstance(value, expected):
                     exp_name = (
@@ -790,16 +784,19 @@ class SessionRegistry:
         manifest = self._manifests.get(session_id)
         if manifest is None:
             raise KeyError(f"unknown session_id {session_id!r}")
-        if manifest.status == SessionStatus.ENDED:
-            raise SessionEndedMidTurn(
-                f"session {session_id!r} has ended (status='ended'); cannot resume"
-            )
         threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
         with threading_lock:
-            # Re-check manifest under the lock — an intervening turn may have ended it.
             live_manifest = self._manifests.get(session_id)
-            if live_manifest is None or live_manifest.status == SessionStatus.ENDED:
-                raise SessionEndedMidTurn(f"session {session_id!r} ended before the turn started")
+            if live_manifest is None:
+                raise SessionEndedMidTurn(
+                    f"session {session_id!r} vanished before the turn started"
+                )
+            # Architect ruling 2026-09-25: an ended session still accepts turns.
+            # The record is the conversation and a RunFinalised tail does not stop
+            # another resume from appending, so the refusal was policy. The status
+            # flips to parked under the lock and Runtime.resume continues the record.
+            if live_manifest.status == SessionStatus.ENDED:
+                live_manifest = self.update_status(session_id, SessionStatus.PARKED)
             record_root = Path(live_manifest.record_root)
             # Sprint 214a: `resume_event_builder` runs UNDER the lock so record-derived
             # state (like next turn_index computed from the reviewer's tail) is atomic
@@ -906,13 +903,21 @@ class SessionRegistry:
         return self._turn_queue_cap
 
     def next_turn_index(self, session_id: str) -> int:
-        """F14: the next turn_index for this session, derived from the
-        in-memory counter (no record scan). Returns 0 for unknown sessions."""
-        return self._next_turn_index.get(session_id, 0)
+        """F14: the next turn_index for this session. The first call for a
+        known session scans its record once (Sprint 094: lazy, not at
+        boot); later calls read the in-memory counter. Returns 0 for
+        unknown sessions."""
+        cached = self._next_turn_index.get(session_id)
+        if cached is not None:
+            return cached
+        manifest = self._manifests.get(session_id)
+        value = _next_turn_index_from_record(Path(manifest.record_root)) if manifest else 0
+        self._next_turn_index[session_id] = value
+        return value
 
     def advance_turn_index(self, session_id: str) -> None:
         """F14: increment the turn counter after a successful turn."""
-        self._next_turn_index[session_id] = self._next_turn_index.get(session_id, 0) + 1
+        self._next_turn_index[session_id] = self.next_turn_index(session_id) + 1
 
     def interrupt(
         self,
@@ -1223,7 +1228,7 @@ def _run_run_sync(
         asyncio.set_event_loop(loop)
         try:
             runtime = api.Runtime(record_root, persistent=True)
-            task = loop.create_task(runtime.run(factory))
+            task = loop.create_task(runtime.run(factory, name="session"))
             if handle_out is not None:
                 handle_out.loop = loop
                 handle_out.task = task
@@ -1425,7 +1430,9 @@ def _next_turn_index_from_record(record_root: Path) -> int:
         return 0
     highest = -1
     try:
-        for env in api.read_record(record_root):
+        for env in api.read_record(
+            record_root, resolve_blobs=True
+        ):  # Sprint 095: a long UserMessage is a blob
             if env.get("kind") == "UserMessage":
                 payload = env.get("payload") or {}
                 if isinstance(payload, dict) and "turn_index" in payload:
@@ -1536,6 +1543,7 @@ __all__ = [
     "SessionRegistry",
     "SessionStatus",
     "SessionTopologyFactory",
+    "TornRecordOnResume",
     "manifest_from_dict",
     "scan_record_status",
 ]

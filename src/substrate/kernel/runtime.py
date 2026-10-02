@@ -164,8 +164,16 @@ class Runtime:
         self._diagnostics = diagnostics
         self._used = False
 
-    async def run(self, topology: Callable[[TopologyBuilder], None]) -> RunResult:
-        """Run a topology to a fresh run record. Opens at seq 0 with substrate.RunStarted."""
+    async def run(
+        self, topology: Callable[[TopologyBuilder], None], *, name: str | None = None
+    ) -> RunResult:
+        """Run a topology to a fresh run record. Opens at seq 0 with substrate.RunStarted.
+
+        `name` (optional) is recorded as RunStarted.payload.name: which topology or application
+        this record is. The structure is already in payload.topology, but nothing named it, so
+        record catalogs could not filter by topology (UI sprint 097). Omitted, the payload is
+        unchanged, so existing records and bundled fixtures stay byte-identical."""
+        self._run_name = name
         return await self._drive(topology, resume_event=None)
 
     async def resume(
@@ -497,7 +505,9 @@ class Runtime:
         #    see correct as-of state), and the kind counts + started/ended totals the
         #    TerminationPolicy reads. Views are deterministic Level-1 projections (kernel §4).
         max_seq = -1
-        for env in read_record(self._record_root):
+        for env in read_record(
+            self._record_root, resolve_blobs=True
+        ):  # Sprint 095: Views fold the payload, not its Claim Check
             seq = int(env.get("seq", -1))
             max_seq = max(max_seq, seq)
             kind = str(env.get("kind", ""))
@@ -571,8 +581,10 @@ class Runtime:
             if pk.export_map is not None:
                 pk_entry["export_map"] = dict(pk.export_map)
             producer_kinds.append(pk_entry)
+        named = getattr(self, "_run_name", None)
         return {
             "run_id": self._st.run_id,
+            **({"name": named} if named is not None else {}),
             "topology": {
                 "producer_kinds": producer_kinds,
                 "triggers": [
@@ -813,9 +825,13 @@ class Runtime:
             if fp is not None and drop_reason is None:
                 sc = try_canonical(fp)
                 if sc.ok:
-                    final_builtins = self._cyc._maybe_offload(sc)
-                    payload["finalisation_payload"] = final_builtins
-                    st.final_payload = final_builtins
+                    # Claim Check split (Sprint 095): the record carries the stub when
+                    # oversized; RunResult carries the payload. Sprint 092a changed
+                    # _maybe_offload to return (disk, memory) and missed this caller,
+                    # which stored the 2-tuple itself (test_robustness caught it).
+                    disk_payload, memory_payload = self._cyc._maybe_offload(sc)
+                    payload["finalisation_payload"] = disk_payload
+                    st.final_payload = memory_payload
                 else:
                     drop_reason = f"finalisation payload not canonical: {sc.reason} at {sc.at_path}"
             if drop_reason is not None:

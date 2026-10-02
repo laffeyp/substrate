@@ -74,7 +74,7 @@ def _ten_turns() -> list[dict[str, Any]]:
 def test_k_five_keeps_last_five_turns(monkeypatch: pytest.MonkeyPatch) -> None:
     events = _ten_turns()
     monkeypatch.setattr(
-        "substrate.topologies.session.transcript.read_record", lambda root: iter(events)
+        "substrate.topologies.session.transcript.read_record", lambda root, **_kw: iter(events)
     )
     # Force K = 5. `_compute_k` uses avg_turn_tokens=800; a budget of 4000 tokens
     # divides to 5. driver_context_tokens * 0.6 = 4000 → driver_context_tokens = 6666.
@@ -103,7 +103,7 @@ def test_k_five_keeps_last_five_turns(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_prompt_lines_reflect_kept_turns_only(monkeypatch: pytest.MonkeyPatch) -> None:
     events = _ten_turns()
     monkeypatch.setattr(
-        "substrate.topologies.session.transcript.read_record", lambda root: iter(events)
+        "substrate.topologies.session.transcript.read_record", lambda root, **_kw: iter(events)
     )
     # driver_context_tokens=8000 leaves K=5 even with the seed cost
     # (headroom 4800 - seed_tokens 4 = 4796; 4796 // 800 = 5).
@@ -128,7 +128,7 @@ def test_dropped_range_is_contiguous_and_strictly_below_kept(
 ) -> None:
     events = _ten_turns()
     monkeypatch.setattr(
-        "substrate.topologies.session.transcript.read_record", lambda root: iter(events)
+        "substrate.topologies.session.transcript.read_record", lambda root, **_kw: iter(events)
     )
     result = render_transcript(
         record_root="/nowhere",

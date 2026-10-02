@@ -381,7 +381,12 @@ def test_read_file_is_line_numbered_with_offset_limit_and_no_silent_truncation(t
     # bare "" — the SAME ambiguity the empty-file marker kills — and limit<=0 pointed a pagination
     # marker back to the same offset (a re-page loop). An empty window now says what happened.
     assert read([str(f), 10]) == "(no lines at offset 10; the file has 5 line(s))"  # past EOF
-    assert read([str(f), 2, 0]) == "(no lines at offset 2; the file has 5 line(s))"  # limit 0
+    # limit<=0 is now a typed error naming `limit` (UI sprint 097): the old message blamed the
+    # offset ("no lines at offset 2") for what was a bad limit.
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="limit must be >= 1"):
+        read([str(f), 2, 0])
 
 
 def test_grep_is_a_real_regex_and_invalid_pattern_is_a_typed_failure(tmp_path):

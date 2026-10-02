@@ -37,7 +37,7 @@ def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
     base_dir = tmp_path_factory.mktemp("daemon-base")
     sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
     import server
-    from session_registry import SessionRegistry
+    from substrate.session_registry import SessionRegistry
 
     server._SESSION_REGISTRY = SessionRegistry(
         base=base_dir,

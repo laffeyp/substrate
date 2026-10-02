@@ -103,7 +103,7 @@ def test_sse_stream_reads_turn_events_from_running_daemon(tmp_path: Path) -> Non
 
     _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
     import server  # type: ignore[import-not-found]
-    from session_registry import SessionRegistry  # type: ignore[import-not-found]
+    from substrate.session_registry import SessionRegistry
 
     from substrate import _daemon, cli
 

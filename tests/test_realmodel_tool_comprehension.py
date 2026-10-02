@@ -245,8 +245,15 @@ async def test_list_records_read_back_by_model(tmp_path: Path) -> None:
     calls = _by_kind(envs, "ToolCall")
     results = _by_kind(envs, "ToolResult")
     assert any(c["payload"].get("tool") == "list_records" for c in calls)
-    assert results and results[0]["payload"].get("ok") is True
-    output = results[0]["payload"].get("output") or {}
+    # An invalid argument (a model sent limit=0 on 2026-10-01) is now an error observation the
+    # model corrects (UI sprint 097); grade the first SUCCESSFUL list_records result.
+    ok = [
+        r
+        for r in results
+        if r["payload"].get("tool") == "list_records" and r["payload"].get("ok") is True
+    ]
+    assert ok, f"no successful list_records result: {[r['payload'] for r in results]}"
+    output = ok[0]["payload"].get("output") or {}
     assert output.get("count") == 2, f"expected count=2, got {output.get('count')}: {output}"
     answer = _last_answer(envs)
     assert "2" in answer or "two" in answer.lower(), (
@@ -258,7 +265,7 @@ async def test_list_records_read_back_by_model(tmp_path: Path) -> None:
 
 
 class _FakeRegistry:
-    """Duck-type of substrate-ui/session_registry.SessionRegistry.list_all,
+    """Duck-type of substrate.session_registry.SessionRegistry.list_all,
     kept in-file so the test does not import the daemon."""
 
     def __init__(self, rows: list[Any]) -> None:
@@ -369,10 +376,17 @@ async def test_inspect_record_summary_read_back_by_model(tmp_path: Path) -> None
     assert inspect_calls, (
         f"model did not call inspect_record; tools={[c['payload'].get('tool') for c in calls]}"
     )
-    assert results and results[0]["payload"].get("ok") is True, (
-        f"inspect_record should return ok=True; got {results[0]['payload'] if results else None}"
+    # A model can mistype the long tmp path; the tool now answers that with an error
+    # (UI sprint 099) and the model retries. Judge the first successful read.
+    ok_results = [
+        r
+        for r in results
+        if r["payload"].get("tool") == "inspect_record" and r["payload"].get("ok") is True
+    ]
+    assert ok_results, (
+        f"no inspect_record call returned ok=True; got {[r['payload'] for r in results]}"
     )
-    output = results[0]["payload"].get("output") or {}
+    output = ok_results[0]["payload"].get("output") or {}
     assert output.get("format") == "summary"
     assert output.get("finalised") is True, f"seeded record should be finalised; got {output}"
     assert output.get("total_events", 0) > 0

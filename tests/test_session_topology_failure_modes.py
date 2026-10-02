@@ -15,7 +15,7 @@ session-topology tests do not walk end-to-end:
 Each test builds the session topology directly (no CI wrapper): `first_turn_user_message`
 opens turn 1 on `Runtime.run()`; `Runtime.resume(topology, resume_event=UserMessage(...))`
 drives subsequent turns. That mirrors the daemon path at
-`substrate-ui/session_registry.py::turn_sync`.
+`substrate/session_registry.py::turn_sync`.
 """
 
 from __future__ import annotations

@@ -122,6 +122,22 @@ def _normalize(output: str, sandbox: Path) -> str:
     )
 
 
+def _gate_env() -> dict[str, str]:
+    """The gate's environment: the caller's, with the RUNNING interpreter's scripts directory first
+    on PATH, so `ruff`, `mypy` and `python` resolve to the environment substrate itself runs in
+    (Twelve-Factor II: dependencies declared and isolated, never whatever the shell's PATH holds).
+    Before UI sprint 097, 78 coding-gate tests failed with `mypy: command not found` whenever pytest
+    ran from a venv interpreter whose bin was not on the shell's PATH."""
+    import os
+    import sys
+    import sysconfig
+
+    env = dict(os.environ)
+    first = [sysconfig.get_path("scripts"), str(Path(sys.executable).parent)]
+    env["PATH"] = os.pathsep.join([*dict.fromkeys(first), env.get("PATH", "")])
+    return env
+
+
 def run_gate(artifacts: dict[str, str], gate: str, *, timeout: float = 60.0) -> GateResult:
     """Write `artifacts` into a fresh temp dir, run `gate` there (shell, no network assumed), and
     return the normalized verdict. A timeout or a non-zero exit is a fail, never an exception to the
@@ -150,11 +166,26 @@ def run_gate(artifacts: dict[str, str], gate: str, *, timeout: float = 60.0) -> 
             target.write_text(content)
         try:
             proc = subprocess.run(
-                gate, shell=True, cwd=sandbox, capture_output=True, text=True, timeout=timeout
+                gate,
+                shell=True,
+                cwd=sandbox,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_gate_env(),
             )
         except subprocess.TimeoutExpired:
             return GateResult(
                 passed=False, returncode=-1, summary=f"gate timed out after {timeout:g}s"
+            )
+        if proc.returncode == 127:
+            # `command not found`: the gate's TOOL is missing from this environment. That is not
+            # the candidate failing; say so, so it is never graded as a bad candidate.
+            return GateResult(
+                passed=False,
+                returncode=127,
+                summary="gate tool not installed in this environment: "
+                + _normalize(proc.stdout + proc.stderr, sandbox),
             )
         return GateResult(
             passed=proc.returncode == 0,

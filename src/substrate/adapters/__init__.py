@@ -50,16 +50,19 @@ class DriverFamily(StrEnum):
 
 
 class DriverParamKey(StrEnum):
-    """The four `driver_params` keys the SessionRegistry validator
-    accepts. Sprint 070: raw-string keys become typed enum members.
-    Adding a new key means adding a member — pre-070 required editing
-    both the validator and every caller.
+    """The `driver_params` keys the SessionRegistry validator accepts.
+    Sprint 070: raw-string keys become typed enum members. Adding a new
+    key means adding a member — pre-070 required editing both the
+    validator and every caller.
     """
 
     THINK = "think"
     MAX_TOKENS = "max_tokens"
     NUM_CTX = "num_ctx"
     TIMEOUT = "timeout"
+    # UI Sprint 087c: the CLI model the version picker chose; the daemon's
+    # driver resolver turns it into the CLI's model flag.
+    DRIVER_VERSION = "driver_version"
 
 
 __all__ = [

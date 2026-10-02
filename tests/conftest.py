@@ -18,10 +18,28 @@ the tool-comprehension suite opts in explicitly."""
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Iterator
 
 import pytest
+
+# Test-session state root (UI sprint 097; same fix as substrate-ui sprint 093). Every test run
+# gets a fresh SUBSTRATE_HOME, set at conftest import so it is in place before any test module
+# imports substrate. Without it, kernel tests that open sessions wrote into the user's real
+# ~/.substrate/sessions: 2026-10-01, the real-model tier's no_escape_guard caught it, and 147
+# session dirs had appeared there that day. The guard below still watches the REAL
+# ~/.substrate, so from here on it fires only on a genuine escape.
+_TEST_HOME = tempfile.mkdtemp(prefix="substrate-kernel-test-home-")
+os.environ["SUBSTRATE_HOME"] = _TEST_HOME
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _remove_test_substrate_home() -> Iterator[None]:
+    yield
+    shutil.rmtree(_TEST_HOME, ignore_errors=True)
 
 
 def _snapshot(paths: list[Path]) -> dict[str, float]:

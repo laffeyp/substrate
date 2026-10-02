@@ -65,7 +65,7 @@ def _extract_slice(
     lo, hi = seq_range
     kinds_set = set(kinds) if kinds else None
     matching: list[dict[str, Any]] = []
-    for env in api.read_record(record_root):
+    for env in api.read_record(record_root, resolve_blobs=True):  # Sprint 095
         seq = int(env.get("seq", -1))
         if seq < lo or seq > hi:
             continue

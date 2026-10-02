@@ -81,6 +81,16 @@ def _reviewer_factory(
     return lambda: reviewer
 
 
+_DECISIONS = ("approve", "request-changes", "block")
+
+
+def _decision_in(text: str) -> str | None:
+    """The verdict word the judge's reply ends on: the decision whose last mention comes latest."""
+    low = text.lower()
+    found = [(low.rfind(d), d) for d in _DECISIONS if d in low]
+    return max(found)[1] if found else None
+
+
 def _judge_factory(responder: Responder) -> _Factory:
     async def judge(inp: Any) -> AsyncIterator[VerdictRendered | ModelUsage]:
         # inp carries the accumulated critiques (the input_builder reads the Bus-view buffer).
@@ -88,16 +98,24 @@ def _judge_factory(responder: Responder) -> _Factory:
         roles = tuple(c["role"] for c in crits)
         max_sev = max((int(c["severity"]) for c in crits), default=0)
         # the judge adjudicates: in CI the decision is a deterministic function of the critiques'
-        # severities; in the walkthrough the real model reasons over the critique summaries.
+        # severities; in the walkthrough the real model reads the critique summaries and names the
+        # verdict. UI sprint 099: the model's reply used to be discarded and the severity rule
+        # decided anyway, and severity is a hash of the critique text, so the walkthrough verdict
+        # was noise. The rule now decides only when no model ran or its reply named no verdict.
+        model_decision = None
         if responder is not None and roles:
             # the judge must see the critique CONTENT to adjudicate, not just the role names.
-            _, usage = await call_responder_metered(
+            text, usage = await call_responder_metered(
                 responder,
-                "Adjudicate these code-review critiques; name the most serious and the verdict:\n"
+                "Adjudicate these code-review critiques. Name the most serious in one sentence, "
+                "then end with exactly one verdict word: block, request-changes, or approve.\n"
                 + "\n".join(f"- {c['role']}: {c.get('summary', '')}" for c in crits),
             )
             yield usage  # metered onto the record (C-7)
-        decision = "block" if max_sev >= 4 else "request-changes" if max_sev >= 2 else "approve"
+            model_decision = _decision_in(text)
+        decision = model_decision or (
+            "block" if max_sev >= 4 else "request-changes" if max_sev >= 2 else "approve"
+        )
         yield VerdictRendered(decision=decision, cited_roles=roles, n_critiques=len(crits))
 
     return lambda: judge

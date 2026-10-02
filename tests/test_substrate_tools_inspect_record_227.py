@@ -186,3 +186,14 @@ def test_inspect_record_first_divergence_missing_compare_raises(record: Path) ->
         match=r"inspect_record: format='first_divergence' requires `compare_record`",
     ):
         tool.run([{"record": str(record), "format": "first_divergence"}])
+
+
+@pytest.mark.parametrize("fmt", ["summary", "narrate", "events", "run_graph"])
+def test_missing_record_is_an_error_not_an_empty_record(tmp_path: Path, fmt: str) -> None:
+    # UI sprint 099: a realmodel run mistyped the record path; the tool answered
+    # ok with total_events=0 and finalised=False, and the model reported a finished
+    # record as unfinished.
+    tool = make_inspect_record()
+    for path in (tmp_path / "nope", tmp_path):
+        with pytest.raises(ValueError, match="no record at"):
+            tool.run([{"record": str(path), "format": fmt}])

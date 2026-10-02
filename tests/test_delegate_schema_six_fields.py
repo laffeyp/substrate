@@ -42,6 +42,7 @@ def test_schema_declares_all_six_properties(tmp_path: Path) -> None:
         "context",
         "baseline",
         "timeout_seconds",
+        "children",  # sprint 245 fan-out (the test predates it; updated in UI sprint 097)
     }
 
 
@@ -71,6 +72,7 @@ def test_ollama_tools_exposes_all_six_fields_to_native_calling(tmp_path: Path) -
         "context",
         "baseline",
         "timeout_seconds",
+        "children",  # sprint 245 fan-out (the test predates it; updated in UI sprint 097)
     }
 
 
