@@ -748,7 +748,7 @@ class SessionRegistry:
         session_id: str,
         resume_event: Any = None,
         *,
-        timeout_seconds: float = 600.0,
+        timeout_seconds: float | None = None,
         resume_event_builder: Callable[[SessionManifest, Path], Any] | None = None,
     ) -> tuple[SessionManifest, Path]:
         """Run one turn against a standing session synchronously. Called from
@@ -844,6 +844,10 @@ class SessionRegistry:
                 factory = self._session_topology_factory(live_manifest, effective_resume_event)
             else:
                 factory = self._session_topology_factory(live_manifest, None)
+            # UI sprint 101: the manifest says a turn is in flight while one is. It said the
+            # previous turn's `parked` until this turn ended, so no reader could tell a running
+            # turn from one that died without parking.
+            self.update_status(session_id, SessionStatus.RUNNING)
             turn_handle = TurnHandle()
             self._running_handles[session_id] = turn_handle
             try:
@@ -862,6 +866,17 @@ class SessionRegistry:
                         timeout_seconds=timeout_seconds,
                         handle_out=turn_handle,
                     )
+            except BaseException:
+                # UI sprint 101: a turn that raises (a timeout the caller set, a cancel, a kernel
+                # error) used to leave the manifest at the previous turn's status and the cached
+                # turn counter unadvanced, though the record already held this turn's UserMessage:
+                # the next turn reused its turn_index. The record decides both instead.
+                self._next_turn_index.pop(session_id, None)
+                try:
+                    self.update_status(session_id, _scan_record_status(record_root))
+                except Exception:  # noqa: BLE001 — never mask the turn's own failure
+                    pass
+                raise
             finally:
                 self._running_handles.pop(session_id, None)
             status_str = getattr(result, "status", "paused")
@@ -1202,11 +1217,49 @@ def _record_has_envelopes(record_root: Path) -> bool:
     return state == "has_envelopes"
 
 
+_STOP_GRACE_S = 10.0
+
+
+def _stop_timed_out_turn(handle: TurnHandle | None, done: threading.Event) -> None:
+    """End a turn whose caller-set time limit passed (UI sprint 101).
+
+    First the way the user's interrupt does it: cancel every live producer through
+    `Runtime.cancel_producer(cause="timeout")`. The session topology's park-on-interrupt trigger
+    then parks the turn, so the record ends with ProducerCancelled + Park and says who stopped it.
+    Cancelling the whole run task instead stops the run without recording why: the record ends
+    mid-turn and every reader (boot scan, activity strip) sees a turn that never ended. That stays
+    only as the fallback when the run has not parked within the grace period.
+    """
+    if handle is None or handle.loop is None:
+        return
+    loop, task, runtime = handle.loop, handle.task, handle.runtime
+
+    def _cancel_live() -> None:
+        st = getattr(runtime, "_st", None)
+        if runtime is None or st is None:
+            return
+        for instance in list(st.kind_by_instance):
+            runtime.cancel_producer(instance, cause="timeout", caller="turn_sync:timeout")
+
+    try:
+        loop.call_soon_threadsafe(_cancel_live)
+    except RuntimeError:  # the loop already closed: the run ended on its own
+        return
+    if done.wait(_STOP_GRACE_S):
+        return
+    if task is not None:
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:
+            return
+        done.wait(_STOP_GRACE_S)
+
+
 def _run_run_sync(
     factory: Callable[["TopologyBuilder"], None],
     record_root: Path,
     *,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
     handle_out: TurnHandle | None = None,
 ) -> Any:
     """Sprint 217a: run `Runtime(record_root, persistent=True).run(factory)` on
@@ -1246,13 +1299,7 @@ def _run_run_sync(
     threading.Thread(target=worker, daemon=True).start()
     if not done.wait(timeout_seconds):
         ready.wait(1.0)
-        if handle_out is not None:
-            loop, task = handle_out.loop, handle_out.task
-        else:
-            loop, task = None, None
-        if loop is not None and task is not None:
-            loop.call_soon_threadsafe(task.cancel)
-            done.wait(10.0)
+        _stop_timed_out_turn(handle_out, done)
         raise TimeoutError(
             f"SessionRegistry.turn_sync: run against {record_root} exceeded "
             f"{timeout_seconds}s and was cancelled"
@@ -1269,14 +1316,15 @@ def _run_resume_sync(
     record_root: Path,
     resume_event: Any,
     *,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
     handle_out: TurnHandle | None = None,
 ) -> Any:
     """Run `Runtime(record_root, persistent=True).resume(factory, resume_event)`
     to completion in a worker thread with its own event loop.
 
     Returns the `RunResult` (has `.status` in `{"paused", "finalised", "failed"}`).
-    Raises `TimeoutError` on wall-clock overrun; re-raises the child's exception
+    Raises `TimeoutError` on wall-clock overrun when `timeout_seconds` is set (None, the
+    turn_sync default since UI sprint 101, waits for the turn however long the model works); re-raises the child's exception
     on kernel failure.
 
     `handle_out`, when provided, is populated with loop/task/runtime once the
@@ -1310,13 +1358,7 @@ def _run_resume_sync(
     threading.Thread(target=worker, daemon=True).start()
     if not done.wait(timeout_seconds):
         ready.wait(1.0)
-        if handle_out is not None:
-            loop, task = handle_out.loop, handle_out.task
-        else:
-            loop, task = None, None
-        if loop is not None and task is not None:
-            loop.call_soon_threadsafe(task.cancel)
-            done.wait(10.0)
+        _stop_timed_out_turn(handle_out, done)
         raise TimeoutError(
             f"SessionRegistry.turn_sync: resume against {record_root} exceeded "
             f"{timeout_seconds}s and was cancelled"

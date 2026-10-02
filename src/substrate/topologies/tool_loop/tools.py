@@ -314,17 +314,58 @@ def _write_file(root: Path, a: list[Any]) -> str:
     return f"wrote {len(str(a[1]))} bytes to {path}"
 
 
-def _bash(root: Path, a: list[Any]) -> dict[str, Any]:
-    """Bash tool. Phase 8 item 8 landed streaming: subprocess.Popen replaces
-    subprocess.run so the tool_loop can emit ToolProgress chunks mid-execution
-    for the client's tool card. The final ToolResult carries the full
-    stdout / stderr / exit as before — subscribers who ignore ToolProgress
-    read the same shape they did before the refactor.
+# UI sprint 101: bash's deadline. Claude Code's Bash tool is the reference: each call takes an
+# optional timeout, 2 minutes by default and 10 at most, measured over the whole command. Before
+# this, the 60 s limit applied only after stdout closed, so a background process holding the pipe
+# (`server &`) blocked the tool, and with it the whole turn, until something outside killed it.
+BASH_DEFAULT_TIMEOUT_S: Final[float] = 120.0
+BASH_MAX_TIMEOUT_S: Final[float] = 600.0
+# After the shell itself exits, how long to keep reading output that background children still hold.
+_BASH_DRAIN_S: Final[float] = 1.0
 
-    Progress emission is opt-in via the module-level `_BASH_PROGRESS_CTX`
-    (call_id + tool + step, threaded through by tool_loop's run_tool
-    wrapper). When absent — a direct unit-test call to _bash([...]) — no
-    progress fires; the tool still returns the full result."""
+# The live bash processes of the current tool call. run_tool (tool_loop/__init__.py) sets a fresh
+# list per call; on cancel (the user's interrupt) it kills each one's process group, because
+# cancelling the task that awaits `asyncio.to_thread` does not stop the thread or its children.
+_BASH_PROCS: _contextvars.ContextVar[list[subprocess.Popen[str]] | None] = _contextvars.ContextVar(
+    "_BASH_PROCS", default=None
+)
+
+
+def kill_process_group(proc: subprocess.Popen[str]) -> None:
+    """SIGKILL the process group `proc` leads (the shell and everything it started)."""
+    import os
+    import signal
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _bash(root: Path, a: list[Any]) -> dict[str, Any]:
+    """Bash tool: `bash(cmd, timeout_s?)`.
+
+    The command runs in its own process group. stdout and stderr are read on two threads (one
+    pipe filling up can no longer block the other) and every stdout line is posted as ToolProgress
+    when `_BASH_PROGRESS_CTX` is set (Phase 8 item 8). The result is `{exit, stdout, stderr}`.
+
+    - Deadline: `timeout_s` (default 120, at most 600) covers the whole command. At the deadline
+      the process group is killed and the result carries `timed_out: true` with the output so far.
+    - Background processes: when the shell exits while a child it backgrounded still holds the
+      output pipes, reading stops after a 1 s drain and the result notes it. The child keeps
+      running, as it would in a terminal; it is killed only by the deadline or a cancel.
+    """
+    import queue
+    import threading
+    import time
+
+    timeout_s = BASH_DEFAULT_TIMEOUT_S
+    if len(a) > 1 and a[1] is not None:
+        timeout_s = float(a[1])
+        if not 0 < timeout_s <= BASH_MAX_TIMEOUT_S:
+            raise ValueError(
+                f"bash: timeout_s must be in (0, {BASH_MAX_TIMEOUT_S:g}], got {a[1]!r}"
+            )
     proc = subprocess.Popen(  # noqa: S602 — explicit agent shell tool (opt-in, not CI)
         str(a[0]),
         shell=True,
@@ -332,42 +373,82 @@ def _bash(root: Path, a: list[Any]) -> dict[str, Any]:
         stderr=subprocess.PIPE,
         text=True,
         cwd=str(root),
-        bufsize=1,  # line-buffered so the read loop sees progress promptly
+        bufsize=1,  # line-buffered so progress arrives promptly
+        start_new_session=True,  # own process group: a kill reaches backgrounded children
     )
+    holder = _BASH_PROCS.get()
+    if holder is not None:
+        holder.append(proc)
+    lines: queue.Queue[tuple[str, str | None]] = queue.Queue()
+
+    def pump(name: str, stream: Any) -> None:
+        for line in iter(stream.readline, ""):
+            lines.put((name, line))
+        lines.put((name, None))
+
+    for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+        threading.Thread(target=pump, args=(name, stream), daemon=True).start()
+
     ctx = _BASH_PROGRESS_CTX.get()
-    stdout_chunks: list[str] = []
+    out: dict[str, list[str]] = {"stdout": [], "stderr": []}
+    open_streams = {"stdout", "stderr"}
     offset = 0
-    # Read stdout in a loop; stderr is captured at the end (line-interleaving
-    # both cleanly needs threads or select; stderr is smaller and rarely used
-    # for progress by well-behaved commands).
-    if proc.stdout is not None:
-        for line in iter(proc.stdout.readline, ""):
-            stdout_chunks.append(line)
+    deadline = time.monotonic() + timeout_s
+    shell_exit_at: float | None = None
+    timed_out = False
+    abandoned_pipes = False
+    while open_streams:
+        now = time.monotonic()
+        if now >= deadline:
+            timed_out = True
+            break
+        if shell_exit_at is None and proc.poll() is not None:
+            shell_exit_at = now
+        if shell_exit_at is not None and now - shell_exit_at >= _BASH_DRAIN_S:
+            abandoned_pipes = True
+            break
+        try:
+            name, line = lines.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        if line is None:
+            open_streams.discard(name)
+            continue
+        out[name].append(line)
+        if name == "stdout":
             if ctx is not None:
                 try:
                     _emit_bash_progress(ctx, chunk=line, offset=offset, eof=False)
                 except Exception:  # noqa: BLE001 — progress is advisory; a broken emitter must NOT sink the tool
                     ctx = None
             offset += len(line)
-    try:
-        _stdout_tail, stderr_text = proc.communicate(timeout=60)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
-        raise
-    if _stdout_tail:
-        stdout_chunks.append(_stdout_tail)
+    if timed_out:
+        kill_process_group(proc)
+    exit_code = proc.wait() if not timed_out else proc.wait(timeout=5)
     if ctx is not None:
         try:
             _emit_bash_progress(ctx, chunk="", offset=offset, eof=True)
         except Exception:  # noqa: BLE001 — see above
             pass
-    stdout_full = "".join(stdout_chunks)
-    return {
-        "exit": proc.returncode,
-        "stdout": stdout_full[:8000],
-        "stderr": (stderr_text or "")[:2000],
+    stderr_text = "".join(out["stderr"])
+    if timed_out:
+        stderr_text += (
+            f"\n[bash: killed after {timeout_s:g} s, with every process it started; pass a larger "
+            f"timeout_s (max {BASH_MAX_TIMEOUT_S:g}) for a longer command]"
+        )
+    elif abandoned_pipes:
+        stderr_text += (
+            "\n[bash: the shell exited but a background process still holds its output; that "
+            "process is still running and its later output is not captured]"
+        )
+    result: dict[str, Any] = {
+        "exit": exit_code,
+        "stdout": "".join(out["stdout"])[:8000],
+        "stderr": stderr_text[-2000:],
     }
+    if timed_out:
+        result["timed_out"] = True
+    return result
 
 
 CALCULATOR: dict[str, Tool] = {
@@ -425,7 +506,7 @@ def full_suite(root: Path | str = ".") -> dict[str, Tool]:
         ),
         "bash": Tool(
             TOOL_NAME_BASH,
-            "bash(cmd) -> {exit, stdout, stderr} (SIDE EFFECT)",
+            "bash(cmd, timeout_s?=120 max 600) -> {exit, stdout, stderr, timed_out?} (SIDE EFFECT)",
             False,
             partial(_bash, r),
         ),

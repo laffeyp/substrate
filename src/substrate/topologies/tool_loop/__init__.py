@@ -396,12 +396,22 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             # caller's Context so the value flows into the worker
             # thread. Set for every tool call (cost is negligible); a
             # non-streaming tool never reads it. Cleared after the run.
-            from .tools import _BASH_PROGRESS_CTX
+            from .tools import _BASH_PROCS, _BASH_PROGRESS_CTX, kill_process_group
 
             _progress_token = _BASH_PROGRESS_CTX.set((call_id, tool, step))
+            # UI sprint 101: cancelling this await (the user's interrupt) does not stop the
+            # worker thread; killing the processes the tool started does, and the thread then
+            # returns on its own.
+            procs: list[Any] = []
+            _procs_token = _BASH_PROCS.set(procs)
             try:
                 output = await _asyncio.to_thread(entry.run, args)
+            except _asyncio.CancelledError:
+                for proc in procs:
+                    kill_process_group(proc)
+                raise
             finally:
+                _BASH_PROCS.reset(_procs_token)
                 _BASH_PROGRESS_CTX.reset(_progress_token)
             # pre-validate encodability so a non-RFC-8785-encodable return becomes a typed failure
             # HERE, not an emit-time crash (the yield's encode runs in the runtime, outside this try).

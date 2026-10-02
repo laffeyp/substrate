@@ -32,7 +32,8 @@ The child's tools write ONLY under its `workspace/` subdir — its record is a S
 an autonomous child cannot write over the immutable evidence of its own run (C-1) — and it inherits the
 parent's capability set via `child_suite_factory` (so `--read-only` survives delegation; review F-5). The real bound on a
 child is its own `child_max_steps × the model call timeout`; set `timeout_seconds` above that — it is the
-safety net, not the primary bound.
+safety net, not the primary bound. Unset (the default since UI sprint 101) there is no wall-clock
+limit: models can work for a long time, and a step cap or an interrupt ends a child, not a clock.
 """
 
 from __future__ import annotations
@@ -81,7 +82,7 @@ def _run_child_to_answer(
     topology: Callable[[api.TopologyBuilder], None],
     root: Path,
     *,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
 ) -> tuple[str, int]:
     """Run `topology` to completion at `root` in a worker thread (its own event loop, isolated from the
     outer runtime's), then read the child's FinalAnswer off its record. Blocks the caller like `bash`.
@@ -155,7 +156,7 @@ def _default_child_factory(
     max_total_children: int,
     tree_budget: dict[str, int],
     child_max_steps: int,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
 ) -> ChildFactory:
     """The child is a real tool_loop agent (walkthrough mode — it runs `responder` on the delegated task)
     over `suite_factory(workspace_root)`, plus a DEEPER delegate (depth+1) when the chain has room — so a
@@ -349,7 +350,7 @@ def _run_fanout(
     parent_session_id: str | None,
     parent_record_root: Path | None,
     model_resolver: Callable[[str], Any] | None,
-    per_call_timeout: float,
+    per_call_timeout: float | None,
 ) -> dict[str, Any]:
     """Fan-out execution: mint N sessions in parallel through
     SessionRegistry.create + turn_sync, wait for all to Park or End,
@@ -557,7 +558,7 @@ def make_delegate(
     # inherited down through _default_child_factory to every descendant.
     tree_budget: dict[str, int] | None = None,
     child_max_steps: int = 6,
-    timeout_seconds: float = 600.0,
+    timeout_seconds: float | None = None,
     # Sprint 212 added the daemon-injected fields; sprint 213a wires paths 2/3/4
     # against them and stubs path 1 for sprint 213b. Every kwarg defaults None so
     # every existing `make_delegate(...)` call in the tree keeps working.

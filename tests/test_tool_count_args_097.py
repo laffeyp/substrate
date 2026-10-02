@@ -82,11 +82,12 @@ async def test_inspect_record_pages_by_limit(tmp_path: Path) -> None:
 
 
 def test_ollama_requests_are_always_capped_and_truncation_fails_loud() -> None:
-    from substrate.adapters.models import DEFAULT_MAX_TOKENS, OllamaResponder
+    from substrate.adapters.models import OllamaResponder
 
     r = OllamaResponder("m")
     _headers, payload = r._request("hi")
-    assert payload["options"]["num_predict"] == DEFAULT_MAX_TOKENS  # Ollama's own default is -1
+    # Ollama's own default is -1 (unlimited); ours is the request's context window (UI sprint 101)
+    assert payload["options"]["num_predict"] == payload["options"]["num_ctx"]
     assert OllamaResponder("m", max_tokens=64)._request("hi")[1]["options"]["num_predict"] == 64
     with pytest.raises(RuntimeError, match="token cap"):
         r._content({"done_reason": "length", "message": {"content": "partial"}})

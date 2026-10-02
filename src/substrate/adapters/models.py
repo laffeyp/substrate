@@ -121,9 +121,12 @@ class DeterministicResponder:
         return self.respond(prompt)
 
 
-# Output cap for every OllamaResponder request when the caller sets none: half the default
-# 32768-token context, room for a long tool call (write_file content) and the prompt.
-DEFAULT_MAX_TOKENS = 16384
+# Output cap for an OllamaResponder request when the caller sets none (UI sprint 101): the
+# request's own context window, `num_ctx`. No reply can outgrow the context, so this is the
+# physical bound, not a guess at how long a model should work. Sprint 097 used 16,384, half the
+# default context; Ollama counts a thinking model's reasoning against num_predict (ollama issues
+# #16583, #17561), so a reasoning model that thought hard hit the cap and failed the turn with
+# done_reason "length" and no answer. A looping small model still stops when the window fills.
 
 
 class OllamaResponder:
@@ -153,10 +156,10 @@ class OllamaResponder:
         base_url: str | None = None,
         api_key: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 0,  # 0 = DEFAULT_MAX_TOKENS; never uncapped (see below)
+        max_tokens: int = 0,  # 0 = num_ctx, the context window; never uncapped (see below)
         num_ctx: int = 32768,
         think: bool = False,
-        timeout: float = 300.0,
+        timeout: float | None = None,
         max_retries: int = 3,
         system: str | None = None,
     ) -> None:
@@ -177,9 +180,12 @@ class OllamaResponder:
         # Uncapped, a looping small model generates until the read timeout: 2026-10-01,
         # llama3.2:1b on a 117-byte prompt took 3 x 300 s ReadTimeout. Every request is capped;
         # a reply that hits the cap fails loud in _content.
-        self._max_tokens = max_tokens if max_tokens > 0 else DEFAULT_MAX_TOKENS
+        self._max_tokens = max_tokens if max_tokens > 0 else num_ctx
         self._num_ctx = num_ctx
         self._think = think
+        # UI sprint 101: no default limit on how long the model works. num_predict above ends every
+        # generation; `timeout` (driver_params) caps reading the reply only when set. Connecting to
+        # Ollama still fails after 10 s.
         self._timeout = timeout
         self._max_retries = max_retries
         self._system = system
@@ -264,7 +270,10 @@ class OllamaResponder:
         for attempt in range(self._max_retries):
             try:
                 resp = httpx.post(
-                    self._endpoint, headers=headers, json=payload, timeout=self._timeout
+                    self._endpoint,
+                    headers=headers,
+                    json=payload,
+                    timeout=httpx.Timeout(self._timeout, connect=10.0),
                 )
                 if resp.status_code >= 400:
                     last_body = resp.text[:400]
@@ -296,7 +305,9 @@ class OllamaResponder:
         last_body: str = ""
         for attempt in range(self._max_retries):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(self._timeout, connect=10.0)
+                ) as client:
                     resp = await client.post(self._endpoint, headers=headers, json=payload)
                 if resp.status_code >= 400:
                     last_body = resp.text[:400]
@@ -362,7 +373,10 @@ class OllamaResponder:
         base = self._endpoint[: -len("/api/chat")]
         show_url = f"{base}/api/show"
         try:
-            resp = httpx.post(show_url, json={"name": self._model}, timeout=self._timeout)
+            # metadata lookup, not model work: bounded
+            resp = httpx.post(
+                show_url, json={"name": self._model}, timeout=httpx.Timeout(30.0, connect=10.0)
+            )
             resp.raise_for_status()
             data = resp.json()
         except httpx.HTTPError as exc:
@@ -397,7 +411,7 @@ class CliResponder:
     cancellable and Producers overlap, matching OllamaResponder's concurrency contract."""
 
     def __init__(
-        self, command: list[str], *, timeout: float = 600.0, name: str | None = None
+        self, command: list[str], *, timeout: float | None = None, name: str | None = None
     ) -> None:
         if not command:
             raise ValueError("CliResponder needs a non-empty command, e.g. ['claude', '-p']")

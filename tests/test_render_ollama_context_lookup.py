@@ -59,6 +59,7 @@ def _fake_httpx(payload: dict[str, Any] | Exception, calls: list[dict[str, Any]]
         return _StubResponse(payload)
 
     module.post = post
+    module.Timeout = lambda read, connect: {"read": read, "connect": connect}
     module.HTTPError = _HTTPError
     return module
 
@@ -75,7 +76,8 @@ def test_llama_family_key_returns_context_length(monkeypatch: pytest.MonkeyPatch
         {
             "url": "http://localhost:11434/api/show",
             "body": {"name": "llama3.2:1b"},
-            "timeout": 300.0,
+            # the capability probe is metadata, not model work: bounded (UI sprint 101)
+            "timeout": {"read": 30.0, "connect": 10.0},
         }
     ]
 

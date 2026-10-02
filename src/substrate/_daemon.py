@@ -104,7 +104,7 @@ def is_running(timeout: float = 1.0) -> bool:
 
 
 def _request(
-    method: str, path: str, body: dict[str, Any] | None = None, timeout: float = 30.0
+    method: str, path: str, body: dict[str, Any] | None = None, timeout: float | None = 30.0
 ) -> tuple[int, dict[str, Any]]:
     conn = _connect(timeout=timeout)
     try:
@@ -156,7 +156,7 @@ def turn(
     text: str,
     *,
     context: dict[str, Any] | None = None,
-    timeout: float = 600.0,
+    timeout: float | None = None,  # UI sprint 101: a turn takes as long as the model works
 ) -> dict[str, Any]:
     body: dict[str, Any] = {"text": text}
     if context is not None:
@@ -224,7 +224,7 @@ def run_topology(
     baseline: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
     await_completion: bool = True,
-    timeout_seconds: float = 600.0,
+    timeout_seconds: float | None = None,  # UI sprint 101: no limit on model work
 ) -> dict[str, Any]:
     """Sprint 226: POST /api/topology/<name>/run.
 
