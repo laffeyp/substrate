@@ -396,22 +396,25 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             # caller's Context so the value flows into the worker
             # thread. Set for every tool call (cost is negligible); a
             # non-streaming tool never reads it. Cleared after the run.
-            from .tools import _BASH_PROCS, _BASH_PROGRESS_CTX, kill_process_group
+            from .tools import _BASH_PROGRESS_CTX, _TOOL_CANCEL_HOOKS
 
             _progress_token = _BASH_PROGRESS_CTX.set((call_id, tool, step))
-            # UI sprint 101: cancelling this await (the user's interrupt) does not stop the
-            # worker thread; killing the processes the tool started does, and the thread then
-            # returns on its own.
-            procs: list[Any] = []
-            _procs_token = _BASH_PROCS.set(procs)
+            # UI sprints 101-102: cancelling this await (the user's interrupt) does not stop the
+            # worker thread. The tool registered what does (bash: kill its process group;
+            # delegate: stop its children), and the thread then returns on its own.
+            cancel_hooks: list[Any] = []
+            _hooks_token = _TOOL_CANCEL_HOOKS.set(cancel_hooks)
             try:
                 output = await _asyncio.to_thread(entry.run, args)
             except _asyncio.CancelledError:
-                for proc in procs:
-                    kill_process_group(proc)
+                for hook in list(cancel_hooks):
+                    try:
+                        hook()
+                    except Exception:  # noqa: BLE001 — one failed stop must not skip the others
+                        pass
                 raise
             finally:
-                _BASH_PROCS.reset(_procs_token)
+                _TOOL_CANCEL_HOOKS.reset(_hooks_token)
                 _BASH_PROGRESS_CTX.reset(_progress_token)
             # pre-validate encodability so a non-RFC-8785-encodable return becomes a typed failure
             # HERE, not an emit-time crash (the yield's encode runs in the runtime, outside this try).

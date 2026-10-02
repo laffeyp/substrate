@@ -323,12 +323,21 @@ BASH_MAX_TIMEOUT_S: Final[float] = 600.0
 # After the shell itself exits, how long to keep reading output that background children still hold.
 _BASH_DRAIN_S: Final[float] = 1.0
 
-# The live bash processes of the current tool call. run_tool (tool_loop/__init__.py) sets a fresh
-# list per call; on cancel (the user's interrupt) it kills each one's process group, because
-# cancelling the task that awaits `asyncio.to_thread` does not stop the thread or its children.
-_BASH_PROCS: _contextvars.ContextVar[list[subprocess.Popen[str]] | None] = _contextvars.ContextVar(
-    "_BASH_PROCS", default=None
+# What stops the current tool call's work. run_tool (tool_loop/__init__.py) sets a fresh list per
+# call and, when the call is cancelled (the user's interrupt, a shutdown), runs every hook in it:
+# cancelling the task that awaits `asyncio.to_thread` does not stop the thread, the processes it
+# started, or the child runs it is waiting on (UI sprints 101-102). bash registers a process-group
+# kill; delegate registers a stop for each child it starts.
+_TOOL_CANCEL_HOOKS: _contextvars.ContextVar[list[Callable[[], None]] | None] = (
+    _contextvars.ContextVar("_TOOL_CANCEL_HOOKS", default=None)
 )
+
+
+def on_tool_cancel(hook: Callable[[], None]) -> None:
+    """Register `hook` to run if the current tool call is cancelled. No-op outside run_tool."""
+    hooks = _TOOL_CANCEL_HOOKS.get()
+    if hooks is not None:
+        hooks.append(hook)
 
 
 def kill_process_group(proc: subprocess.Popen[str]) -> None:
@@ -376,9 +385,7 @@ def _bash(root: Path, a: list[Any]) -> dict[str, Any]:
         bufsize=1,  # line-buffered so progress arrives promptly
         start_new_session=True,  # own process group: a kill reaches backgrounded children
     )
-    holder = _BASH_PROCS.get()
-    if holder is not None:
-        holder.append(proc)
+    on_tool_cancel(lambda: kill_process_group(proc))
     lines: queue.Queue[tuple[str, str | None]] = queue.Queue()
 
     def pump(name: str, stream: Any) -> None:

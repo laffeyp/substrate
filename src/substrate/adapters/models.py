@@ -440,19 +440,36 @@ class CliResponder:
         """Async, cancellable call over an asyncio subprocess (the path `call_responder` prefers)."""
         import asyncio as _asyncio
 
+        import os as _os
+        import signal as _signal
+
         proc = await _asyncio.create_subprocess_exec(
             *self._command,
             prompt,
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
+            start_new_session=True,  # own process group: a kill reaches the agent's children
         )
+
+        def _kill_group() -> None:
+            try:
+                _os.killpg(proc.pid, _signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
         try:
             stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=self._timeout)
         except (TimeoutError, _asyncio.TimeoutError):
-            proc.kill()
+            _kill_group()
             raise RuntimeError(
                 f"CliResponder({self.name}) timed out after {self._timeout}s"
             ) from None
+        except _asyncio.CancelledError:
+            # UI sprint 102: the user's interrupt cancels this call. Before, only a timeout
+            # killed the process, so an interrupted CLI agent kept running (and editing files)
+            # after the turn had parked.
+            _kill_group()
+            raise
         if proc.returncode != 0:
             raise RuntimeError(
                 f"CliResponder({self.name}) exit {proc.returncode}: "

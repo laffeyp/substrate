@@ -50,7 +50,7 @@ from typing import Any
 from ... import api
 from ...adapters import DeterministicResponder, DriverFamily, OllamaResponder, Responder
 from ...session_registry import SessionEndedMidTurn, SessionRegistry
-from .tools import Tool, full_suite
+from .tools import _TOOL_CANCEL_HOOKS, Tool, full_suite, on_tool_cancel
 
 
 # Sprint 224a — wire-error contract constant. The delegate raises a
@@ -78,11 +78,21 @@ SuiteFactory = Callable[[Path], dict[str, Tool]]
 _CANCEL_GRACE_SECONDS = 10.0
 
 
+def _interrupter(registry: SessionRegistry, session_id: str) -> Callable[[], None]:
+    """A cancel hook that interrupts `session_id`'s running turn (hard tier), as ctrl+c would."""
+
+    def stop() -> None:
+        registry.interrupt(session_id, tier="hard")
+
+    return stop
+
+
 def _run_child_to_answer(
     topology: Callable[[api.TopologyBuilder], None],
     root: Path,
     *,
     timeout_seconds: float | None,
+    cancel_hooks: list[Callable[[], None]] | None = None,
 ) -> tuple[str, int]:
     """Run `topology` to completion at `root` in a worker thread (its own event loop, isolated from the
     outer runtime's), then read the child's FinalAnswer off its record. Blocks the caller like `bash`.
@@ -120,6 +130,17 @@ def _run_child_to_answer(
             done.set()
 
     threading.Thread(target=worker, daemon=True).start()
+    if ready.wait(5.0):
+        # UI sprint 102: interrupting the parent's turn cancels this tool call; stop the child too.
+        child_loop, child_task = handle["loop"], handle["task"]
+
+        def _stop_child() -> None:
+            try:
+                child_loop.call_soon_threadsafe(child_task.cancel)
+            except RuntimeError:  # the child's loop already closed: it finished
+                pass
+
+        (cancel_hooks.append if cancel_hooks is not None else on_tool_cancel)(_stop_child)
     if not done.wait(timeout_seconds):
         # timeout — cancel the child cooperatively and wait for its record to seal.
         ready.wait(1.0)  # the loop+task should exist by now; tiny wait covers the startup race
@@ -399,6 +420,10 @@ def _run_fanout(
 
     from ..session import UserMessage
 
+    # UI sprint 102: the children run on executor threads, which do not inherit context
+    # variables; capture this tool call's cancel hooks here so each child can register its stop.
+    parent_cancel_hooks = _TOOL_CANCEL_HOOKS.get()
+
     # Kick off N sessions in parallel via SessionRegistry.create + turn_sync.
     def _run_one(spec: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         name = spec["_name"]
@@ -441,6 +466,9 @@ def _run_fanout(
             assembled_prompt=task,
             slash_source="delegate",
         )
+        if parent_cancel_hooks is not None:
+            # interrupting the parent's turn interrupts this child's turn (UI sprint 102)
+            parent_cancel_hooks.append(_interrupter(session_registry, session_id))
         try:
             _final_manifest, record_root = session_registry.turn_sync(
                 session_id, resume_event, timeout_seconds=per_call_timeout
@@ -734,6 +762,8 @@ def make_delegate(
                 assembled_prompt=task,
                 slash_source="delegate",
             )
+            # interrupting the parent's turn interrupts the standing session's turn (UI sprint 102)
+            on_tool_cancel(_interrupter(session_registry, resolved))
             try:
                 _final_manifest, reviewer_root = session_registry.turn_sync(
                     resolved, resume_event, timeout_seconds=per_call_timeout

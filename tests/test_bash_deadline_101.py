@@ -19,9 +19,8 @@ import pytest
 
 from substrate.topologies.tool_loop.tools import (
     BASH_MAX_TIMEOUT_S,
-    _BASH_PROCS,
+    _TOOL_CANCEL_HOOKS,
     _bash,
-    kill_process_group,
 )
 
 
@@ -76,20 +75,20 @@ def test_a_full_stderr_pipe_does_not_deadlock(tmp_path: Path) -> None:
 
 
 def test_killing_the_registered_group_ends_the_call(tmp_path: Path) -> None:
-    # run_tool's cancel path: it kills every process the call registered in _BASH_PROCS.
-    procs: list = []
+    # run_tool's cancel path: it runs every hook the call registered in _TOOL_CANCEL_HOOKS.
+    hooks: list = []
     box: dict = {}
 
     def call() -> None:
-        _BASH_PROCS.set(procs)
+        _TOOL_CANCEL_HOOKS.set(hooks)
         box["out"] = _bash(tmp_path, ["sleep 30"])
 
     worker = threading.Thread(target=call)
     t0 = time.monotonic()
     worker.start()
-    while not procs and time.monotonic() - t0 < 5:
+    while not hooks and time.monotonic() - t0 < 5:
         time.sleep(0.05)
-    kill_process_group(procs[0])
+    hooks[0]()
     worker.join(5)
     assert not worker.is_alive(), "the tool thread returned once its process group died"
     assert time.monotonic() - t0 < 5
