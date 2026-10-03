@@ -529,7 +529,7 @@ def _bash_stop(owner: str, a: list[Any]) -> dict[str, Any]:
     from .background import TABLE
 
     task = TABLE.get(owner, str(a[0]))
-    TABLE.stop(task, "stopped with bash_stop")
+    TABLE.stop(task, "stopped with bash_stop", by_model=True)
     return task.describe()
 
 
@@ -538,7 +538,7 @@ def _bash_tasks(owner: str, a: list[Any]) -> list[dict[str, Any]]:
     from .background import TABLE
 
     del a
-    return [t.describe() for t in TABLE.list(owner)]
+    return [t.describe() for t in TABLE.tasks_of(owner)]
 
 
 CALCULATOR: dict[str, Tool] = {

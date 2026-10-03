@@ -134,6 +134,29 @@ class ModelReply(Struct, frozen=True):
     turn_index: int
 
 
+class BackgroundTaskEnded(Struct, frozen=True):
+    """A bash background task of this session ended without the model stopping it (UI sprint 104).
+    Written by the model producer before the step that tells the model, so the record shows what
+    the model was told and when."""
+
+    task_id: str
+    command: str
+    status: str  # "exited" | "stopped"
+    exit: int | None
+    stopped_because: str | None
+    runtime_s: float
+    stdout_tail: str
+    stderr_tail: str
+
+
+def background_notice(e: BackgroundTaskEnded) -> str:
+    """The one line the model reads about an ended task."""
+    how = f"exited {e.exit}" if e.status == "exited" else f"was stopped ({e.stopped_because})"
+    tail = (e.stdout_tail + e.stderr_tail).strip()[-300:]
+    last = f"; last output: {tail}" if tail else ""
+    return f"[background task {e.task_id} ({e.command[:120]}) {how} after {e.runtime_s:g} s{last}]"
+
+
 class Park(Struct, frozen=True):
     awaiting: str
     turn_index: int
@@ -338,6 +361,7 @@ def _model_factory(
     driver_headroom_frac: float,
     record_root: Path | None,
     tools: dict[str, Tool],
+    session_id: str = "",
 ) -> Callable[[], Any]:
     """Model Producer body. Yields TranscriptCompacted, ToolCall, ModelReply, or FinalAnswer.
 
@@ -366,7 +390,9 @@ def _model_factory(
 
     async def _model(
         inp: Any,
-    ) -> AsyncIterator[ToolCall | ModelReply | FinalAnswer | TranscriptCompacted]:
+    ) -> AsyncIterator[
+        ToolCall | ModelReply | FinalAnswer | TranscriptCompacted | BackgroundTaskEnded
+    ]:
         step = int(inp.get("step", 0)) if hasattr(inp, "get") else 0
         results = list(inp.get("results", [])) if hasattr(inp, "get") else []
         final = bool(inp.get("final", False)) if hasattr(inp, "get") else False
@@ -401,6 +427,32 @@ def _model_factory(
             prompt_text = rendered.prompt_text
         if composed_prompt:
             prompt_text = f"{composed_prompt}\n\n{prompt_text}" if prompt_text else composed_prompt
+
+        # UI sprint 104: background tasks of this session that ended since the last step. Each is
+        # recorded, then told to the model in this step's prompt; later steps read it from the
+        # rendered transcript. A session parked while a task ended hears on its next turn's first
+        # step. (Claude Code notifies its agent when a background command finishes.)
+        if session_id:
+            from ..tool_loop.background import TABLE as _BG_TABLE
+
+            ended = [
+                BackgroundTaskEnded(
+                    task_id=str(n["task_id"]),
+                    command=str(n["command"]),
+                    status=str(n["status"]),
+                    exit=n["exit"],
+                    stopped_because=n["stopped_because"],
+                    runtime_s=float(n["runtime_s"]),
+                    stdout_tail=str(n["stdout_tail"]),
+                    stderr_tail=str(n["stderr_tail"]),
+                )
+                for n in _BG_TABLE.drain_ended(session_id)
+            ]
+            for e in ended:
+                yield e
+            if ended:
+                notices = "\n".join(background_notice(e) for e in ended)
+                prompt_text = f"{prompt_text}\n\n{notices}" if prompt_text else notices
 
         # Sprint 049: on either terminal condition — the wrap-up trigger's
         # `final=True` (max step reached) or the anti-spin guard tripping
@@ -753,7 +805,7 @@ def session_topology(
         )
         b.producer_kind(
             PRODUCER_KIND_MODEL,
-            schemas=[ToolCall, FinalAnswer, ModelReply, TranscriptCompacted],
+            schemas=[ToolCall, FinalAnswer, ModelReply, TranscriptCompacted, BackgroundTaskEnded],
             schema_version=1,
             factory=_model_factory(
                 driver=driver,
@@ -764,6 +816,7 @@ def session_topology(
                 driver_headroom_frac=driver_headroom_frac,
                 record_root=record_root,
                 tools=tools,
+                session_id=session_id,
             ),
             deterministic=model_is_deterministic,
         )
@@ -1280,6 +1333,7 @@ from .views import (  # noqa: E402
 )
 
 __all__ = [
+    "BackgroundTaskEnded",
     "FinalAnswer",
     "ModelFailures",
     "ModelReply",

@@ -268,6 +268,14 @@ def _render(
                 marker = "RESULT" if ok else "RESULT(fail)"
                 out = payload.get("output") if ok else payload.get("error", "")
                 lines.append(f"{marker}: {out}")
+            elif kind == "BackgroundTaskEnded":
+                # UI sprint 104: the model keeps hearing that a background task ended
+                from . import BackgroundTaskEnded, background_notice
+
+                try:
+                    lines.append(background_notice(BackgroundTaskEnded(**payload)))
+                except TypeError:
+                    lines.append(f"[background task {payload.get('task_id', '?')} ended]")
             elif kind == _KIND_FINAL_ANSWER:
                 lines.append(f"FINAL: {payload.get('text', '')}")
     return "\n".join(lines)

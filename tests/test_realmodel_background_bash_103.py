@@ -97,6 +97,6 @@ async def test_model_runs_supervises_and_stops_a_background_server(tmp_path: Pat
         ]
         assert curl and "HELLO-103" in str(curl[-1]["output"]), f"curl results: {curl}"
         assert not _port_open(port), "the server is still listening after bash_stop"
-        assert all(t.poll() != "running" for t in TABLE.list(owner))
+        assert all(t.poll() != "running" for t in TABLE.tasks_of(owner))
     finally:
         TABLE.stop_owner(owner, "test teardown")

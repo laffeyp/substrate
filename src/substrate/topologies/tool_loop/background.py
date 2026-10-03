@@ -89,6 +89,9 @@ class Task:
     ended_at: float | None = None
     exit_code: int | None = None
     stopped_because: str = ""
+    # UI sprint 104: whether the owner's model has been told this task ended. A stop the model
+    # asked for (bash_stop) starts out reported.
+    reported: bool = False
 
     def poll(self) -> str:
         """`running`, `exited` or `stopped`, read from the processes now."""
@@ -172,15 +175,17 @@ class TaskTable:
             raise KeyError(f"no background task {task_id!r} in this session")
         return task
 
-    def list(self, owner: str) -> list[Task]:
+    def tasks_of(self, owner: str) -> list[Task]:
         with self._lock:
             return [t for t in self._tasks.values() if t.owner == owner]
 
     # ── stopping ────────────────────────────────────────────────────────────
 
-    def stop(self, task: Task, because: str = "stopped") -> None:
+    def stop(self, task: Task, because: str = "stopped", *, by_model: bool = False) -> None:
         if task.poll() != "running":
             return
+        if by_model:
+            task.reported = True
         pids = _descendants({task.pid}, task.pgid)
         try:
             os.killpg(task.pgid, signal.SIGKILL)
@@ -200,7 +205,7 @@ class TaskTable:
         task.ended_at = time.time()
 
     def stop_owner(self, owner: str, because: str = "its owner ended") -> int:
-        tasks = [t for t in self.list(owner) if t.poll() == "running"]
+        tasks = [t for t in self.tasks_of(owner) if t.poll() == "running"]
         for t in tasks:
             self.stop(t, because)
         return len(tasks)
@@ -236,6 +241,32 @@ class TaskTable:
                     except OSError:
                         pass
                     self.stop(t, f"its output passed {self._cap} bytes")
+
+    # ── telling the model (UI sprint 104) ──────────────────────────────────
+
+    def drain_ended(self, owner: str, tail_chars: int = 500) -> list[dict[str, Any]]:
+        """Every task of `owner` that ended and has not been reported, each once: its description
+        plus the last `tail_chars` characters of stdout and of stderr."""
+        out: list[dict[str, Any]] = []
+        for t in self.tasks_of(owner):
+            if t.reported or t.poll() == "running":
+                continue
+            t.reported = True
+            info = t.describe()
+            info["stdout_tail"] = _tail(t.stdout_file, tail_chars)
+            info["stderr_tail"] = _tail(t.stderr_file, tail_chars)
+            out.append(info)
+        return out
+
+
+def _tail(path: Path, chars: int) -> str:
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            f.seek(max(0, size - chars * 4))
+            return f.read().decode("utf-8", "replace")[-chars:]
+    except OSError:
+        return ""
 
 
 TABLE = TaskTable()
