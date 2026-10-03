@@ -17,11 +17,15 @@ from pathlib import Path
 
 import pytest
 
+from substrate.topologies.tool_loop.background import TABLE
 from substrate.topologies.tool_loop.tools import (
     BASH_MAX_TIMEOUT_S,
     _TOOL_CANCEL_HOOKS,
     _bash,
 )
+
+
+OWNER = "test:bash_deadline_101"
 
 
 def _alive(pid: int) -> bool:
@@ -35,22 +39,23 @@ def _alive(pid: int) -> bool:
 def test_background_child_holding_the_pipe_does_not_block(tmp_path: Path) -> None:
     pidfile = tmp_path / "child.pid"
     t0 = time.monotonic()
-    out = _bash(tmp_path, [f"sleep 30 & echo $! > {pidfile}; echo hi"])
+    out = _bash(tmp_path, OWNER, [f"sleep 30 & echo $! > {pidfile}; echo hi"])
     elapsed = time.monotonic() - t0
     child = int(pidfile.read_text())
     try:
         assert elapsed < 5, f"bash waited {elapsed:.1f} s on a backgrounded child"
         assert out["exit"] == 0 and out["stdout"] == "hi\n"
-        assert "background process still holds its output" in out["stderr"]
+        # UI sprint 103: the leftover child becomes a background task, still running
+        assert out["background_task_id"].startswith("bg_")
         assert _alive(child), "a backgrounded child keeps running, as in a terminal"
     finally:
-        os.kill(child, signal.SIGKILL)
+        TABLE.stop_owner(OWNER, "test teardown")
 
 
 def test_deadline_kills_the_command_and_everything_it_started(tmp_path: Path) -> None:
     pidfile = tmp_path / "child.pid"
     t0 = time.monotonic()
-    out = _bash(tmp_path, [f"sleep 30 & echo $! > {pidfile}; echo started; sleep 30", 1])
+    out = _bash(tmp_path, OWNER, [f"sleep 30 & echo $! > {pidfile}; echo started; sleep 30", 1])
     elapsed = time.monotonic() - t0
     assert elapsed < 5, f"a 1 s deadline took {elapsed:.1f} s"
     assert out["timed_out"] is True
@@ -63,13 +68,15 @@ def test_deadline_kills_the_command_and_everything_it_started(tmp_path: Path) ->
 def test_timeout_bounds(tmp_path: Path) -> None:
     for bad in (0, -1, BASH_MAX_TIMEOUT_S + 1):
         with pytest.raises(ValueError, match="timeout_s"):
-            _bash(tmp_path, ["true", bad])
+            _bash(tmp_path, OWNER, ["true", bad])
 
 
 def test_a_full_stderr_pipe_does_not_deadlock(tmp_path: Path) -> None:
     # stderr was read only after stdout closed; 200 KB fills a 64 KB pipe and blocks the writer.
     out = _bash(
-        tmp_path, ["python3 -c \"import sys; sys.stderr.write('x' * 200000); print('done')\""]
+        tmp_path,
+        OWNER,
+        ["python3 -c \"import sys; sys.stderr.write('x' * 200000); print('done')\""],
     )
     assert out["exit"] == 0 and out["stdout"] == "done\n"
 
@@ -81,7 +88,7 @@ def test_killing_the_registered_group_ends_the_call(tmp_path: Path) -> None:
 
     def call() -> None:
         _TOOL_CANCEL_HOOKS.set(hooks)
-        box["out"] = _bash(tmp_path, ["sleep 30"])
+        box["out"] = _bash(tmp_path, OWNER, ["sleep 30"])
 
     worker = threading.Thread(target=call)
     t0 = time.monotonic()

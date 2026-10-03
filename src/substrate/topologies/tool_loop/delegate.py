@@ -869,9 +869,16 @@ def make_delegate(
 
         inner_topology = run_factory(effective_task, workspace_root)
         topology = _with_baseline(inner_topology, merged_baseline)
-        answer, steps = _run_child_to_answer(
-            topology, record_root, timeout_seconds=per_call_timeout
-        )
+        try:
+            answer, steps = _run_child_to_answer(
+                topology, record_root, timeout_seconds=per_call_timeout
+            )
+        finally:
+            # UI sprint 103 (Claude Code: a foreground subagent's background commands stop when its
+            # run ends): the child's suite owns its tasks by workspace path.
+            from .background import TABLE
+
+            TABLE.stop_owner(str(workspace_root.resolve()), "its delegated run ended")
         result: dict[str, Any] = {
             "answer": answer,
             "child_root": str(record_root),

@@ -59,6 +59,9 @@ TOOL_NAME_WEB_FETCH: Final[str] = "web_fetch"
 TOOL_NAME_EDIT_FILE: Final[str] = "edit_file"
 TOOL_NAME_WRITE_FILE: Final[str] = "write_file"
 TOOL_NAME_BASH: Final[str] = "bash"
+TOOL_NAME_BASH_OUTPUT: Final[str] = "bash_output"
+TOOL_NAME_BASH_STOP: Final[str] = "bash_stop"
+TOOL_NAME_BASH_TASKS: Final[str] = "bash_tasks"
 TOOL_NAME_DELEGATE: Final[str] = "delegate"
 # Substrate tools (implementations at substrate_tools.py).
 TOOL_NAME_INSPECT_RECORD: Final[str] = "inspect_record"
@@ -81,6 +84,9 @@ TOOL_NAMES: Final[frozenset[str]] = frozenset(
         TOOL_NAME_EDIT_FILE,
         TOOL_NAME_WRITE_FILE,
         TOOL_NAME_BASH,
+        TOOL_NAME_BASH_OUTPUT,
+        TOOL_NAME_BASH_STOP,
+        TOOL_NAME_BASH_TASKS,
         TOOL_NAME_DELEGATE,
         TOOL_NAME_INSPECT_RECORD,
         TOOL_NAME_LIST_RECORDS,
@@ -320,8 +326,6 @@ def _write_file(root: Path, a: list[Any]) -> str:
 # (`server &`) blocked the tool, and with it the whole turn, until something outside killed it.
 BASH_DEFAULT_TIMEOUT_S: Final[float] = 120.0
 BASH_MAX_TIMEOUT_S: Final[float] = 600.0
-# After the shell itself exits, how long to keep reading output that background children still hold.
-_BASH_DRAIN_S: Final[float] = 1.0
 
 # What stops the current tool call's work. run_tool (tool_loop/__init__.py) sets a fresh list per
 # call and, when the call is cancelled (the user's interrupt, a shutdown), runs every hook in it:
@@ -340,7 +344,7 @@ def on_tool_cancel(hook: Callable[[], None]) -> None:
         hooks.append(hook)
 
 
-def kill_process_group(proc: subprocess.Popen[str]) -> None:
+def kill_process_group(proc: subprocess.Popen[Any]) -> None:
     """SIGKILL the process group `proc` leads (the shell and everything it started)."""
     import os
     import signal
@@ -351,23 +355,28 @@ def kill_process_group(proc: subprocess.Popen[str]) -> None:
         pass
 
 
-def _bash(root: Path, a: list[Any]) -> dict[str, Any]:
-    """Bash tool: `bash(cmd, timeout_s?)`.
+def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
+    """Bash tool: `bash(cmd, timeout_s?, run_in_background?)` (UI sprints 101, 103).
 
-    The command runs in its own process group. stdout and stderr are read on two threads (one
-    pipe filling up can no longer block the other) and every stdout line is posted as ToolProgress
-    when `_BASH_PROGRESS_CTX` is set (Phase 8 item 8). The result is `{exit, stdout, stderr}`.
+    The command runs in its own process group with stdout and stderr written to files (never
+    pipes, which a backgrounded child can hold open). The behaviour follows Claude Code's Bash
+    tool (code.claude.com/docs/en/tools-reference, "Background commands"):
 
-    - Deadline: `timeout_s` (default 120, at most 600) covers the whole command. At the deadline
-      the process group is killed and the result carries `timed_out: true` with the output so far.
-    - Background processes: when the shell exits while a child it backgrounded still holds the
-      output pipes, reading stops after a 1 s drain and the result notes it. The child keeps
-      running, as it would in a terminal; it is killed only by the deadline or a cancel.
+    - `run_in_background=true`: returns `{task_id, status, stdout_file, stderr_file, pid}` at
+      once; read it with `bash_output`, stop it with `bash_stop`.
+    - foreground: returns `{exit, stdout, stderr}` when the shell exits, posting each stdout line as
+      ToolProgress while it runs. `timeout_s` (default 120, max 600) bounds the wait. At the
+      deadline a command moves to the background (`moved_to_background: true` and a `task_id`),
+      unless it starts with `sleep`, which is killed (`timed_out: true`).
+    - a shell that exits while processes it started are still alive (`server &`): those processes
+      become a background task named in `background_task_id`, so they can be read, stopped, and are
+      stopped with the session.
     """
-    import queue
-    import threading
     import time
 
+    from .background import TABLE, Task, read_since
+
+    command = str(a[0])
     timeout_s = BASH_DEFAULT_TIMEOUT_S
     if len(a) > 1 and a[1] is not None:
         timeout_s = float(a[1])
@@ -375,87 +384,161 @@ def _bash(root: Path, a: list[Any]) -> dict[str, Any]:
             raise ValueError(
                 f"bash: timeout_s must be in (0, {BASH_MAX_TIMEOUT_S:g}], got {a[1]!r}"
             )
-    proc = subprocess.Popen(  # noqa: S602 — explicit agent shell tool (opt-in, not CI)
-        str(a[0]),
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=str(root),
-        bufsize=1,  # line-buffered so progress arrives promptly
-        start_new_session=True,  # own process group: a kill reaches backgrounded children
+    background = len(a) > 2 and a[2] is not None and _as_bool(a[2])
+    task_id, out_path, err_path = TABLE.new_files(owner)
+    with out_path.open("wb") as out_f, err_path.open("wb") as err_f:
+        proc = subprocess.Popen(  # noqa: S602 — explicit agent shell tool (opt-in, not CI)
+            command,
+            shell=True,
+            stdin=subprocess.DEVNULL,
+            stdout=out_f,
+            stderr=err_f,
+            cwd=str(root),
+            start_new_session=True,  # own process group: a kill reaches backgrounded children
+        )
+    task = Task(
+        task_id=task_id,
+        owner=owner,
+        command=command,
+        pid=proc.pid,
+        pgid=proc.pid,
+        stdout_file=out_path,
+        stderr_file=err_path,
+        started_at=time.time(),
+        proc=proc,
     )
-    on_tool_cancel(lambda: kill_process_group(proc))
-    lines: queue.Queue[tuple[str, str | None]] = queue.Queue()
+    if background:
+        TABLE.add(task)
+        return {
+            "task_id": task_id,
+            "status": "running",
+            "pid": proc.pid,
+            "stdout_file": str(out_path),
+            "stderr_file": str(err_path),
+        }
 
-    def pump(name: str, stream: Any) -> None:
-        for line in iter(stream.readline, ""):
-            lines.put((name, line))
-        lines.put((name, None))
+    in_foreground = {"yes": True}
 
-    for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
-        threading.Thread(target=pump, args=(name, stream), daemon=True).start()
+    def _cancel() -> None:  # the user's interrupt: stop a command still in the foreground
+        if in_foreground["yes"]:
+            kill_process_group(proc)
 
+    on_tool_cancel(_cancel)
     ctx = _BASH_PROGRESS_CTX.get()
-    out: dict[str, list[str]] = {"stdout": [], "stderr": []}
-    open_streams = {"stdout", "stderr"}
-    offset = 0
+    offset = 0  # bytes read from the stdout file so far
+    emitted = 0  # characters already posted as ToolProgress: the next chunk's offset
+    pending = ""
     deadline = time.monotonic() + timeout_s
-    shell_exit_at: float | None = None
-    timed_out = False
-    abandoned_pipes = False
-    while open_streams:
-        now = time.monotonic()
-        if now >= deadline:
-            timed_out = True
-            break
-        if shell_exit_at is None and proc.poll() is not None:
-            shell_exit_at = now
-        if shell_exit_at is not None and now - shell_exit_at >= _BASH_DRAIN_S:
-            abandoned_pipes = True
-            break
-        try:
-            name, line = lines.get(timeout=0.1)
-        except queue.Empty:
-            continue
-        if line is None:
-            open_streams.discard(name)
-            continue
-        out[name].append(line)
-        if name == "stdout":
-            if ctx is not None:
-                try:
-                    _emit_bash_progress(ctx, chunk=line, offset=offset, eof=False)
-                except Exception:  # noqa: BLE001 — progress is advisory; a broken emitter must NOT sink the tool
-                    ctx = None
-            offset += len(line)
-    if timed_out:
+
+    def _pump() -> None:
+        nonlocal offset, emitted, pending, ctx
+        chunk, offset = read_since(out_path, offset, 1 << 20)
+        if not chunk or ctx is None:
+            return
+        pending += chunk
+        *lines, pending = pending.split("\n")
+        for line in lines:
+            try:
+                _emit_bash_progress(ctx, chunk=line + "\n", offset=emitted, eof=False)
+            except Exception:  # noqa: BLE001 — progress is advisory; a broken emitter must NOT sink the tool
+                ctx = None
+                return
+            emitted += len(line) + 1
+
+    while proc.poll() is None and time.monotonic() < deadline:
+        _pump()
+        time.sleep(0.05)
+    _pump()
+    shell_done = proc.poll() is not None
+    if not shell_done and command.lstrip().startswith("sleep"):
+        # Claude Code's exception: a timed-out `sleep` is stopped, not backgrounded.
         kill_process_group(proc)
-    exit_code = proc.wait() if not timed_out else proc.wait(timeout=5)
-    if ctx is not None:
+        proc.wait(timeout=5)
+        shell_done = True
+        timed_out = True
+    else:
+        timed_out = False
+    in_foreground["yes"] = False
+    if ctx is not None and (shell_done or timed_out):
         try:
-            _emit_bash_progress(ctx, chunk="", offset=offset, eof=True)
+            _emit_bash_progress(ctx, chunk=pending, offset=emitted, eof=True)
         except Exception:  # noqa: BLE001 — see above
             pass
-    stderr_text = "".join(out["stderr"])
-    if timed_out:
-        stderr_text += (
-            f"\n[bash: killed after {timeout_s:g} s, with every process it started; pass a larger "
-            f"timeout_s (max {BASH_MAX_TIMEOUT_S:g}) for a longer command]"
-        )
-    elif abandoned_pipes:
-        stderr_text += (
-            "\n[bash: the shell exited but a background process still holds its output; that "
-            "process is still running and its later output is not captured]"
-        )
-    result: dict[str, Any] = {
-        "exit": exit_code,
-        "stdout": "".join(out["stdout"])[:8000],
-        "stderr": stderr_text[-2000:],
-    }
+    stdout_text, _ = read_since(out_path, 0, 8000)
+    stderr_full = err_path.read_text(encoding="utf-8", errors="replace")
+    result: dict[str, Any] = {"exit": proc.returncode, "stdout": stdout_text}
     if timed_out:
         result["timed_out"] = True
+        stderr_full += (
+            f"\n[bash: killed after {timeout_s:g} s, with every process it started; pass a larger "
+            f"timeout_s (max {BASH_MAX_TIMEOUT_S:g}) or run_in_background=true]"
+        )
+    elif not shell_done:
+        TABLE.add(task)
+        result.update({"exit": None, "moved_to_background": True, "task_id": task_id})
+        stderr_full += (
+            f"\n[bash: still running after {timeout_s:g} s; moved to the background as {task_id}. "
+            "Read it with bash_output, stop it with bash_stop]"
+        )
+    elif task.poll() == "running":
+        TABLE.add(task)
+        result["background_task_id"] = task_id
+        stderr_full += (
+            f"\n[bash: the shell exited but processes it started are still running, now background "
+            f"task {task_id}. Read them with bash_output, stop them with bash_stop]"
+        )
+    result["stderr"] = stderr_full[-2000:]
     return result
+
+
+def _offset_arg(a: list[Any], i: int, name: str) -> int:
+    if len(a) <= i or a[i] is None:
+        return 0
+    value = int(a[i])
+    if value < 0:
+        raise ValueError(f"bash_output: {name} must be >= 0, got {a[i]!r}")
+    return value
+
+
+def _bash_output(owner: str, a: list[Any]) -> dict[str, Any]:
+    """`bash_output(task_id, offset=0, err_offset=0)`: a background task's status and its output
+    after the given byte offsets (8 KB each at most); pass back `next_offset` to read on."""
+    from .background import TABLE, read_since
+
+    task = TABLE.get(owner, str(a[0]))
+    offset = _offset_arg(a, 1, "offset")
+    err_offset = _offset_arg(a, 2, "err_offset")
+    out, next_offset = read_since(task.stdout_file, offset, 8000)
+    err, next_err = read_since(task.stderr_file, err_offset, 8000)
+    info = task.describe()
+    return {
+        "task_id": task.task_id,
+        "status": info["status"],
+        "exit": info["exit"],
+        "stopped_because": info["stopped_because"],
+        "runtime_s": info["runtime_s"],
+        "stdout": out,
+        "stderr": err,
+        "next_offset": next_offset,
+        "next_err_offset": next_err,
+    }
+
+
+def _bash_stop(owner: str, a: list[Any]) -> dict[str, Any]:
+    """`bash_stop(task_id)`: kill the task's process group and everything it started."""
+    from .background import TABLE
+
+    task = TABLE.get(owner, str(a[0]))
+    TABLE.stop(task, "stopped with bash_stop")
+    return task.describe()
+
+
+def _bash_tasks(owner: str, a: list[Any]) -> list[dict[str, Any]]:
+    """`bash_tasks()`: this session's background tasks, running and ended."""
+    from .background import TABLE
+
+    del a
+    return [t.describe() for t in TABLE.list(owner)]
 
 
 CALCULATOR: dict[str, Tool] = {
@@ -464,11 +547,16 @@ CALCULATOR: dict[str, Tool] = {
 }
 
 
-def full_suite(root: Path | str = ".") -> dict[str, Tool]:
+def full_suite(root: Path | str = ".", *, owner: str | None = None) -> dict[str, Tool]:
     """The full tool suite rooted at a WORKSPACE directory (default: the process cwd, the old behavior).
     Relative paths and `bash` resolve against `root`; absolute paths still go where named. Pass the
-    per-conversation workspace here so the agent operates inside it, the way Claude Code works in a repo."""
+    per-conversation workspace here so the agent operates inside it, the way Claude Code works in a repo.
+
+    `owner` names who the bash tool's background tasks belong to (UI sprint 103): the daemon passes
+    the session id, so the session's tools see only its tasks and ending the session stops them.
+    Default: the workspace path."""
     r = Path(root)
+    who = owner if owner is not None else str(r.resolve())
     return {
         **CALCULATOR,
         "read_file": Tool(
@@ -513,9 +601,31 @@ def full_suite(root: Path | str = ".") -> dict[str, Tool]:
         ),
         "bash": Tool(
             TOOL_NAME_BASH,
-            "bash(cmd, timeout_s?=120 max 600) -> {exit, stdout, stderr, timed_out?} (SIDE EFFECT)",
+            "bash(cmd, timeout_s?=120 max 600, run_in_background?=false) -> {exit, stdout, stderr}; "
+            "a command still running at timeout_s moves to the background (task_id); "
+            "run_in_background=true returns a task_id at once — use it for servers, watchers and "
+            "long builds (SIDE EFFECT)",
             False,
-            partial(_bash, r),
+            partial(_bash, r, who),
+        ),
+        "bash_output": Tool(
+            TOOL_NAME_BASH_OUTPUT,
+            "bash_output(task_id, offset?=0, err_offset?=0) -> a background task's status (running | "
+            "exited | stopped), exit code, and output after those byte offsets; pass back next_offset",
+            False,
+            partial(_bash_output, who),
+        ),
+        "bash_stop": Tool(
+            TOOL_NAME_BASH_STOP,
+            "bash_stop(task_id) -> stop a background task and every process it started (SIDE EFFECT)",
+            False,
+            partial(_bash_stop, who),
+        ),
+        "bash_tasks": Tool(
+            TOOL_NAME_BASH_TASKS,
+            "bash_tasks() -> this session's background tasks: command, status, runtime",
+            False,
+            partial(_bash_tasks, who),
         ),
     }
 
@@ -584,7 +694,31 @@ _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "properties": {"path": {"type": "string"}, "text": {"type": "string"}},
         "required": ["path", "text"],
     },
-    "bash": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]},
+    # UI sprint 103: timeout_s (sprint 101) was missing here, so a native tool call could not pass it.
+    "bash": {
+        "type": "object",
+        "properties": {
+            "cmd": {"type": "string"},
+            "timeout_s": {"type": "number", "exclusiveMinimum": 0, "maximum": 600},
+            "run_in_background": {"type": "boolean"},
+        },
+        "required": ["cmd"],
+    },
+    "bash_output": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string"},
+            "offset": {"type": "integer", "minimum": 0},
+            "err_offset": {"type": "integer", "minimum": 0},
+        },
+        "required": ["task_id"],
+    },
+    "bash_stop": {
+        "type": "object",
+        "properties": {"task_id": {"type": "string"}},
+        "required": ["task_id"],
+    },
+    "bash_tasks": {"type": "object", "properties": {}},
     # tools authored OUTSIDE this module (e.g. delegate — make_delegate) do NOT register here; they carry
     # their schema on the Tool itself and the helpers above fall back to it (review C-10). This literal is
     # only the built-in suite; it deliberately does not know about caller-composed tools.

@@ -888,6 +888,8 @@ class SessionRegistry:
                 new_status = SessionStatus.PARKED
             updated = self.update_status(session_id, new_status)
             self.advance_turn_index(session_id)
+            if new_status == SessionStatus.ENDED:
+                _stop_background_tasks(session_id, "its session ended")
             return updated, record_root
 
     # ── queue cap ──────────────────────────────────────────────────────────
@@ -1151,6 +1153,7 @@ class SessionRegistry:
             self._turn_threading_locks.pop(session_id, None)
         finally:
             threading_lock.release()
+        _stop_background_tasks(session_id, "its session was deleted")
         return manifest
 
     # ── private ────────────────────────────────────────────────────────────
@@ -1215,6 +1218,14 @@ def _record_has_envelopes(record_root: Path) -> bool:
     """
     state, _ = _record_state(record_root)
     return state == "has_envelopes"
+
+
+def _stop_background_tasks(session_id: str, because: str) -> None:
+    """Stop the bash tool's background tasks this session owns (UI sprint 103). The daemon builds
+    session tools with owner=session_id."""
+    from .topologies.tool_loop.background import TABLE
+
+    TABLE.stop_owner(session_id, because)
 
 
 _STOP_GRACE_S = 10.0
