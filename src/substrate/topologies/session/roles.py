@@ -22,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...kernel.topology import RegistrationError
+from ...naming import check_path_component
 
 
 def _shipped_prompts_dir() -> Path:
@@ -74,6 +75,7 @@ def resolve_role_prompt_with_source(
     existing `resolve_role_prompt` stays as a thin wrapper for callers
     that only want the text.
     """
+    check_path_component("role", role)
     if repo_root is not None:
         layer1 = _resolve_at_layer(repo_root / ".substrate" / "prompts", role)
         if layer1 is not None:

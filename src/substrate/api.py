@@ -97,7 +97,7 @@ from .record.record import (
     resolve_blob_payload,
 )
 from .projections.replay import HashMismatch, ReplayError, ReplayResult, assert_replayable, replay
-from .bundles import list_bundles, load_bundle
+from .bundles import BundleError, BundleNotFoundError, list_bundles, load_bundle
 from .kernel.runtime import Runtime, RunResult, find_active_runtime
 from .record.sidecar import read_sidecar
 from .testing import assert_event, assert_no_event, assert_sequence
@@ -257,6 +257,9 @@ __all__ = [
     "assert_sequence",
     # configuration — the per-user state root (config-externalization, sprint 246)
     "substrate_home",
+    # bundle loading failures, so a daemon maps them by type (UI sprint 110)
+    "BundleError",
+    "BundleNotFoundError",
     # standing sessions — the name index + manifest catalog the daemon serves (UI sprint 099:
     # one registry, here; substrate-ui's private copy had drifted from it)
     "FreshSessionRequiresUserMessage",

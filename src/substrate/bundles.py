@@ -23,6 +23,8 @@ from typing import Any
 
 from msgspec import Struct
 
+from .naming import check_path_component
+
 
 class BundleError(Exception):
     """Base class for bundle loading failures. Carries the bundle name
@@ -148,6 +150,7 @@ def load_bundle(name: str, *, bundles_root: Path | None = None) -> Bundle:
     tools blocks. Raises `BundleNotFoundError` if the directory is
     absent; `BundleShapeError` on a duplicate slot; propagates
     `tomllib.TOMLDecodeError` on a malformed `bundle.toml`."""
+    check_path_component("bundle", name)
     root = _bundles_root(bundles_root)
     bundle_dir = root / name
     if not bundle_dir.is_dir():
