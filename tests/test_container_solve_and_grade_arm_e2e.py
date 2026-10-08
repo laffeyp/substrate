@@ -56,6 +56,10 @@ def _flask_image_cached() -> bool:
         return False
 
 
+# UI sprint 107: a real Docker grading run belongs to the opt-in Docker tier. In the fast tier its
+# skip depended on Docker Desktop's state (the probe failed while the VM was paused or loaded), so
+# the tier's count changed between runs on one machine.
+@pytest.mark.swebench_harness
 @pytest.mark.skipif(not _docker_up(), reason="Docker daemon not running")
 @pytest.mark.skipif(
     not _flask_image_cached(),
