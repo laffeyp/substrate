@@ -35,6 +35,11 @@ jobs:
       - name: Type-check (strict)
         run: uv run mypy
 
+      # UI sprint 107: the BLE001-rationale and status-literal gates lived only in the pre-commit
+      # hook, which runs only where `git config core.hooksPath .githooks` was set.
+      - name: Pre-commit gates
+        run: bash .githooks/pre-commit
+
       # The realmodel tier needs a local Ollama and the swebench_harness tier Docker images; CI
       # runners have neither. They run locally (`-m realmodel`, `-m swebench_harness`), as the
       # tests' own docstrings say. UI sprint 106: this step ran them, and an unguarded realmodel
