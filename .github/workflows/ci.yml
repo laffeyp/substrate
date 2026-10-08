@@ -35,8 +35,12 @@ jobs:
       - name: Type-check (strict)
         run: uv run mypy
 
+      # The realmodel tier needs a local Ollama and the swebench_harness tier Docker images; CI
+      # runners have neither. They run locally (`-m realmodel`, `-m swebench_harness`), as the
+      # tests' own docstrings say. UI sprint 106: this step ran them, and an unguarded realmodel
+      # test failed every job.
       - name: Tests
-        run: uv run pytest
+        run: uv run pytest -m "not realmodel and not swebench_harness"
 
       - name: Import contract (F-API-6)
         run: uv run lint-imports

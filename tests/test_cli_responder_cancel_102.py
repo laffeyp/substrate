@@ -8,18 +8,21 @@ had parked.
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
 from substrate.adapters.models import CliResponder
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+    """Running, not merely unreaped. os.kill(pid, 0) also succeeds for a zombie (a killed child
+    its parent has not waited on yet), which on Linux CI read a killed CLI as alive (UI sprint
+    106)."""
+    import subprocess
+
+    state = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+    ).stdout.strip()
+    return bool(state) and not state.startswith("Z")
 
 
 def test_cancel_kills_the_cli_and_its_children(tmp_path: Path) -> None:

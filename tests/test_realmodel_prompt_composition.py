@@ -37,6 +37,23 @@ _MODEL = "kimi-k2.6:cloud"  # daily-driver cloud model per project convention
 _TIMEOUT = 300.0
 
 
+def _require_model() -> None:
+    """Skip, naming why, when Ollama or the model is not there (UI sprint 106). This file had no
+    guard: on a CI runner with no Ollama the model call failed and the test failed with "no
+    ModelReply" instead of skipping."""
+    import httpx
+
+    try:
+        names = {
+            m["name"]
+            for m in httpx.get("http://127.0.0.1:11434/api/tags", timeout=4).json()["models"]
+        }
+    except Exception as exc:  # noqa: BLE001 — any unreachability is a SKIP
+        pytest.skip(f"Ollama not reachable ({type(exc).__name__})")
+    if _MODEL not in names:
+        pytest.skip(f"model absent: {_MODEL}")
+
+
 def _run_one_turn(
     tmp_path: Path,
     *,
@@ -45,6 +62,7 @@ def _run_one_turn(
     role: str | None = None,
 ) -> list[dict]:
     """Fire one turn against a real model. Returns the record envelopes."""
+    _require_model()
 
     async def _run() -> None:
         record_root = tmp_path / "ci"
