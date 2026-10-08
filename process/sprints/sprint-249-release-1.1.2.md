@@ -3,7 +3,7 @@
 ```yaml
 ---
 id: 249
-status: in_progress
+status: held
 opened_at: 2026-10-08
 pass_kind: release
 ---
@@ -30,3 +30,7 @@ The Architect, 2026-10-08: "then kernel can come last today", after the substrat
 ## result
 
 (filled at close)
+
+## held (2026-10-08)
+
+Held by the Architect until the lens audit is done. The build found a packaging finding, recorded and not yet fixed: the sdist ships `process/runs` (18,336 files, 95 MB compressed; 1.0.0's sdist was 1.3 MB), 5 MB under PyPI's default limit. Version is 1.1.2 in `pyproject.toml`; nothing was uploaded or tagged.
