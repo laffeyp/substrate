@@ -1453,6 +1453,8 @@ def _scan_record_status(record_root: Path) -> SessionStatus:
 def _next_turn_index_from_record(record_root: Path) -> int:
     """Scan the record for the highest UserMessage.turn_index + 1. Used once at
     boot_scan; afterward the in-memory counter is incremented per turn."""
+    from substrate.topologies.session.vocabulary import USER_MESSAGE
+
     if not record_root.exists():
         return 0
     highest = -1
@@ -1460,7 +1462,7 @@ def _next_turn_index_from_record(record_root: Path) -> int:
         for env in api.read_record(
             record_root, resolve_blobs=True
         ):  # Sprint 095: a long UserMessage is a blob
-            if env.get("kind") == "UserMessage":
+            if env.get("kind") == USER_MESSAGE:
                 payload = env.get("payload") or {}
                 if isinstance(payload, dict) and "turn_index" in payload:
                     highest = max(highest, int(payload["turn_index"]))

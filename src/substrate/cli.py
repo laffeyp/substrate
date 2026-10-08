@@ -1006,18 +1006,18 @@ def _render_stream_line(env: dict[str, Any], *, verbose: bool = False) -> None:
     payload = env.get("payload") or {}
     if not isinstance(payload, dict):
         return
-    if kind == "ModelReply":
+    if kind == api.MODEL_REPLY:
         text = str(payload.get("text", ""))
         if text:
             click.echo(text)
-    elif kind == "FinalAnswer":
+    elif kind == api.FINAL_ANSWER:
         return  # already streamed via ModelReply
-    elif kind == "ToolCall":
+    elif kind == api.TOOL_CALL:
         tool_name = str(payload.get("tool", "?"))
         args = payload.get("args", [])
         args_str = ", ".join(repr(a) for a in args) if isinstance(args, list) else str(args)
         _err.print(f"→ {tool_name}({args_str})")
-    elif kind == "ToolResult":
+    elif kind == api.TOOL_RESULT:
         ok = bool(payload.get("ok", True))
         if ok:
             output = payload.get("output", "")
@@ -1371,7 +1371,7 @@ def _repl(session: dict[str, Any], *, verbose: bool = False) -> None:
             finally:
                 turn_in_flight.clear()
             status = result.get("status")
-            if status == "ended":
+            if status == api.SessionStatus.ENDED:
                 break
     finally:
         stop_event.set()

@@ -78,6 +78,7 @@ SESSION_ENDED = "SessionEnded"
 SESSION_END_REQUESTED = "SessionEndRequested"
 TRANSCRIPT_COMPACTED = "TranscriptCompacted"
 SESSION_WARNING = "SessionWarning"
+BACKGROUND_TASK_ENDED = "BackgroundTaskEnded"  # UI sprint 104
 
 # v0.2 additions (session-vocabulary.md § I, sprint 058, 2026-09-01).
 PROMPT_FRAGMENT = "PromptFragment"

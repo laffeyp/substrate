@@ -416,7 +416,7 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
     """
     import time
 
-    from .background import TABLE, Task, read_since
+    from .background import TABLE, Task, TaskStatus, read_since
 
     command = str(a[0])
     timeout_s = BASH_DEFAULT_TIMEOUT_S
@@ -453,7 +453,7 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
         TABLE.add(task)
         return {
             "task_id": task_id,
-            "status": "running",
+            "status": TaskStatus.RUNNING,
             "pid": proc.pid,
             "stdout_file": str(out_path),
             "stderr_file": str(err_path),
@@ -522,7 +522,7 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
             f"\n[bash: still running after {timeout_s:g} s; moved to the background as {task_id}. "
             "Read it with bash_output, stop it with bash_stop]"
         )
-    elif task.poll() == "running":
+    elif task.poll() == TaskStatus.RUNNING:
         TABLE.add(task)
         result["background_task_id"] = task_id
         stderr_full += (

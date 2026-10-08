@@ -25,6 +25,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +76,16 @@ def _descendants(root_pids: set[int], pgid: int) -> set[int]:
     return found
 
 
+class TaskStatus(StrEnum):
+    """A background task's state, read from its processes. UI sprint 107: these were bare strings
+    compared in eight places across the kernel and retyped in the client; `scripts/gen_kinds.py`
+    now generates the client's copy from this class."""
+
+    RUNNING = "running"
+    EXITED = "exited"
+    STOPPED = "stopped"
+
+
 @dataclass
 class Task:
     task_id: str
@@ -93,18 +104,18 @@ class Task:
     # asked for (bash_stop) starts out reported.
     reported: bool = False
 
-    def poll(self) -> str:
-        """`running`, `exited` or `stopped`, read from the processes now."""
+    def poll(self) -> TaskStatus:
+        """The task's state, read from the processes now."""
         if self.stopped_because:
-            return "stopped"
+            return TaskStatus.STOPPED
         leader_done = self.proc is None or self.proc.poll() is not None
         if self.proc is not None and self.proc.returncode is not None:
             self.exit_code = self.proc.returncode
         if leader_done and not _group_alive(self.pgid):
             if self.ended_at is None:
                 self.ended_at = time.time()
-            return "exited"
-        return "running"
+            return TaskStatus.EXITED
+        return TaskStatus.RUNNING
 
     def output_bytes(self) -> int:
         size = 0
@@ -121,7 +132,7 @@ class Task:
             "task_id": self.task_id,
             "command": self.command,
             "status": status,
-            "exit": self.exit_code if status == "exited" else None,
+            "exit": self.exit_code if status == TaskStatus.EXITED else None,
             "stopped_because": self.stopped_because or None,
             "pid": self.pid,
             "runtime_s": round((self.ended_at or time.time()) - self.started_at, 1),
@@ -182,7 +193,7 @@ class TaskTable:
     # ── stopping ────────────────────────────────────────────────────────────
 
     def stop(self, task: Task, because: str = "stopped", *, by_model: bool = False) -> None:
-        if task.poll() != "running":
+        if task.poll() != TaskStatus.RUNNING:
             return
         if by_model:
             task.reported = True
@@ -205,7 +216,7 @@ class TaskTable:
         task.ended_at = time.time()
 
     def stop_owner(self, owner: str, because: str = "its owner ended") -> int:
-        tasks = [t for t in self.tasks_of(owner) if t.poll() == "running"]
+        tasks = [t for t in self.tasks_of(owner) if t.poll() == TaskStatus.RUNNING]
         for t in tasks:
             self.stop(t, because)
         return len(tasks)
@@ -213,7 +224,7 @@ class TaskTable:
     def stop_all(self, because: str = "the daemon shut down") -> int:
         with self._lock:
             tasks = list(self._tasks.values())
-        running = [t for t in tasks if t.poll() == "running"]
+        running = [t for t in tasks if t.poll() == TaskStatus.RUNNING]
         for t in running:
             self.stop(t, because)
         return len(running)
@@ -233,7 +244,7 @@ class TaskTable:
             with self._lock:
                 tasks = list(self._tasks.values())
             for t in tasks:
-                if t.poll() == "running" and t.output_bytes() > self._cap:
+                if t.poll() == TaskStatus.RUNNING and t.output_bytes() > self._cap:
                     note = f"\n[bash: stopped after its output passed {self._cap} bytes]\n"
                     try:
                         with t.stderr_file.open("a") as f:
@@ -249,7 +260,7 @@ class TaskTable:
         plus the last `tail_chars` characters of stdout and of stderr."""
         out: list[dict[str, Any]] = []
         for t in self.tasks_of(owner):
-            if t.reported or t.poll() == "running":
+            if t.reported or t.poll() == TaskStatus.RUNNING:
                 continue
             t.reported = True
             info = t.describe()

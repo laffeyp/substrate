@@ -24,6 +24,7 @@ from typing import Any
 
 from msgspec import Struct, field
 
+from .kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 from .tools import TOOL_NAME_BASH, TOOL_NAME_EDIT_FILE, TOOL_NAME_WRITE_FILE
 
 _CODE_TOOLS = frozenset({TOOL_NAME_WRITE_FILE, TOOL_NAME_EDIT_FILE})
@@ -136,7 +137,7 @@ def score_agency(events: Iterable[Mapping[str, Any]]) -> AgencyScore:
     for e in events:
         kind = e.get("kind")
         p = e.get("payload", {})
-        if kind == "ToolCall":
+        if kind == TOOL_CALL:
             tool_calls += 1
             tool = p.get("tool")
             if had_fail:
@@ -153,7 +154,7 @@ def score_agency(events: Iterable[Mapping[str, Any]]) -> AgencyScore:
                 max_same = max(max_same, same_run)
             else:
                 prev_write, same_run = None, 0
-        elif kind == "ToolResult":
+        elif kind == TOOL_RESULT:
             tool = p.get("tool")
             out = p.get("output")
             exit_ = int(out.get("exit", 0) or 0) if isinstance(out, Mapping) else None
@@ -163,7 +164,7 @@ def score_agency(events: Iterable[Mapping[str, Any]]) -> AgencyScore:
                 last_bash_exit = exit_
                 if exit_ == 0:
                     saw_zero = True
-        elif kind == "FinalAnswer":
+        elif kind == FINAL_ANSWER:
             final_text = str(p.get("text", ""))
 
     engaged = tool_calls > 0

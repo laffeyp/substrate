@@ -32,6 +32,7 @@ from ... import api
 from ...adapters import DeterministicResponder, Responder, call_responder
 from ...kernel.policies import TerminationPolicy
 from ..tool_loop import _tool_factory as _tool_loop_tool_factory
+from ..tool_loop.background import TaskStatus
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from .vocabulary import (
     END_ON_EXIT_SENTINEL,
@@ -141,7 +142,7 @@ class BackgroundTaskEnded(Struct, frozen=True):
 
     task_id: str
     command: str
-    status: str  # "exited" | "stopped"
+    status: str  # a TaskStatus value: exited or stopped (a str on the record)
     exit: int | None
     stopped_because: str | None
     runtime_s: float
@@ -151,7 +152,11 @@ class BackgroundTaskEnded(Struct, frozen=True):
 
 def background_notice(e: BackgroundTaskEnded) -> str:
     """The one line the model reads about an ended task."""
-    how = f"exited {e.exit}" if e.status == "exited" else f"was stopped ({e.stopped_because})"
+    how = (
+        f"exited {e.exit}"
+        if e.status == TaskStatus.EXITED
+        else f"was stopped ({e.stopped_because})"
+    )
     tail = (e.stdout_tail + e.stderr_tail).strip()[-300:]
     last = f"; last output: {tail}" if tail else ""
     return f"[background task {e.task_id} ({e.command[:120]}) {how} after {e.runtime_s:g} s{last}]"

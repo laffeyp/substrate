@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from ... import api
+from .kinds import FINAL_ANSWER
 from ...adapters import DeterministicResponder, DriverFamily, OllamaResponder, Responder
 from ...session_registry import SessionEndedMidTurn, SessionRegistry
 from .tools import _TOOL_CANCEL_HOOKS, Tool, full_suite, on_tool_cancel
@@ -161,7 +162,7 @@ def _run_child_to_answer(
     events = list(
         api.read_record(root, resolve_blobs=True)
     )  # Sprint 095: a FinalAnswer may exceed 16 KiB
-    answer = next((e for e in events if e["kind"] == "FinalAnswer"), None)
+    answer = next((e for e in events if e["kind"] == FINAL_ANSWER), None)
     if answer is None:
         raise ValueError(f"delegate child at {root} produced no FinalAnswer")
     payload = answer["payload"]
@@ -481,7 +482,7 @@ def _run_fanout(
                 "ok": False,
             }
         # Read the tail FinalAnswer off this child's record.
-        finals = [e for e in _iter_record(Path(record_root)) if e.get("kind") == "FinalAnswer"]
+        finals = [e for e in _iter_record(Path(record_root)) if e.get("kind") == FINAL_ANSWER]
         if not finals:
             return name, {
                 "error": "no_final_answer",
@@ -730,6 +731,7 @@ def make_delegate(
             # Import the session vocab lazily to avoid dragging session_topology
             # into every tool_loop test that does not touch the standing-session path.
             from ..session import UserMessage
+            from ..session.vocabulary import USER_MESSAGE
 
             # Reviewer's turn_index is the reviewer's own per-turn counter, NOT the
             # parent's record seq. The two records are unrelated numerically (review
@@ -748,7 +750,7 @@ def make_delegate(
                         reviewer_tail_seq_before_turn = max(
                             reviewer_tail_seq_before_turn, int(env.get("seq", -1))
                         )
-                        if env.get("kind") == "UserMessage":
+                        if env.get("kind") == USER_MESSAGE:
                             payload = env.get("payload") or {}
                             if isinstance(payload, dict) and "turn_index" in payload:
                                 reviewer_next_turn_index = int(payload["turn_index"]) + 1
@@ -785,7 +787,7 @@ def make_delegate(
             this_turn_finals = [
                 e
                 for e in api.read_record(Path(reviewer_root), resolve_blobs=True)  # Sprint 095
-                if e["kind"] == "FinalAnswer"
+                if e["kind"] == FINAL_ANSWER
                 and int(e.get("seq", -1)) > reviewer_tail_seq_before_turn
             ]
             if not this_turn_finals:

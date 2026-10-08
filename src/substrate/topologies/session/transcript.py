@@ -37,7 +37,9 @@ from ...adapters import (
     Responder,
 )
 from ...record.record import read_record
+from ..tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 from .vocabulary import (
+    BACKGROUND_TASK_ENDED,
     MODEL_REPLY as _KIND_MODEL_REPLY,
     PARK as _KIND_PARK,
     TRANSCRIPT_COMPACTED as _KIND_TRANSCRIPT_COMPACTED,
@@ -59,9 +61,9 @@ _AVG_TURN_TOKENS_DEFAULT = 800  # K-window heuristic (see module docstring)
 
 # _KIND_USER_MESSAGE, _KIND_MODEL_REPLY, _KIND_PARK, _KIND_TRANSCRIPT_COMPACTED
 # imported above from `.vocabulary` (single source of truth per REVIEW F5).
-_KIND_TOOL_CALL = "ToolCall"
-_KIND_TOOL_RESULT = "ToolResult"
-_KIND_FINAL_ANSWER = "FinalAnswer"
+_KIND_TOOL_CALL = TOOL_CALL
+_KIND_TOOL_RESULT = TOOL_RESULT
+_KIND_FINAL_ANSWER = FINAL_ANSWER
 # `TranscriptCompacted` rides a turn because the `model` producer yields it at the start
 # of a firing (session/__init__.py::_model_factory). `SessionWarning` fires at session-open
 # via the `session_warning` initial and never rides a turn, so it stays out of this set.
@@ -268,7 +270,7 @@ def _render(
                 marker = "RESULT" if ok else "RESULT(fail)"
                 out = payload.get("output") if ok else payload.get("error", "")
                 lines.append(f"{marker}: {out}")
-            elif kind == "BackgroundTaskEnded":
+            elif kind == BACKGROUND_TASK_ENDED:
                 # UI sprint 104: the model keeps hearing that a background task ended
                 from . import BackgroundTaskEnded, background_notice
 

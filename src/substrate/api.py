@@ -126,6 +126,8 @@ if TYPE_CHECKING:
         scan_record_status,
     )
     from . import _daemon as daemon_client
+    from .topologies.session.vocabulary import MODEL_REPLY
+    from .topologies.tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 
 __all__ = [
     # lifecycle kind constants (the locked vocabulary)
@@ -267,6 +269,11 @@ __all__ = [
     "scan_record_status",
     # the local daemon's HTTP client module, which the run_topology tools take (UI sprint 107)
     "daemon_client",
+    # envelope kind names the CLI renders (UI sprint 107)
+    "FINAL_ANSWER",
+    "MODEL_REPLY",
+    "TOOL_CALL",
+    "TOOL_RESULT",
 ]
 
 
@@ -298,7 +305,13 @@ _SESSION_REGISTRY_NAMES = frozenset(
         "scan_record_status",
     }
 )
-# `daemon_client` resolves lazily too (see __getattr__).
+# `daemon_client` resolves lazily too (see __getattr__), as do these kind names.
+_KIND_NAMES: dict[str, str] = {
+    "MODEL_REPLY": "substrate.topologies.session.vocabulary",
+    "FINAL_ANSWER": "substrate.topologies.tool_loop.kinds",
+    "TOOL_CALL": "substrate.topologies.tool_loop.kinds",
+    "TOOL_RESULT": "substrate.topologies.tool_loop.kinds",
+}
 
 
 def __getattr__(name: str) -> object:
@@ -306,6 +319,12 @@ def __getattr__(name: str) -> object:
         from . import session_registry
 
         return getattr(session_registry, name)
+    if name in _KIND_NAMES:
+        # The session and tool-loop kind names the CLI renders (UI sprint 107); leaf modules, so
+        # resolving them imports no topology code.
+        from importlib import import_module
+
+        return getattr(import_module(_KIND_NAMES[name]), name)
     if name == "daemon_client":
         # The HTTP client for the local daemon (`substrate._daemon`): the `run_topology` tools
         # take it. UI sprint 107 names it here so the console stops importing a private module.
