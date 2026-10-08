@@ -18,20 +18,20 @@ are tested by extracting the handler bodies via direct invocation.
 from __future__ import annotations
 
 import os
-import sys
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+
+from tests._ui_daemon import ui_server_module
 from click.testing import CliRunner
 
 
 @pytest.fixture
 def daemon(tmp_path: Path):
     """Spin the daemon in-process. Point the CLI's _daemon client at its TCP."""
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
-    import server  # type: ignore[import-not-found]
+    server = ui_server_module()
     from substrate.session_registry import SessionRegistry
 
     from substrate import _daemon

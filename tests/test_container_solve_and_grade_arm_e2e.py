@@ -50,7 +50,9 @@ def _flask_image_cached() -> bool:
             timeout=15,
         )
         return bool(p.stdout.strip())
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        # UI sprint 106: no `docker` binary is a skip, as in _docker_up(). Catching only the
+        # timeout made collection crash on every machine without Docker (all macOS CI jobs).
         return False
 
 

@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_run_suite_with_salvage_narrows_to_exception_not_baseexception() -> None:
     """Sprint 199b (S7b): the cell catch lives in `run_suite_with_salvage` at
@@ -71,6 +73,8 @@ def test_classify_cell_error_halts_on_keyboard_interrupt() -> None:
     classifier's fallback substring matches (adding e.g. `if 'interrupt' in msg`)
     cannot accidentally reroute a real interrupt to a NO_VERDICT continue-the-sweep
     path."""
+    # the script imports HuggingFace `datasets` at load; it is not a dev dependency (UI sprint 106)
+    pytest.importorskip("datasets")
     from scripts.assay_swebench_confirmatory import _classify_cell_error
 
     reason, should_halt = _classify_cell_error(KeyboardInterrupt())
@@ -88,6 +92,8 @@ def test_classify_cell_error_halts_on_keyboard_interrupt() -> None:
 
 def test_classify_cell_error_halts_on_system_exit() -> None:
     """Same contract for SystemExit — the runner's catch must not swallow it."""
+    # the script imports HuggingFace `datasets` at load; it is not a dev dependency (UI sprint 106)
+    pytest.importorskip("datasets")
     from scripts.assay_swebench_confirmatory import _classify_cell_error
 
     reason, should_halt = _classify_cell_error(SystemExit(1))

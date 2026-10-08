@@ -10,20 +10,19 @@ its registry state carries the assertion.
 
 from __future__ import annotations
 
-import sys
 import threading
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 
 import pytest
+
+from tests._ui_daemon import ui_server_module
 from click.testing import CliRunner
 
 
 @pytest.fixture(scope="module")
 def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
     base_dir = tmp_path_factory.mktemp("cli-session-222")
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
-    import server
+    server = ui_server_module()
     from substrate.session_registry import SessionRegistry
 
     server._SESSION_REGISTRY = SessionRegistry(

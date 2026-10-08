@@ -24,6 +24,8 @@ Tests pin the row-level distinction:
 
 from __future__ import annotations
 
+import pytest
+
 from substrate.assay.oracle import Verdict
 from substrate.assay.swebench import (
     REASON_DOCKER_ERROR,
@@ -156,6 +158,8 @@ def test_runner_and_oracle_share_the_classifier():
     the shared taxonomy — a substring rule added to one must land in both."""
     import subprocess
 
+    # the script imports HuggingFace `datasets` at load; it is not a dev dependency (UI sprint 106)
+    pytest.importorskip("datasets")
     from scripts.assay_swebench_confirmatory import _classify_cell_error
 
     docker_exc = subprocess.CalledProcessError(125, ["docker", "run"])

@@ -13,13 +13,13 @@ updated its state. Non-daemon slashes (`/help`, `/exit`, `/context`,
 
 from __future__ import annotations
 
-import sys
 import threading
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tests._ui_daemon import ui_server_module
 
 
 # ── real-daemon fixture (imported once per module) ───────────────────────
@@ -35,8 +35,7 @@ def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
     daemon-side registry after — a real dual contract, no mocks.
     """
     base_dir = tmp_path_factory.mktemp("daemon-base")
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
-    import server
+    server = ui_server_module()
     from substrate.session_registry import SessionRegistry
 
     server._SESSION_REGISTRY = SessionRegistry(

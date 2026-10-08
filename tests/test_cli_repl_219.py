@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._ui_daemon import ui_server_module
+
 
 # ── unit test for the formatter ───────────────────────────────────────────────
 
@@ -99,10 +101,8 @@ def test_sse_stream_reads_turn_events_from_running_daemon(tmp_path: Path) -> Non
     """Spin the real daemon in-process. Create a session. Fire a turn from
     the main thread. The SSE reader thread should see the turn's ModelReply
     and format it before the loop ends."""
-    import sys as _sys
 
-    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "substrate-ui"))
-    import server  # type: ignore[import-not-found]
+    server = ui_server_module()
     from substrate.session_registry import SessionRegistry
 
     from substrate import _daemon, cli
