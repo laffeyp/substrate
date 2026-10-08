@@ -31,6 +31,7 @@ from typing import Any
 
 from msgspec import Struct
 
+from ..constants import RunStatus
 from ..constants import (
     PRODUCER_CANCELLED,
     PRODUCER_COMPLETED,
@@ -53,8 +54,8 @@ _END_KINDS = {
     PRODUCER_FAILED: "failed",
     PRODUCER_CANCELLED: "cancelled",
 }
-# RunFinalised reasons that mean the RUN ITSELF failed (RunResult.status == "failed"), as opposed
-# to a clean finalise that nonetheless had Producer-level failures inside it (finished != worked).
+# RunFinalised reasons that mean the RUN ITSELF failed (RunStatus.FAILED), as opposed to a clean
+# finalise that nonetheless had Producer-level failures inside it (finished != worked).
 _RUN_FAILURE_REASONS = frozenset({"view_failure", "kernel_error", "stuck_quiescent"})
 
 
@@ -222,10 +223,10 @@ class RunGraph(Struct, frozen=True):
     terminal — absence-of-terminal encodes medium failure); a static "incomplete" read is NOT a
     clean "running", so a torn record never reads as fine (§7.2). "paused" awaits external input.
     `final_reason` is the RunFinalised reason (None for an ordinary finalise; the failure reason
-    for a "failed" run). `paused_on` is the resume_condition when status == "paused"."""
+    for a "failed" run). `paused_on` is the resume_condition when status is PAUSED."""
 
     instances: tuple[ProducerInstance, ...]
-    status: str
+    status: RunStatus
     final_reason: str | None
     paused_on: str | None
 
@@ -317,9 +318,9 @@ def run_graph(record: Any) -> RunGraph:
     # Producer-level failures INSIDE it is still "finalised"; that finished-!=-worked case is the
     # per-instance statuses + the failure tally, not the run-level status. (review #30 finding 1.)
     if finalised:
-        status = "failed" if final_reason in _RUN_FAILURE_REASONS else "finalised"
+        status = RunStatus.FAILED if final_reason in _RUN_FAILURE_REASONS else RunStatus.FINALISED
     elif paused:
-        status = "paused"
+        status = RunStatus.PAUSED
     else:
         # no terminal RunFinalised: the record is INCOMPLETE — either still being written (if it
         # is being live-followed) OR torn/medium-failed (the fsync-gate path fails the run WITHOUT
@@ -327,10 +328,10 @@ def run_graph(record: Any) -> RunGraph:
         # cannot distinguish the two; that is out-of-band (the follow/liveness context). The §7.2-
         # safe default for a STATIC read is "incomplete" (indeterminate / not a clean "running"),
         # so a torn record never reads as fine. (review #31.)
-        status = "incomplete"
+        status = RunStatus.INCOMPLETE
     return RunGraph(
         instances=tuple(instances),
         status=status,
         final_reason=final_reason,
-        paused_on=paused_resume_condition if status == "paused" else None,
+        paused_on=paused_resume_condition if status == RunStatus.PAUSED else None,
     )

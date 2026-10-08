@@ -50,6 +50,7 @@ from typing import Any
 
 from ..constants import RUN_FINALISED, RUN_STARTED
 from ..projections.attach import LiveRecord
+from ..constants import RunStatus
 from ..errors import SubstrateError
 from .runtime import Runtime
 from .topology import TopologyBuilder
@@ -199,7 +200,7 @@ def embedded_substrate(
         # Inner failure surfaces as ONE outer ProducerFailed carrying the inner run_id (§20).
         # The run_id is taken from the inner RunResult (authoritative + always present), NOT
         # scraped from polled frames (which could be empty under a fast inner-failure race).
-        if result is not None and getattr(result, "status", None) == "failed":
+        if result is not None and getattr(result, "status", None) == RunStatus.FAILED:
             rid = getattr(result, "run_id", "") or inner_run_id
             raise EmbeddedRunFailed(
                 f"embedded substrate inner run {rid} failed",

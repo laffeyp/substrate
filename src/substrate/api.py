@@ -63,6 +63,7 @@ from .projections.inspect import (
     trace_ancestry,
     view_at,
 )
+from .constants import RunStatus
 from .projections.graph import (
     ProducerInstance,
     ProducerNode,
@@ -248,6 +249,7 @@ __all__ = [
     "TriggerEdge",
     "RouteEdge",
     "RunGraph",
+    "RunStatus",
     "ProducerInstance",
     # test helpers
     "assert_event",

@@ -28,6 +28,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Final, Protocol
 
+from ...constants import RunStatus
 from .tools import Tool, positive_int
 
 
@@ -153,7 +154,7 @@ def _run_topology_impl(daemon_client: DaemonClient, args: list[Any]) -> dict[str
     response = daemon_client.run_topology(name, inputs, **kwargs)
     # Normalize to the shape the tech spec names: {output, child_root, run_id}
     # for finalised; {run_id, record_root, status} for async.
-    if response.get("status") == "finalised":
+    if response.get("status") == RunStatus.FINALISED:
         # Pull the terminal envelope's payload as `output` — same as
         # sprint 225d's status handler does. Kept here (rather than on
         # the daemon side) so a synchronous run also returns output

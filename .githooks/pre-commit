@@ -42,17 +42,17 @@ fi
 
 # Sprint 224h gate + drift-grooming 2026-09-02: raw-status-string comparison ban. A status is
 # compared against its enum (SessionStatus in session_registry.py, TaskStatus in
-# tool_loop/background.py), never a retyped string that silently returns False after a rename.
+# tool_loop/background.py, RunStatus in constants.py), never a retyped string that silently returns False after a rename.
 # UI sprint 107: the gate scanned only substrate-ui and only `==`, and its note said this repo
 # carried no such literals; cli.py compared `== "ended"` and background.py `== "running"` six
 # times. It now scans both repos, both operators, and the task statuses.
 echo "pre-commit: status-literal-comparison gate"
-STATUS_RE='[=!]= *"(ended|parked|interrupted|running|exited|stopped)"|"(ended|parked|interrupted|running|exited|stopped)" *[=!]='
+STATUS_RE='[=!]= *"(ended|parked|interrupted|running|exited|stopped|incomplete|paused|finalised|failed)"|"(ended|parked|interrupted|running|exited|stopped|incomplete|paused|finalised|failed)" *[=!]='
 UI_PY=""
 [ -d ../substrate-ui ] && UI_PY="$(ls ../substrate-ui/*.py)"
 # shellcheck disable=SC2086
-if grep -rnE "$STATUS_RE" src/ $UI_PY 2>/dev/null; then
-  echo "  ^^ Compare against SessionStatus.* / TaskStatus.* instead."
+if grep -rnE --include="*.py" "$STATUS_RE" src/ $UI_PY 2>/dev/null; then
+  echo "  ^^ Compare against SessionStatus.* / TaskStatus.* / RunStatus.* instead."
   fail=1
 fi
 

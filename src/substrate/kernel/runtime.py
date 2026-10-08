@@ -20,13 +20,14 @@ import asyncio
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import msgspec
 from msgspec import Struct
 from ulid import ULID
 
 from ..record import locking
+from ..constants import RunStatus
 from ..constants import (
     BUDGET_US,
     HYSTERESIS_K,
@@ -86,7 +87,7 @@ class RunResult(Struct, frozen=True):
 
     run_id: str
     record_root: str
-    status: Literal["finalised", "paused", "failed"]
+    status: RunStatus  # FINALISED, PAUSED or FAILED
     final_event: Event | None
     elapsed_seconds: float
     finalisation_payload: Any | None
@@ -366,12 +367,12 @@ class Runtime:
         )
 
     @staticmethod
-    def _status(st: RunState | None) -> Literal["finalised", "paused", "failed"]:
+    def _status(st: RunState | None) -> RunStatus:
         if st is None or st.phase is RunPhase.FAILED:
-            return "failed"
+            return RunStatus.FAILED
         if st.phase is RunPhase.PAUSED:
-            return "paused"
-        return "finalised"
+            return RunStatus.PAUSED
+        return RunStatus.FINALISED
 
     def _new_run_state(self, reg: Registration) -> RunState:
         """Construct the per-run mutable state. quiescence_with_watchdog(seconds=) drives

@@ -831,9 +831,9 @@ class SessionRegistry:
             finally:
                 self._running_handles.pop(session_id, None)
             status_str = getattr(result, "status", "paused")
-            if status_str == "finalised":
+            if status_str == api.RunStatus.FINALISED:
                 new_status: SessionStatus = SessionStatus.ENDED
-            elif status_str == "failed":
+            elif status_str == api.RunStatus.FAILED:
                 new_status = SessionStatus.INTERRUPTED
             else:
                 new_status = SessionStatus.PARKED

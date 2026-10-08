@@ -10,6 +10,8 @@ successor to process/signals/0.1.json; see process/signals/0.2-rationale.md).
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 # ── technical spec §19 (normative defaults; all configurable) ──────────────────
 SEGMENT_MAX_BYTES = 64 * 1024 * 1024  # 64 MiB — seal cadence vs file-count noise
 FRAME_MAX_BYTES = 1 * 1024 * 1024  # 1 MiB — larger payloads belong in the blob store
@@ -71,3 +73,15 @@ def is_reserved(kind: str) -> bool:
     """True if `kind` is in the reserved kernel namespace (F-OBS-5). Producer-declared
     kinds MUST NOT use this prefix; registration rejects collisions."""
     return kind.startswith(RESERVED_PREFIX)
+
+
+class RunStatus(StrEnum):
+    """A run's outcome, as `run_graph` reads it from the record and as `Runtime.run()` returns it
+    (`RunResult.status`, which is never INCOMPLETE). INCOMPLETE is no terminal RunFinalised: the
+    record is still being written, or torn. UI sprint 107: bare strings before, compared in eight
+    places in the console and typed as a Literal in the runtime."""
+
+    INCOMPLETE = "incomplete"
+    PAUSED = "paused"
+    FINALISED = "finalised"
+    FAILED = "failed"

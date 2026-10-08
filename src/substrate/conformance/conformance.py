@@ -48,6 +48,7 @@ from ..kernel.composition import embedded_substrate
 from ..errors import BusLockedError, ProducerNotFound
 from ..projections.inspect import first_divergence, trace_ancestry, view_at
 from ..kernel.policies import Decision, TerminationPolicy, quiescence_with_watchdog, threshold_count
+from ..constants import RunStatus
 from ..projections.replay import replay
 from ..record.record import read_record
 from ..kernel.runtime import Runtime
@@ -259,7 +260,7 @@ async def _check_5_quiescence(root: Path) -> CheckResult:
     # A logical-cooldown run finalises via quiescence-with-watchdog.
     result = await Runtime(root).run(_basic_topo)
     envs = list(read_record(root))
-    if result.status == "finalised" and envs[-1]["kind"] == RUN_FINALISED:
+    if result.status == RunStatus.FINALISED and envs[-1]["kind"] == RUN_FINALISED:
         return CheckResult(
             5, "Quiescence", Status.PASS, "logical-cooldown run finalised on quiescence"
         )
