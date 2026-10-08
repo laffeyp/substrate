@@ -47,6 +47,11 @@ from substrate.topologies.session import UserMessage, session_topology
 from substrate.topologies.session.ci import ci_session_topology
 from substrate.topologies.tool_loop.tools import CALCULATOR
 
+# A short scripted run inside one K-window: the documented exception to session_topology's
+# record_root warning (UI sprint 107 states it here instead of letting it print on every run).
+pytestmark = pytest.mark.filterwarnings(r"ignore:session_topology\(record_root=None\)")
+
+
 _FIXTURES = Path(__file__).parent / "fixtures"
 _FIXTURE_FILE = _FIXTURES / "three_turns.json"
 

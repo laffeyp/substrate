@@ -51,6 +51,7 @@ def daemon(tmp_path: Path):
     os.environ.clear()
     os.environ.update(orig_env)
     srv.shutdown()
+    srv.server_close()
 
 
 def test_ctrl_d_ends_session(daemon) -> None:

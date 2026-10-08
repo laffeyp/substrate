@@ -307,7 +307,7 @@ def _format_context_event(env: dict[str, Any]) -> str:
     return f"[seq={seq} kind={kind}] {payload_repr}"
 
 
-def _prefix_context_slice(
+def prefix_context_slice(
     parent_record_root: Path,
     task: str,
     context: dict[str, Any],
@@ -836,7 +836,7 @@ def make_delegate(
         effective_task = task
         if per_call_context is not None and parent_record_root is not None:
             if isinstance(per_call_context, dict):
-                effective_task = _prefix_context_slice(
+                effective_task = prefix_context_slice(
                     Path(parent_record_root), task, per_call_context
                 )
 

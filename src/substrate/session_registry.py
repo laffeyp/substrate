@@ -310,6 +310,8 @@ class SessionRegistry:
         # asyncio.Lock in that path was wrong-primitive dead weight. One lock, one
         # primitive, one invariant.
         self._turn_threading_locks: dict[str, threading.Lock] = {}
+        # UI sprint 107: guards manifest read-modify-writes only; never held across a turn.
+        self._manifest_write_lock = threading.Lock()
         # Sprint 213b: the callable the daemon injects at construction time to
         # rebuild a `session_topology` factory for a given manifest. `turn_sync`
         # invokes it once per call. When None (default), `turn_sync` raises so
@@ -467,14 +469,13 @@ class SessionRegistry:
         if the name is already in use by a different session.
 
         Red-team finding 4 (2026-08-26): the read-modify-write on
-        ``_manifests[session_id]`` must hold the per-session lock so a
+        ``_manifests[session_id]`` holds ``_manifest_write_lock`` so a
         concurrent ``update_status`` (called by ``turn_sync`` on turn
         completion) does not clobber this write or vice-versa.
         """
         if session_id not in self._manifests:
             raise KeyError(f"unknown session_id {session_id!r}")
-        threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
-        with threading_lock:
+        with self._manifest_write_lock:
             manifest = self._manifests.get(session_id)
             if manifest is None:
                 raise KeyError(f"unknown session_id {session_id!r}")
@@ -499,24 +500,14 @@ class SessionRegistry:
         `Runtime.resume` reads the new list via `_build_session_topology_from_manifest`;
         the in-flight turn (if any) completes on its prior tool set.
 
-        Holds the per-session lock so a concurrent `update_status` from
-        `turn_sync` cannot clobber this write (same pattern as `set_driver`).
+        Writes through `_update_manifest`, so a concurrent `update_status` from
+        `turn_sync` cannot clobber this write, and a running turn does not block it.
 
         Raises `KeyError` on unknown session_id.
         """
         if session_id not in self._manifests:
             raise KeyError(f"unknown session_id {session_id!r}")
-        threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
-        with threading_lock:
-            manifest = self._manifests.get(session_id)
-            if manifest is None:
-                raise KeyError(f"unknown session_id {session_id!r}")
-            updated = _replace(manifest, tools=tools)
-            _atomic_write_json(
-                self._base / session_id / _MANIFEST_FILENAME, _manifest_to_dict(updated)
-            )
-            self._manifests[session_id] = updated
-        return updated
+        return self._update_manifest(session_id, tools=tools)
 
     def set_per_turn(self, session_id: str, per_turn: str) -> SessionManifest:
         """Sprint 223d: change the session's per-turn prefix (spec the topology-layer contract).
@@ -528,17 +519,7 @@ class SessionRegistry:
         """
         if session_id not in self._manifests:
             raise KeyError(f"unknown session_id {session_id!r}")
-        threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
-        with threading_lock:
-            manifest = self._manifests.get(session_id)
-            if manifest is None:
-                raise KeyError(f"unknown session_id {session_id!r}")
-            updated = _replace(manifest, per_turn=per_turn)
-            _atomic_write_json(
-                self._base / session_id / _MANIFEST_FILENAME, _manifest_to_dict(updated)
-            )
-            self._manifests[session_id] = updated
-        return updated
+        return self._update_manifest(session_id, per_turn=per_turn)
 
     def set_driver_params(self, session_id: str, params: dict[str, Any] | None) -> SessionManifest:
         """Change the per-session driver params mid-flight (piece G sprint 032c).
@@ -629,17 +610,7 @@ class SessionRegistry:
                     v_num = cast(float, value)
                     if v_num <= 0:
                         raise ValueError(f"driver_params.timeout must be > 0; got {v_num}")
-        threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
-        with threading_lock:
-            manifest = self._manifests.get(session_id)
-            if manifest is None:
-                raise KeyError(f"unknown session_id {session_id!r}")
-            updated = _replace(manifest, driver_params=params)
-            _atomic_write_json(
-                self._base / session_id / _MANIFEST_FILENAME, _manifest_to_dict(updated)
-            )
-            self._manifests[session_id] = updated
-        return updated
+        return self._update_manifest(session_id, driver_params=params)
 
     def set_bundle(self, session_id: str, bundle: str | None) -> SessionManifest:
         """Change the bundle attached to a session mid-flight. In-memory
@@ -677,17 +648,7 @@ class SessionRegistry:
             from substrate.bundles import load_bundle
 
             load_bundle(bundle)
-        threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
-        with threading_lock:
-            manifest = self._manifests.get(session_id)
-            if manifest is None:
-                raise KeyError(f"unknown session_id {session_id!r}")
-            updated = _replace(manifest, bundle=bundle)
-            _atomic_write_json(
-                self._base / session_id / _MANIFEST_FILENAME, _manifest_to_dict(updated)
-            )
-            self._manifests[session_id] = updated
-        return updated
+        return self._update_manifest(session_id, bundle=bundle)
 
     def set_driver(self, session_id: str, driver: str) -> SessionManifest:
         """Change the driver for a session. In-memory catalog and manifest.json
@@ -703,25 +664,15 @@ class SessionRegistry:
         the failure on the next /turn, not at PATCH time. The daemon-side
         Ollama-tag round-trip is a piece-B follow-up if needed.
 
-        Red-team finding 4 (2026-08-26): holds the per-session lock so a
-        concurrent ``update_status`` from ``turn_sync`` does not clobber
-        this write or vice-versa.
+        Red-team finding 4 (2026-08-26): writes through ``_update_manifest``
+        so a concurrent ``update_status`` from ``turn_sync`` does not clobber
+        this write or vice-versa; a running turn does not block it.
 
         Raises `KeyError` on unknown session_id.
         """
         if session_id not in self._manifests:
             raise KeyError(f"unknown session_id {session_id!r}")
-        threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
-        with threading_lock:
-            manifest = self._manifests.get(session_id)
-            if manifest is None:
-                raise KeyError(f"unknown session_id {session_id!r}")
-            updated = _replace(manifest, driver=driver)
-            _atomic_write_json(
-                self._base / session_id / _MANIFEST_FILENAME, _manifest_to_dict(updated)
-            )
-            self._manifests[session_id] = updated
-        return updated
+        return self._update_manifest(session_id, driver=driver)
 
     # ── lookups ────────────────────────────────────────────────────────────
 
@@ -1086,13 +1037,28 @@ class SessionRegistry:
     # ── status transitions ────────────────────────────────────────────────
 
     def update_status(self, session_id: str, status: SessionStatus) -> SessionManifest:
-        manifest = self._manifests.get(session_id)
-        if manifest is None:
-            raise KeyError(f"unknown session_id {session_id!r}")
-        updated = _replace(manifest, status=status)
-        _atomic_write_json(self._base / session_id / _MANIFEST_FILENAME, _manifest_to_dict(updated))
-        self._manifests[session_id] = updated
-        return updated
+        return self._update_manifest(session_id, status=status)
+
+    def _update_manifest(self, session_id: str, **fields: Any) -> SessionManifest:
+        """One read-modify-write of a session's manifest, under `_manifest_write_lock`.
+
+        UI sprint 107: the setters used to take the per-session TURN lock for this, which a turn
+        holds for its whole run (no time limit since UI sprint 101). A rename or a driver change
+        sent mid-turn then waited for the model to finish, against their own contract ("the
+        in-flight turn completes on its prior driver; the next turn sees the new one"). Each
+        invariant now has its own lock, held only for its critical section (lock splitting;
+        Goetz et al., Java Concurrency in Practice, §11.4): the turn lock serializes turns, this
+        one makes each manifest write atomic against the others (red-team finding 4)."""
+        with self._manifest_write_lock:
+            manifest = self._manifests.get(session_id)
+            if manifest is None:
+                raise KeyError(f"unknown session_id {session_id!r}")
+            updated = _replace(manifest, **fields)
+            _atomic_write_json(
+                self._base / session_id / _MANIFEST_FILENAME, _manifest_to_dict(updated)
+            )
+            self._manifests[session_id] = updated
+            return updated
 
     def delete(self, session_id: str) -> SessionManifest:
         """Remove a session from the registry: manifest file, by-name entry, per-
@@ -1120,6 +1086,11 @@ class SessionRegistry:
         manifest = self._manifests.get(session_id)
         if manifest is None:
             raise KeyError(f"unknown session_id {session_id!r}")
+        # UI sprint 107: turns have no time limit (UI sprint 101), so a running turn could hold
+        # the lock past the 30 s bound below and every delete mid-turn failed. Interrupt it first,
+        # as quit and `/end` do; the turn parks within milliseconds and releases the lock.
+        if manifest.status == SessionStatus.RUNNING:
+            self.interrupt(session_id, tier="hard")
         threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
         if not threading_lock.acquire(timeout=30.0):
             raise TimeoutError(
@@ -1127,30 +1098,33 @@ class SessionRegistry:
                 f"30s (an in-flight turn is still running)"
             )
         try:
-            # Re-check under the lock: a concurrent second delete may have
-            # already removed the manifest by the time we acquire.
-            manifest = self._manifests.get(session_id)
-            if manifest is None:
-                raise KeyError(f"unknown session_id {session_id!r}")
-            # Remove the by-name entry under the flock so a concurrent
-            # `set_name` or `create` sees the removal atomically.
-            if manifest.name is not None:
-                with _flocked(self._base / _BY_NAME_FILENAME) as index:
-                    if index.get(manifest.name) == session_id:
-                        del index[manifest.name]
-                    self._by_name = dict(index)
-            # Remove the manifest file. Leave the record dir alone.
-            manifest_path = self._base / session_id / _MANIFEST_FILENAME
-            try:
-                manifest_path.unlink()
-            except FileNotFoundError:
-                pass  # already gone; idempotent
-            # Drop the in-memory catalog + lock. A turn_sync caller still
-            # waiting on the lock finds `_manifests.get(...)` returning None
-            # under the lock and raises SessionEndedMidTurn — the caller's
-            # existing 410 branch handles it.
-            self._manifests.pop(session_id, None)
-            self._turn_threading_locks.pop(session_id, None)
+            # UI sprint 107: also under the manifest-write lock, so a setter cannot read the
+            # manifest before this removal and write it back after.
+            with self._manifest_write_lock:
+                # Re-check under the lock: a concurrent second delete may have
+                # already removed the manifest by the time we acquire.
+                manifest = self._manifests.get(session_id)
+                if manifest is None:
+                    raise KeyError(f"unknown session_id {session_id!r}")
+                # Remove the by-name entry under the flock so a concurrent
+                # `set_name` or `create` sees the removal atomically.
+                if manifest.name is not None:
+                    with _flocked(self._base / _BY_NAME_FILENAME) as index:
+                        if index.get(manifest.name) == session_id:
+                            del index[manifest.name]
+                        self._by_name = dict(index)
+                # Remove the manifest file. Leave the record dir alone.
+                manifest_path = self._base / session_id / _MANIFEST_FILENAME
+                try:
+                    manifest_path.unlink()
+                except FileNotFoundError:
+                    pass  # already gone; idempotent
+                # Drop the in-memory catalog + lock. A turn_sync caller still
+                # waiting on the lock finds `_manifests.get(...)` returning None
+                # under the lock and raises SessionEndedMidTurn — the caller's
+                # existing 410 branch handles it.
+                self._manifests.pop(session_id, None)
+                self._turn_threading_locks.pop(session_id, None)
         finally:
             threading_lock.release()
         _stop_background_tasks(session_id, "its session was deleted")

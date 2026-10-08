@@ -67,6 +67,9 @@ packages = ["src/substrate"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# pytest-asyncio 1.4 warns while this is unset; "function" (its announced future default) gives each
+# async fixture a fresh loop (UI sprint 107).
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 # The suite is FUNCTION-tests only (def test_*, with underscore-prefixed helper classes). Disable
 # class-based collection so a DOMAIN record whose name starts with "Test" (e.g. the locked vocabulary

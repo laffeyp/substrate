@@ -25,6 +25,7 @@ wiring end-to-end.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -91,8 +92,8 @@ def ci_session_topology(
             "the CI record needs a clean finalisation via end-on-exit → SessionEnded."
         )
 
-    def topo(b: api.TopologyBuilder) -> None:
-        base = session_topology(
+    def _ci_base() -> Any:
+        return session_topology(
             driver=DeterministicResponder(seed=0),
             driver_name="deterministic",
             driver_context_tokens=4096,
@@ -109,6 +110,14 @@ def ci_session_topology(
             bundle=bundle,
             parent_context=parent_context,
         )
+
+    def topo(b: api.TopologyBuilder) -> None:
+        # A three-turn scripted run is the documented exception to session_topology's
+        # record_root warning (one K-window of turns); UI sprint 107 stops it firing on every
+        # CI build, where it hid the warnings that matter.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=r"session_topology\(record_root=None\)")
+            base = _ci_base()
         base(b)
         b.producer_kind(
             PRODUCER_KIND_DRIVER_STEPPER,

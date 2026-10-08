@@ -53,6 +53,7 @@ def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
     _daemon.os.environ["SUBSTRATE_DAEMON_SOCK"] = "/nonexistent/socket"
     yield f"http://127.0.0.1:{tcp_port}"
     srv.shutdown()
+    srv.server_close()
 
 
 @pytest.fixture

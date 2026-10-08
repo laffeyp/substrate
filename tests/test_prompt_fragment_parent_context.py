@@ -11,7 +11,7 @@ Verifies:
  - Empty parent_context yields zero fragments.
  - Kinds filter drops non-matching events.
 
-Deferred: delegate.py rewrite that swaps _prefix_context_slice for the
+Deferred: delegate.py rewrite that swaps prefix_context_slice for the
 producer path. Sprint 063 makes the fragment path available on
 session_topology; a follow-up card migrates delegate itself.
 """

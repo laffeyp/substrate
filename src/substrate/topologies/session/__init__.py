@@ -968,7 +968,7 @@ def session_topology(
         # parent_record_root, parent_seq_range, kinds). Yields one
         # PromptFragment(source=parent_context, precedence=30) with the
         # extracted slice. Delegate migration deferred: delegate.py's
-        # _prefix_context_slice still runs today; sprint 063 makes the
+        # prefix_context_slice still runs today; sprint 063 makes the
         # fragment path available to any caller that wires it directly.
         if parent_context is not None:
             b.producer_kind(

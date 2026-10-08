@@ -125,6 +125,7 @@ if TYPE_CHECKING:
         manifest_from_dict,
         scan_record_status,
     )
+    from . import _daemon as daemon_client
 
 __all__ = [
     # lifecycle kind constants (the locked vocabulary)
@@ -264,6 +265,8 @@ __all__ = [
     "TornRecordOnResume",
     "manifest_from_dict",
     "scan_record_status",
+    # the local daemon's HTTP client module, which the run_topology tools take (UI sprint 107)
+    "daemon_client",
 ]
 
 
@@ -295,6 +298,7 @@ _SESSION_REGISTRY_NAMES = frozenset(
         "scan_record_status",
     }
 )
+# `daemon_client` resolves lazily too (see __getattr__).
 
 
 def __getattr__(name: str) -> object:
@@ -302,4 +306,10 @@ def __getattr__(name: str) -> object:
         from . import session_registry
 
         return getattr(session_registry, name)
+    if name == "daemon_client":
+        # The HTTP client for the local daemon (`substrate._daemon`): the `run_topology` tools
+        # take it. UI sprint 107 names it here so the console stops importing a private module.
+        from . import _daemon
+
+        return _daemon
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

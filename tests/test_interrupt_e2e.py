@@ -31,6 +31,11 @@ from substrate import api
 from substrate.adapters import DeterministicResponder
 from substrate.topologies.session import InterruptRequested, session_topology, UserMessage
 from substrate.topologies.tool_loop.tools import Tool
+import pytest
+
+# A short scripted run inside one K-window: the documented exception to session_topology's
+# record_root warning (UI sprint 107 states it here instead of letting it print on every run).
+pytestmark = pytest.mark.filterwarnings(r"ignore:session_topology\(record_root=None\)")
 
 
 def _slow_add_tool() -> dict[str, Tool]:

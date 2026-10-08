@@ -451,16 +451,22 @@ class CliResponder:
             start_new_session=True,  # own process group: a kill reaches the agent's children
         )
 
-        def _kill_group() -> None:
+        async def _kill_group() -> None:
             try:
                 _os.killpg(proc.pid, _signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
+                pass
+            # UI sprint 107: reap the child. Unwaited, it stayed a zombie and its pipe transports
+            # open until garbage collection (ResourceWarning in the kernel suite).
+            try:
+                await proc.wait()
+            except _asyncio.CancelledError:
                 pass
 
         try:
             stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=self._timeout)
         except (TimeoutError, _asyncio.TimeoutError):
-            _kill_group()
+            await _kill_group()
             raise RuntimeError(
                 f"CliResponder({self.name}) timed out after {self._timeout}s"
             ) from None
@@ -468,7 +474,7 @@ class CliResponder:
             # UI sprint 102: the user's interrupt cancels this call. Before, only a timeout
             # killed the process, so an interrupted CLI agent kept running (and editing files)
             # after the turn had parked.
-            _kill_group()
+            await _kill_group()
             raise
         if proc.returncode != 0:
             raise RuntimeError(

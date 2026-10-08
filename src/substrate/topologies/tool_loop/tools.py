@@ -241,17 +241,62 @@ def _list_dir(root: Path, a: list[Any]) -> list[str]:
     return sorted(e.name + ("/" if e.is_dir() else "") for e in p.iterdir())
 
 
+class ToolCancelled(Exception):
+    """The user's interrupt reached a walking tool (glob, grep) between two directories."""
+
+
+def _walk_files(where: Path) -> Any:
+    """Every file under `where`, lazily, in a stable sorted order, stopping when the call is
+    cancelled. UI sprint 107: glob sorted the whole match set and grep sorted `rglob("*")` before
+    capping, so a model's `glob("**/*", "/")` walked the entire disk; and the walk ran in a worker
+    thread the interrupt could not reach. This walks one directory at a time and checks the
+    cancel event `run_tool` sets on interrupt (see `on_tool_cancel`). Symlinked dirs are not
+    followed (no cycles); unreadable dirs are skipped."""
+    import os
+    import threading
+
+    stop = threading.Event()
+    on_tool_cancel(stop.set)
+    if where.is_file():
+        yield where
+        return
+    for dirpath, dirnames, filenames in os.walk(where, followlinks=False):
+        if stop.is_set():
+            raise ToolCancelled("cancelled")
+        dirnames.sort()
+        for name in sorted(filenames):
+            yield Path(dirpath) / name
+
+
+def _glob_parts_match(pat: list[str], parts: tuple[str, ...]) -> bool:
+    """`pathlib` glob semantics on path segments: `**` spans zero or more directories, every
+    other segment is an fnmatch pattern (dotfiles included, as `Path.glob` includes them)."""
+    import fnmatch
+
+    if not pat:
+        return not parts
+    if pat[0] == "**":
+        return any(_glob_parts_match(pat[1:], parts[i:]) for i in range(len(parts) + 1))
+    return (
+        bool(parts)
+        and fnmatch.fnmatchcase(parts[0], pat[0])
+        and _glob_parts_match(pat[1:], parts[1:])
+    )
+
+
 def _glob(root: Path, a: list[Any]) -> list[str]:
-    # canonical `glob`: fast pattern file-find (e.g. "**/*.py"), sorted + CAPPED. Uncapped, a match
-    # over a big tree ("**/*.py" in a repo) returns 100s of KB, which blob-offloads the whole ToolResult
-    # payload and strips the loop-control fields off the frame — wedging the loop. Cap + report instead.
+    # canonical `glob`: fast pattern file-find (e.g. "**/*.py"), CAPPED. Uncapped, a match over a big
+    # tree ("**/*.py" in a repo) returns 100s of KB, which blob-offloads the whole ToolResult payload
+    # and strips the loop-control fields off the frame — wedging the loop. Cap + report instead; the
+    # walk stops at the cap (UI sprint 107), so the cost is bounded by the hits, not the tree.
     pattern, where = str(a[0]), (_resolve(root, a[1]) if len(a) > 1 and a[1] is not None else root)
-    hits = sorted(str(p) for p in where.glob(pattern) if p.is_file())
-    if len(hits) > _MAX_GLOB_HITS:
-        return [
-            *hits[:_MAX_GLOB_HITS],
-            f"… (+{len(hits) - _MAX_GLOB_HITS} more; narrow the pattern or root)",
-        ]
+    pat = [seg for seg in pattern.split("/") if seg not in ("", ".")]
+    hits: list[str] = []
+    for f in _walk_files(where):
+        if _glob_parts_match(pat, f.relative_to(where).parts):
+            if len(hits) == _MAX_GLOB_HITS:
+                return [*hits, f"… (more than {_MAX_GLOB_HITS} files; narrow the pattern or root)"]
+            hits.append(str(f))
     return hits
 
 
@@ -263,11 +308,8 @@ def _grep(root: Path, a: list[Any]) -> list[str]:
         pat = re.compile(pat_s)
     except re.error as e:
         raise ValueError(f"grep: invalid regex {pat_s!r}: {e}") from e
-    files = [where] if where.is_file() else sorted(where.rglob("*"))
     hits: list[str] = []
-    for f in files:
-        if not f.is_file():
-            continue
+    for f in _walk_files(where):
         try:
             for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
                 if pat.search(line):

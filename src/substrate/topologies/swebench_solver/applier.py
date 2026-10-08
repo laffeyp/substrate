@@ -251,7 +251,8 @@ def apply_candidate(text: str, repo_dir: str, *, base_ref: str = "HEAD") -> Appl
     for relpath, blocks in files.items():
         full = os.path.join(repo_dir, relpath)
         if os.path.exists(full):
-            raw = open(full, "rb").read()
+            with open(full, "rb") as fh:
+                raw = fh.read()
             uses_crlf = b"\r\n" in raw[:4096]
             original: str | None = (
                 raw.decode("utf-8", errors="replace").replace("\r\n", "\n")

@@ -169,3 +169,4 @@ def test_sse_stream_reads_turn_events_from_running_daemon(tmp_path: Path) -> Non
         _daemon.os.environ.clear()
         _daemon.os.environ.update(orig_env)
         srv.shutdown()
+        srv.server_close()

@@ -23,7 +23,7 @@ from substrate.adapters import DeterministicResponder
 from substrate.topologies.tool_loop.delegate import (
     _CONTEXT_SLICE_CAP_BYTES,
     _extract_context_slice,
-    _prefix_context_slice,
+    prefix_context_slice,
     make_delegate,
 )
 
@@ -167,13 +167,13 @@ def test_slice_empty_when_no_events_match(monkeypatch: pytest.MonkeyPatch) -> No
 # ── prefix + integration test ────────────────────────────────────────────────
 
 
-def test_prefix_context_slice_wraps_task_with_header(monkeypatch: pytest.MonkeyPatch) -> None:
+def testprefix_context_slice_wraps_task_with_header(monkeypatch: pytest.MonkeyPatch) -> None:
     envs = [_envelope(0, "FinalAnswer", {"text": "the answer is 42"})]
     monkeypatch.setattr(
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter(envs),
     )
-    prefixed = _prefix_context_slice(
+    prefixed = prefix_context_slice(
         Path("/nowhere"),
         "please continue",
         {"parent_seq_range": [0, 10], "kinds": ["FinalAnswer"]},
@@ -190,7 +190,7 @@ def test_prefix_returns_task_unchanged_when_slice_is_empty(monkeypatch: pytest.M
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter([]),
     )
-    prefixed = _prefix_context_slice(
+    prefixed = prefix_context_slice(
         Path("/nowhere"),
         "solo",
         {"parent_seq_range": [0, 10], "kinds": ["FinalAnswer"]},

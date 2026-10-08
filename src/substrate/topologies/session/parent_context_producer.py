@@ -18,7 +18,7 @@ is what changes. The child topology binds this producer via
 range: [lo, hi], kinds: [...]})`.
 
 Deferred to a follow-up card: the delegate.py rewrite. Today delegate
-still calls `_prefix_context_slice` to build a string that prepends to
+still calls `prefix_context_slice` to build a string that prepends to
 `assembled_prompt`. Sprint 063 makes the fragment-producer path
 available as a session_topology parameter, so a caller that wires it
 directly (test, CI wrapper, future delegate-to-session-child migration)
