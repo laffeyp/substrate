@@ -13,8 +13,8 @@ import pytest
 
 from substrate import api
 from substrate.adapters import DeterministicResponder
-from substrate.session_registry import SessionManifest, SessionRegistry
 from substrate.topologies.session import UserMessage, session_topology
+from substrate.topologies.session_registry import SessionManifest, SessionRegistry
 from substrate.topologies.tool_loop import tools as T
 from substrate.topologies.tool_loop.background import TABLE
 

@@ -69,6 +69,8 @@ from substrate.assay.cells import report_from_cells
 from substrate.assay.oracle import Verdict
 from substrate.assay.preregistration import (
     fingerprint as _fingerprint_shared,
+)
+from substrate.assay.preregistration import (
     guard as preregistration_guard,
 )
 from substrate.assay.run import (
@@ -85,7 +87,6 @@ from substrate.assay.swebench import (
     REASON_HARNESS_ERROR,
     REASON_RATE_LIMITED,
     REASON_TIMED_OUT,
-    FirewallViolation,
     SwebenchExtractOnlyOracle,
     batch_grade_from_records,
     classify_reason_string,
@@ -104,6 +105,7 @@ from substrate.assay.swebench_suite import (
     swebench_solver_arm,
     swebench_suite,
 )
+from substrate.topologies.swebench_solver.firewall import FirewallViolation
 
 # ── SWE-bench cell-error taxonomy ─────────────────────────────────────────────
 # H-3 (ratified 2026-08-10): runner-side error reasons flow from the shared

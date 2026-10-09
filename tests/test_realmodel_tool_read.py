@@ -20,7 +20,6 @@ import pytest
 from substrate import api
 from substrate.adapters import OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
-
 from tests._sandbox import sandboxed_fs_tools
 
 pytestmark = [pytest.mark.realmodel, pytest.mark.usefixtures("no_escape_guard")]

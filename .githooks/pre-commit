@@ -34,27 +34,25 @@ fi
 # mypy at every commit.
 echo "pre-commit: mypy --strict src/substrate"
 UV="$(command -v uv || echo .venv/bin/uv)"
-if ! "$UV" run mypy --strict src/substrate > /tmp/substrate-mypy.log 2>&1; then
-  tail -15 /tmp/substrate-mypy.log
+MYPY_LOG="$(mktemp -t substrate-mypy.XXXXXX)"  # its own temp file, not a shared /tmp path (F293)
+trap 'rm -f "$MYPY_LOG"' EXIT
+if ! "$UV" run mypy --strict src/substrate > "$MYPY_LOG" 2>&1; then
+  tail -15 "$MYPY_LOG"
   echo "  ^^ mypy strict violations. Fix or add a scoped [tool.mypy.overrides] entry with justification."
   fail=1
 fi
 
-# Sprint 224h gate + drift-grooming 2026-09-02: raw-status-string comparison ban. A status is
-# compared against its enum (SessionStatus in session_registry.py, TaskStatus in
-# tool_loop/background.py, RunStatus in constants.py), never a retyped string that silently returns False after a rename.
-# UI sprint 107: the gate scanned only substrate-ui and only `==`, and its note said this repo
-# carried no such literals; cli.py compared `== "ended"` and background.py `== "running"` six
-# times. It now scans both repos, both operators, and the task statuses.
+# Import contracts (lens audit F061, F199): the CLI imports only api and app, and every unit
+# imports only the units below it (pyproject [tool.importlinter]). About 2 s.
+echo "pre-commit: lint-imports"
+"$UV" run lint-imports > "$MYPY_LOG" 2>&1 || { tail -20 "$MYPY_LOG"; fail=1; }
+
+# Status-literal gate (Sprint 224h; UI sprint 107; lens audit F292): one script, both repos.
 echo "pre-commit: status-literal-comparison gate"
-STATUS_RE='[=!]= *"(ended|parked|interrupted|running|exited|stopped|incomplete|paused|finalised|failed)"|"(ended|parked|interrupted|running|exited|stopped|incomplete|paused|finalised|failed)" *[=!]='
-UI_PY=""
-[ -d ../substrate-ui ] && UI_PY="$(ls ../substrate-ui/*.py)"
+UI_SRC=""
+[ -d ../substrate-ui ] && UI_SRC="$(ls ../substrate-ui/*.py) ../substrate-ui/scripts ../substrate-ui/web"
 # shellcheck disable=SC2086
-if grep -rnE --include="*.py" "$STATUS_RE" src/ $UI_PY 2>/dev/null; then
-  echo "  ^^ Compare against SessionStatus.* / TaskStatus.* / RunStatus.* instead."
-  fail=1
-fi
+bash scripts/check_status_literals.sh src/ scripts/ $UI_SRC || fail=1
 
 [ "$fail" -ne 0 ] && echo "pre-commit FAILED — fix the above (or: git commit --no-verify to override deliberately)"
 exit $fail

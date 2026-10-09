@@ -23,10 +23,9 @@ from substrate.adapters import DeterministicResponder
 from substrate.topologies.tool_loop.delegate import (
     _CONTEXT_SLICE_CAP_BYTES,
     _extract_context_slice,
-    prefix_context_slice,
     make_delegate,
+    prefix_context_slice,
 )
-
 
 # ── extractor unit tests (deterministic; no runtime) ────────────────────────
 
@@ -209,6 +208,7 @@ async def test_context_slice_reaches_the_child_task(tmp_path: Path) -> None:
     parent_root = tmp_path / "parent-record"
 
     from collections.abc import AsyncIterator
+
     from msgspec import Struct
 
     class ParentReply(Struct, frozen=True):

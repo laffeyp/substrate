@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _RUNNER = Path(__file__).resolve().parent.parent / "scripts" / "assay_swebench_confirmatory.py"
 
 

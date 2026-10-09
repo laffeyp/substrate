@@ -39,7 +39,6 @@ from typing import Any
 from . import PromptComposed
 from .vocabulary import PROMPT_FRAGMENT
 
-
 _CHARS_PER_TOKEN = 4  # matches transcript.py's estimator
 
 

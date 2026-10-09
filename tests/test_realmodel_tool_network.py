@@ -20,7 +20,6 @@ from substrate import api
 from substrate.adapters import OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
 from substrate.topologies.tool_loop.tools import full_suite
-
 from tests._sandbox import stub_urlopen
 
 pytestmark = [pytest.mark.realmodel, pytest.mark.usefixtures("no_escape_guard")]

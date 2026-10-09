@@ -100,8 +100,8 @@ def test_combine_repro_scripts_bundles_k_variants_into_one_runner():
     assert "'Issue reproduced'" in runner  # first + third scripts' text
     assert "'Issue resolved'" in runner  # second
     # Actually execute it — verify the runner prints all three markers.
-    import io
     import contextlib
+    import io
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -118,8 +118,8 @@ def test_combine_repro_scripts_isolates_variant_exceptions():
 
     scripts = ["raise RuntimeError('boom')", "print('Issue resolved')"]
     runner = combine_repro_scripts(scripts)
-    import io
     import contextlib
+    import io
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

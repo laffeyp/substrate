@@ -25,7 +25,6 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Final
 
-
 # Sprint 070 (2026-09-02): closed-set string values as StrEnum. Each class
 # below carries the values documented in session-vocabulary.md; wire
 # representation stays the underlying string (msgspec Struct fields accept

@@ -156,12 +156,12 @@ async def test_list_applications_read_back_by_model(tmp_path: Path) -> None:
     """Model calls list_applications; the result carries the app registry
     passed in; model's answer names at least one application."""
     _require_model()
-    from substrate.topologies.tool_loop.substrate_tools import make_list_applications
-
     # `_make_list_applications_impl` reads `.name/.description/.runs/.
     # output_kind` off the values — msgspec Structs in production. A
     # lightweight namespace stand-in has the same duck type.
     from types import SimpleNamespace
+
+    from substrate.topologies.tool_loop.substrate_tools import make_list_applications
 
     app_registry = {
         "code_review": SimpleNamespace(
@@ -212,8 +212,9 @@ async def test_list_records_read_back_by_model(tmp_path: Path) -> None:
     list_records, result shape matches, model's answer references the
     count."""
     _require_model()
-    from substrate.topologies.tool_loop.substrate_tools import make_list_records
     import msgspec
+
+    from substrate.topologies.tool_loop.substrate_tools import make_list_records
 
     # Two fake session records under `records_root/`. list_records walks
     # `<records_root>/<sid>/manifest.json` (server layout).
@@ -265,7 +266,7 @@ async def test_list_records_read_back_by_model(tmp_path: Path) -> None:
 
 
 class _FakeRegistry:
-    """Duck-type of substrate.session_registry.SessionRegistry.list_all,
+    """Duck-type of substrate.topologies.session_registry.SessionRegistry.list_all,
     kept in-file so the test does not import the daemon."""
 
     def __init__(self, rows: list[Any]) -> None:

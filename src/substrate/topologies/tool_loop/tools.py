@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from functools import partial
@@ -325,8 +326,11 @@ def _grep(root: Path, a: list[Any]) -> list[str]:
 
 
 def _web_fetch(a: list[Any]) -> str:  # no path arg — the workspace root doesn't apply
-    req = urllib.request.Request(str(a[0]), headers={"User-Agent": "substrate-tool-loop"})
-    with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 — explicit agent tool
+    url = str(a[0])
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        raise ValueError(f"web_fetch takes an http(s) URL, not {url!r}")  # no file:, ftp:, data:
+    req = urllib.request.Request(url, headers={"User-Agent": "substrate-tool-loop"})  # noqa: S310 — scheme checked above
+    with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 — scheme checked above
         return str(r.read(20000).decode("utf-8", "replace"))
 
 
@@ -504,7 +508,7 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
     if ctx is not None and (shell_done or timed_out):
         try:
             _emit_bash_progress(ctx, chunk=pending, offset=emitted, eof=True)
-        except Exception:  # noqa: BLE001 — see above
+        except Exception:  # noqa: BLE001, S110 — see above
             pass
     stdout_text, _ = read_since(out_path, 0, 8000)
     stderr_full = err_path.read_text(encoding="utf-8", errors="replace")

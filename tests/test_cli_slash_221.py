@@ -13,20 +13,26 @@ updated its state. Non-daemon slashes (`/help`, `/exit`, `/context`,
 
 from __future__ import annotations
 
-import threading
-from http.server import ThreadingHTTPServer
 from typing import Any
 
 import pytest
 
-from tests._ui_daemon import ui_server_module
-
+from tests._ui_daemon import ui_daemon
 
 # ── real-daemon fixture (imported once per module) ───────────────────────
 
 
 @pytest.fixture(scope="module")
-def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
+def daemon_app(tmp_path_factory: pytest.TempPathFactory) -> object:
+    """The daemon's App, served for the whole module by `daemon_base`."""
+    app, srv = ui_daemon(tmp_path_factory.mktemp("daemon-base"))
+    yield app, srv
+    srv.shutdown()
+    srv.server_close()
+
+
+@pytest.fixture(scope="module")
+def daemon_base(daemon_app: tuple[object, object]) -> str:
     """Boot substrate-ui's daemon in-process on a random TCP port.
 
     The daemon shares this test's Python process; the CLI's `_daemon`
@@ -34,16 +40,7 @@ def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
     that mutates state creates its own session and asserts on the
     daemon-side registry after — a real dual contract, no mocks.
     """
-    base_dir = tmp_path_factory.mktemp("daemon-base")
-    server = ui_server_module()
-    from substrate.session_registry import SessionRegistry
-
-    server._SESSION_REGISTRY = SessionRegistry(
-        base=base_dir,
-        session_topology_factory=server._build_session_topology_from_manifest,
-    )
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    app, srv = daemon_app
     tcp_port = srv.server_address[1]
     # Point the CLI's daemon client at this port; disable UDS.
     from substrate import _daemon
@@ -52,8 +49,6 @@ def daemon_base(tmp_path_factory: pytest.TempPathFactory) -> str:
     _daemon.os.environ["SUBSTRATE_DAEMON_PORT"] = str(tcp_port)
     _daemon.os.environ["SUBSTRATE_DAEMON_SOCK"] = "/nonexistent/socket"
     yield f"http://127.0.0.1:{tcp_port}"
-    srv.shutdown()
-    srv.server_close()
 
 
 @pytest.fixture
@@ -193,28 +188,24 @@ def test_list_applications_prints_hint_and_does_not_pollute_pending_context(
 
 
 def test_model_slash_updates_manifest_driver_on_the_daemon(
-    session: dict[str, Any], daemon_base: str
+    session: dict[str, Any], daemon_base: str, daemon_app: tuple[object, object]
 ) -> None:
     """/model X → PATCH /api/session/<id> {driver: X} → registry sees X."""
-    import server
-
     sid = session["session_id"]
     handled, _ = _route("/model deterministic", session)
     assert handled is True
-    manifest = server._SESSION_REGISTRY.get(sid)
+    manifest = daemon_app[0].registry.get(sid)
     assert manifest.driver == "deterministic"
 
 
 def test_tools_slash_updates_manifest_tools_on_the_daemon(
-    session: dict[str, Any], daemon_base: str
+    session: dict[str, Any], daemon_base: str, daemon_app: tuple[object, object]
 ) -> None:
     """/tools a,b,c → PATCH /api/session/<id> {tools: [a,b,c]} → registry sees them."""
-    import server
-
     sid = session["session_id"]
     handled, _ = _route("/tools read_file,grep", session)
     assert handled is True
-    manifest = server._SESSION_REGISTRY.get(sid)
+    manifest = daemon_app[0].registry.get(sid)
     assert manifest.tools == ("read_file", "grep")
 
 

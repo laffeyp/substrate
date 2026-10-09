@@ -17,20 +17,20 @@ measured (it times the whole solve). Wiring metered calls is a later refinement.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, cast
 
 from .. import api
-import os
-
 from ..adapters import OllamaResponder, ProviderQuota, RateLimitedResponder, Responder
 from ..adapters.rate_limit import OllamaQuota
+from ..topologies.swebench_solver.assemble import swebench_repair_topology
+from ..topologies.swebench_solver.firewall import FirewallViolation, firewall_check
 from ..topologies.swebench_solver.records import SelectedPatch
 from .suite import Arm, Case, Suite
-from .swebench import FirewallViolation, firewall_check, swebench_record_oracle
+from .swebench import swebench_record_oracle
 from .swebench_agent import solve_in_container
 from .swebench_host import solve_on_host
-from ..topologies.swebench_solver.assemble import swebench_repair_topology
 from .swebench_suite import PreparedPayload, safe_case_id
 
 _Factory = Callable[[], Any]
@@ -125,8 +125,8 @@ def _backend_topology_with_grade(
     from the oracle. Same discipline as Sprint 196: audit-vs-grade split preserved, grade
     itself remains non-deterministic (pytest inside Docker), the audit re-derives from
     the record."""
-    from ..topologies.swebench_solver.grader import grade_producer_factory
     from ..topologies.swebench_solver.records import GradeResult
+    from .swebench_grade_producer import grade_producer_factory
 
     def topo(b: api.TopologyBuilder) -> None:
         b.producer_kind(

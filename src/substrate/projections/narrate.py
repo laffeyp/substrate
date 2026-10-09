@@ -30,13 +30,14 @@ position.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
-from pathlib import Path
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from msgspec import Struct
 
 from ..constants import (
+    FAILURE_KINDS,
+    INITIAL_TRIGGER_ID,
     INJECTION_APPLIED,
     INPUT_BUILD_FAILED,
     PREDICATE_QUARANTINED,
@@ -50,7 +51,8 @@ from ..constants import (
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
 )
-from ..record.record import read_record
+from ..kernel.policies import Decision
+from ..record.record import load_envelopes
 
 # Lifecycle bracketing suppressed by default — implied by the trigger beat + the work event.
 _LIFECYCLE_NOISE = frozenset(
@@ -66,16 +68,7 @@ _LIFECYCLE_NOISE = frozenset(
 # invalid-emission raw echo).
 _ELIDE = frozenset({"topology", "schemas", "baseline", "config", "raw_payload", "producer"})
 
-# Authoring-failure kinds — counted distinctly by the summary so a finalised-but-broken run
-# is legible as broken (mirrors cli._FAILURE_KINDS).
-_FAILURE_KINDS = frozenset(
-    {
-        PRODUCER_FAILED,
-        INPUT_BUILD_FAILED,
-        PREDICATE_QUARANTINED,
-        PRODUCER_EMITTED_INVALID,
-    }
-)
+_FAILURE_KINDS = FAILURE_KINDS
 
 
 class NarrationLine(Struct, frozen=True):
@@ -105,17 +98,6 @@ class NarrationSummary(Struct, frozen=True):
     predicate_quarantines: int
     invalid_emissions: int
     application_events: dict[str, int]
-
-
-def _load(record: Any) -> list[dict[str, Any]]:
-    """Accept a record root path or an iterable of envelopes (the inspect-surface contract)."""
-    if isinstance(record, (str, Path)):
-        return list(read_record(record))
-    if isinstance(record, Iterable):
-        return list(record)
-    raise TypeError(
-        f"expected a record root path or an iterable of envelopes, got {type(record)!r}"
-    )
 
 
 def _short(value: Any, *, limit: int = 50) -> str:
@@ -154,9 +136,9 @@ def _trigger_fired(p: dict[str, Any], ref: Any) -> str:
     factory = p.get("factory", "?")
     trigger_id = p.get("trigger_id", "?")
     key = p.get("firing_key")
-    if trigger_id == "__initial__":
+    if trigger_id == INITIAL_TRIGGER_ID:
         return f"Initial trigger starts {factory}."
-    on_key = "" if key in (None, "__initial__") else f" on key={key}"
+    on_key = "" if key in (None, INITIAL_TRIGGER_ID) else f" on key={key}"
     return f"Trigger {trigger_id} fired{on_key} -> starts {factory}."
 
 
@@ -189,7 +171,7 @@ def _invalid_emission(p: dict[str, Any], ref: Any) -> str:
 
 def _termination_matched(p: dict[str, Any], ref: Any) -> str:
     decision = p.get("decision", "?")
-    if decision == "pause-await-input":
+    if decision == Decision.PAUSE_AWAIT_INPUT.value:
         # the load-bearing fact about a pause is WHAT input it awaits (review #26) — render the
         # typed resume_condition, not a bare "pause-await-input".
         cond = p.get("resume_condition")
@@ -250,7 +232,7 @@ def narrate(record: Any, *, lifecycle: bool = False) -> Iterator[NarrationLine]:
     """Narrate a run record beat by beat. By default suppresses the lifecycle bracketing
     (ProducerStarted / ProducerCompleted / InjectionApplied); `lifecycle=True` includes it.
     Yields a NarrationLine per narrated event, in seq order (the log's total order)."""
-    for env in _load(record):
+    for env in load_envelopes(record, resolve_blobs=True):
         kind = str(env.get("kind", ""))
         if not lifecycle and kind in _LIFECYCLE_NOISE:
             continue
@@ -279,7 +261,7 @@ def narration_summary(record: Any) -> NarrationSummary:
     finalised = False
     final_reason: str | None = None
     total = 0
-    for env in _load(record):
+    for env in load_envelopes(record, resolve_blobs=True):
         total += 1
         kind = str(env.get("kind", ""))
         if kind in counts:

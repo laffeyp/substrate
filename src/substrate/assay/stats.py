@@ -112,7 +112,7 @@ def bootstrap_delta_pass_k(
     cases = sorted(set(arm_by_case) & set(control_by_case))
     if not cases:
         return DeltaCI(0.0, 0.0, 0.0, 1.0, INCONCLUSIVE, 0, k, n_boot, margin)
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 — a seeded bootstrap must be reproducible, not secret
 
     point = sum(
         _phk(arm_by_case[c], k, None) - _phk(control_by_case[c], k, None) for c in cases

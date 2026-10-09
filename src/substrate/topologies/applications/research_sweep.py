@@ -98,7 +98,7 @@ def _reader_factory(question: str, reader: Responder) -> _Factory:
             )
             yield usage
             note = note.strip() or "(no contribution)"
-        except Exception as exc:  # a reader failure is a recorded gap, not a hung run
+        except Exception as exc:  # noqa: BLE001 — a reader failure is a recorded gap, not a hung run
             note = f"(read failed: {type(exc).__name__})"
         yield Finding(index=index, source=source, note=note)
 
@@ -120,7 +120,7 @@ def _critic_factory(question: str, critic: Responder) -> _Factory:
             )
             yield usage  # metered onto the record (F-18)
             note = note.strip() or "(no gaps named)"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a model failure becomes a recorded gap; K254 retires this (ledger F127, F189)
             note = f"(critic failed: {type(exc).__name__})"
         yield Gaps(note=note)
 
@@ -143,7 +143,7 @@ def _synthesizer_factory(question: str, synthesizer: Responder) -> _Factory:
             )
             yield usage  # metered onto the record (F-18)
             text = text.strip() or "(empty synthesis)"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a model failure becomes a recorded gap; K254 retires this (ledger F127, F189)
             text = f"(synthesis failed: {type(exc).__name__})"
         yield Synthesis(text=text)
 

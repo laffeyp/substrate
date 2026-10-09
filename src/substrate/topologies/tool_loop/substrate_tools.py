@@ -24,13 +24,12 @@ remote one (HTTP over UDS/TCP) — the seam is the same.
 
 from __future__ import annotations
 
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Final, Protocol
 
 from ...constants import RunStatus
 from .tools import Tool, positive_int
-
 
 # Sprint 072 named this file as a target for TOOL_NAME_* constants; the
 # migration never landed. Drift-grooming 2026-09-02: each toolkit tool
@@ -309,8 +308,8 @@ def _sign_cursor(payload: dict[str, Any], hmac_key: bytes) -> str:
     daemon-boot random key means a cursor is one-boot-live only, which
     matches the `_TOPOLOGY_RUNS` in-memory-only shape (§13.5 red-team)."""
     import base64
-    import hmac
     import hashlib
+    import hmac
 
     import msgspec
 
@@ -327,8 +326,8 @@ def _verify_cursor(cursor: str, hmac_key: bytes) -> dict[str, Any] | None:
     A tampered or otherwise-invalid cursor produces a typed
     ToolResult(ok=false) at the caller layer."""
     import base64
-    import hmac
     import hashlib
+    import hmac
 
     import msgspec
 
@@ -600,7 +599,7 @@ def make_inspect_record(
 
 
 class _SessionRegistryLike(Protocol):
-    """The subset of substrate.session_registry.SessionRegistry
+    """The subset of substrate.topologies.session_registry.SessionRegistry
     substrate_tools reaches. Duck-typed for testability."""
 
     def list_all(self) -> list[Any]: ...
@@ -727,7 +726,7 @@ def _make_list_sessions_impl(
     manifest so a rename or a new bucket lands at import via NameError
     instead of drifting silently on the wire (sprint 070 promoted
     STATUS_* constants to a StrEnum)."""
-    from ...session_registry import SessionStatus
+    from ..session_registry import SessionStatus
 
     live: list[dict[str, Any]] = []
     parked: list[dict[str, Any]] = []

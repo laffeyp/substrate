@@ -15,7 +15,7 @@ import sys
 
 from datasets import load_dataset
 
-from substrate.assay.swebench import firewall_check
+from substrate.topologies.swebench_solver.firewall import firewall_check
 from substrate.topologies.swebench_solver.select_docker import (
     DockerTestRunner,
     instance_image,

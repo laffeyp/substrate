@@ -16,7 +16,6 @@ from click.testing import CliRunner
 
 from substrate.templates.interpolate import parse_template_header, render
 
-
 SHIPPED_TEMPLATES = (
     "default",
     "code_review",

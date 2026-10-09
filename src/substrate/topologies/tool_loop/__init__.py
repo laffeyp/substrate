@@ -46,8 +46,8 @@ from typing import Any
 from msgspec import Struct
 
 from ... import api
-from ...encoding import canonical_bytes
 from ...adapters import Responder, call_responder
+from ...encoding import canonical_bytes
 from .tools import CALCULATOR, Tool, ollama_tools, parse_tool_call, required_params, suite_describe
 
 _Factory = Callable[[], Any]
@@ -410,7 +410,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
                 for hook in list(cancel_hooks):
                     try:
                         hook()
-                    except Exception:  # noqa: BLE001 — one failed stop must not skip the others
+                    except Exception:  # noqa: BLE001, S110 — one failed stop must not skip the others
                         pass
                 raise
             finally:
@@ -420,7 +420,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             # HERE, not an emit-time crash (the yield's encode runs in the runtime, outside this try).
             raw = canonical_bytes(output)
         except (
-            Exception
+            Exception  # noqa: BLE001 — bad args, not-found, IO or non-encodable output become ok=False, never a crash
         ) as exc:  # bad args / not-found / IO / non-encodable output -> ok=False, no crash
             yield ToolResult(
                 call_id=call_id,

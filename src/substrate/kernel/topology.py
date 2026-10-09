@@ -18,10 +18,10 @@ from msgspec import Struct
 
 from ..constants import is_reserved
 from ..errors import SubstrateError
-from .policies import TerminationPolicy
 from ..protocols import Producer, TriggerContext, View
-from .triggers import Cooldown, FiringPolicy, Logical, PerEvent, WallClock, WhileTrue
 from ..types import Subscription
+from .policies import TerminationPolicy
+from .triggers import Cooldown, FiringPolicy, Logical, PerEvent, WallClock, WhileTrue
 
 
 class RegistrationError(SubstrateError):
@@ -199,7 +199,10 @@ class TopologyBuilder:
                     f"reserved namespace."
                 )
             schema_map[s.__name__] = (s, schema_version)
-        assert factory is not None  # the exactly-one check above guarantees this
+        if (
+            factory is None
+        ):  # the exactly-one check above rules this out; say so if it ever does not
+            raise RegistrationError(f'producer_kind "{kind}": no factory')
         # Derive the composition export map from the embedded substrate's OWN map (single
         # source of truth): an embedded_substrate `start` callable carries
         # __substrate_export_map__; build the factory once (cheap — just constructs the
@@ -210,7 +213,7 @@ class TopologyBuilder:
             raw = getattr(built, "__substrate_export_map__", None)
             if isinstance(raw, dict):
                 export_map = dict(raw)
-        except Exception:
+        except Exception:  # noqa: BLE001 — a factory that cannot be pre-built has no static export map (K251 F028 revisits this sniff)
             export_map = None  # a factory that can't be pre-built has no static export map
         if budget is not None and budget.event_counts is not None:
             # Sprint 199 (roadmap v2 S7a fold-in): wall_seconds enforcement lives at

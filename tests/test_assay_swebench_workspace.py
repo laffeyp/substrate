@@ -8,8 +8,8 @@ from pathlib import Path
 
 from substrate.assay.swebench_workspace import (
     filter_diff,
-    is_test_file,
     graded_test_files,
+    is_test_file,
     workspace_diff,
 )
 

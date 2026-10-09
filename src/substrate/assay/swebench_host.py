@@ -18,7 +18,7 @@ import shutil
 from typing import Any, Protocol
 
 from ..topologies.swebench_solver.applier import apply_candidate
-from .swebench import firewall_check
+from ..topologies.swebench_solver.firewall import firewall_check
 from .swebench_workspace import graded_test_files, host_clone, workspace_diff
 
 

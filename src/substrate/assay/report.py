@@ -23,8 +23,8 @@ bootstrap is seeded, so the Report is REPEATABLE (same results -> same CI).
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from .conformance import PASS, ControlRanCheck, check_control_ran

@@ -19,9 +19,10 @@ from datasets import load_dataset
 
 from substrate.assay.run import run_arm_on_case
 from substrate.assay.suite import FULL, Arm
-from substrate.assay.swebench import firewall_check, swebench_record_oracle
+from substrate.assay.swebench import swebench_record_oracle
 from substrate.assay.swebench_suite import prepare_swebench_case, solver_topology_from_payload
 from substrate.reference._models import OllamaResponder
+from substrate.topologies.swebench_solver.firewall import firewall_check
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 8
 MODEL = sys.argv[2] if len(sys.argv) > 2 else "qwen3-coder:480b-cloud"

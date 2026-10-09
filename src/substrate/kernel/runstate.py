@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from ..types import Event
 
 
-class RunPhase(enum.Enum):
+class RunPhase(enum.StrEnum):
     """The run's lifecycle phase. Legal transitions: RUNNING -> {FINALISED, PAUSED,
     FAILED}; PAUSED is a non-terminal rest (a resume re-enters RUNNING, handled by the
     caller). Terminal phases (FINALISED, FAILED) forbid any further bus append (the

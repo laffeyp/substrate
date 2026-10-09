@@ -37,8 +37,8 @@ from substrate.topologies.code_review import DEFAULT_ROLES, code_review_topology
 from substrate.topologies.debate import debate_topology
 from substrate.topologies.intel_asymmetry import intel_asymmetry_topology
 from substrate.topologies.natural_conversation import natural_conversation_topology
-from substrate.topologies.prisoners_dilemma import prisoners_dilemma_topology
 from substrate.topologies.pair_coding import pair_coding_topology
+from substrate.topologies.prisoners_dilemma import prisoners_dilemma_topology
 from substrate.topologies.recursive_decomposition import recursive_decomposition_topology
 
 pytestmark = pytest.mark.realmodel

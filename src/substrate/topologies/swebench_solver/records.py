@@ -90,7 +90,7 @@ class ReproductionTest(Struct, frozen=True):
     code: str
 
 
-class Reproduction(enum.Enum):
+class Reproduction(enum.StrEnum):
     """The reproduction test's three-state outcome — enforced at the speaker's mouth (#2), not by string
     convention."""
 
@@ -122,7 +122,7 @@ class SelectedPatch(Struct, frozen=True):
 # --- TERMINAL OUTCOME (the always-emit summary) ---
 
 
-class RepairOutcome(enum.Enum):
+class RepairOutcome(enum.StrEnum):
     """Why a repair run terminated — the ENUMERATED terminal states (technique #53), so the record SAYS why
     a run produced no patch instead of leaving it implicit in the absence of other events. The judge only
     declares success when a candidate APPLIES, so the no-patch case splits by whether localization

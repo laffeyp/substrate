@@ -25,11 +25,11 @@ from .applications.fanout_review import fanout_review_topology
 from .applications.research_sweep import research_sweep_topology
 from .code_review import DEFAULT_ROLES, code_review_topology
 from .debate import debate_topology
+from .game_of_life import game_of_life_topology, glider
 from .intel_asymmetry import intel_asymmetry_topology
 from .natural_conversation import natural_conversation_topology
-from .prisoners_dilemma import prisoners_dilemma_topology
 from .pair_coding import pair_coding_topology
-from .game_of_life import game_of_life_topology, glider
+from .prisoners_dilemma import prisoners_dilemma_topology
 from .recursive_decomposition import recursive_decomposition_topology
 from .session.ci import ci_session_topology
 from .swebench_solver.bundled import swebench_repair_ci

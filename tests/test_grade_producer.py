@@ -16,7 +16,7 @@ import asyncio
 
 def test_empty_patch_grade_producer_yields_one_grade_result_fail(tmp_path):
     """Empty patch → run_swebench_one fast-path FAIL → GradeResult(verdict="fail")."""
-    from substrate.topologies.swebench_solver.grader import grade_producer_factory
+    from substrate.assay.swebench_grade_producer import grade_producer_factory
     from substrate.topologies.swebench_solver.records import GradeResult
 
     factory = grade_producer_factory(
@@ -45,10 +45,10 @@ def test_grade_producer_maps_verdict_enum_to_wire_string(tmp_path, monkeypatch):
     GradeResult event carries (`"pass"` / `"fail"` / `"no_verdict"`). Same three strings
     the vocab v0.3 § E.1 Verdict enum's `.value` field carries. Monkeypatch
     `run_swebench_one` to return each of the three verdicts and verify the mapping."""
+    from substrate.assay import swebench_grade_producer as grader_module
     from substrate.assay.oracle import Verdict as V
     from substrate.assay.swebench import HarnessOutcome
-    from substrate.topologies.swebench_solver import grader as grader_module
-    from substrate.topologies.swebench_solver.grader import grade_producer_factory
+    from substrate.assay.swebench_grade_producer import grade_producer_factory
 
     mapping = [
         (HarnessOutcome(verdict=V.PASS, reason="", detail="ok"), "pass", ""),

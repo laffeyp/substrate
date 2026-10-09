@@ -120,8 +120,8 @@ def test_5_a_delegated_childs_tasks_stop_when_the_child_ends(
 
 def test_6_session_end_and_delete_stop_the_sessions_tasks(tmp_path: Path) -> None:
     from substrate.adapters import DeterministicResponder
-    from substrate.session_registry import SessionManifest, SessionRegistry
     from substrate.topologies.session import SessionEndRequested, UserMessage, session_topology
+    from substrate.topologies.session_registry import SessionManifest, SessionRegistry
 
     def factory(m: SessionManifest, first: Any = None) -> Any:
         return session_topology(

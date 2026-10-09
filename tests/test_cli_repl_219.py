@@ -14,13 +14,11 @@ from __future__ import annotations
 
 import threading
 import time
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
-from tests._ui_daemon import ui_server_module
-
+from tests._ui_daemon import ui_daemon
 
 # ── unit test for the formatter ───────────────────────────────────────────────
 
@@ -102,18 +100,10 @@ def test_sse_stream_reads_turn_events_from_running_daemon(tmp_path: Path) -> Non
     the main thread. The SSE reader thread should see the turn's ModelReply
     and format it before the loop ends."""
 
-    server = ui_server_module()
-    from substrate.session_registry import SessionRegistry
-
     from substrate import _daemon, cli
 
     # Boot registry + TCP daemon.
-    server._SESSION_REGISTRY = SessionRegistry(
-        base=tmp_path,
-        session_topology_factory=server._build_session_topology_from_manifest,
-    )
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    _app, srv = ui_daemon(tmp_path)
     tcp_port = srv.server_address[1]
 
     # Point the CLI's daemon client at this TCP port; disable UDS lookup.

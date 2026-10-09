@@ -51,6 +51,7 @@ def test_child_baseline_carries_parent_session_id(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_child_baseline_carries_parent_seq_at_call(tmp_path: Path) -> None:
     from collections.abc import AsyncIterator
+
     from msgspec import Struct
 
     class Tick(Struct, frozen=True):

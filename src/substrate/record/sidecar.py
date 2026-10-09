@@ -134,8 +134,12 @@ def read_sidecar(path: Path | str) -> list[dict[str, Any]]:
     if not p.exists():
         return []
     out: list[dict[str, Any]] = []
-    for line in p.read_text().splitlines():
-        line = line.strip()
-        if line:
+    lines = [ln.strip() for ln in p.read_text().splitlines() if ln.strip()]
+    for i, line in enumerate(lines):
+        try:
             out.append(json.loads(line))
+        except json.JSONDecodeError:
+            if i == len(lines) - 1:
+                break  # the flush is a plain append; a crash mid-write leaves a cut last line
+            raise
     return out

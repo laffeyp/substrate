@@ -128,5 +128,5 @@ def test_termination_name_lists_all_ten_triggers_and_no_all_completed() -> None:
     _, termination = _open_scaffold()
     assert termination is not None
     assert "pause_await_input" in termination.name
-    assert "threshold_count(SessionEnded,1)" in termination.name
+    assert "finalise_on(SessionEnded)" in termination.name
     assert "all_completed" not in termination.name

@@ -43,27 +43,28 @@ from ..constants import (
     RUN_FINALISED,
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
+    InvalidReason,
+    RunStatus,
 )
-from ..kernel.composition import embedded_substrate
 from ..errors import BusLockedError, ProducerNotFound
-from ..projections.inspect import first_divergence, trace_ancestry, view_at
+from ..kernel.composition import embedded_substrate
 from ..kernel.policies import Decision, TerminationPolicy, quiescence_with_watchdog, threshold_count
-from ..constants import RunStatus
-from ..projections.replay import replay
-from ..record.record import read_record
 from ..kernel.runtime import Runtime
 from ..kernel.triggers import Once, PerEvent
-from ..types import Subscription
 from ..kernel.views import KindCount
+from ..projections.inspect import first_divergence, trace_ancestry, view_at
+from ..projections.replay import replay
+from ..record.record import read_record
+from ..types import Subscription
 
 
-class Status(enum.Enum):
+class Status(enum.StrEnum):
     """The outcome of one conformance check: PASS, FAIL, DEFERRED (spec-amended "not shippable
     in v1.0" — only check 6's Level-3b clause, A1.1), or SKIPPED (not exercised on this
     invocation, e.g. check 15 under --no-perf). DEFERRED and SKIPPED are deliberately distinct
     so a skip never reads as a ruled deferral."""
 
-    PASS = "PASS"
+    PASS = "PASS"  # noqa: S105 — a verdict word, not a credential
     FAIL = "FAIL"
     # DEFERRED is reserved for a SPEC-AMENDED deferral (check 6's Level-3b clause, A1.1) — a
     # real, ruled "not shippable in v1.0" state. SKIPPED is for a run-time skip (e.g. check 15
@@ -247,7 +248,7 @@ async def _check_4_invalid_emission(root: Path) -> CheckResult:
     inv = [e for e in envs if e["kind"] == PRODUCER_EMITTED_INVALID]
     if (
         inv
-        and inv[0]["payload"]["reason"] == "unknown_kind"
+        and inv[0]["payload"]["reason"] == InvalidReason.UNKNOWN_KIND
         and not any(e["kind"] == "Undeclared" for e in envs)
     ):
         return CheckResult(
@@ -674,7 +675,7 @@ async def run_conformance(*, include_perf: bool = True) -> ConformanceReport:
             root = base / f"check-{i:02d}"
             try:
                 results.append(await check(root))
-            except Exception as exc:  # a check raising is itself a FAIL, with the error
+            except Exception as exc:  # noqa: BLE001 — a check raising is itself a FAIL, with the error
                 results.append(
                     CheckResult(i, check.__name__, Status.FAIL, f"check raised: {exc!r}")
                 )

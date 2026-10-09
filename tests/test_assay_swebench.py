@@ -16,6 +16,7 @@ import pytest
 
 from substrate.assay.oracle import EXTERNAL_GRADER, Verdict
 from substrate.assay.swebench import (
+    _HARNESS_REASONS,
     KEY_INSTANCE_ID,
     KEY_MODEL,
     KEY_PREDICTION,
@@ -27,7 +28,6 @@ from substrate.assay.swebench import (
     REASON_RATE_LIMITED,
     REASON_TIMED_OUT,
     HarnessOutcome,
-    _HARNESS_REASONS,
     make_prediction,
     model_patch_from_record,
     read_resolved,
@@ -168,7 +168,7 @@ def test_swebench_oracle_grades_from_a_prerun_report(tmp_path):
 
 
 def test_firewall_check_both_test_id_formats() -> None:
-    from substrate.assay.swebench import firewall_check
+    from substrate.topologies.swebench_solver.firewall import firewall_check
 
     clean = {
         "patch": "+++ b/src/m.py\n",

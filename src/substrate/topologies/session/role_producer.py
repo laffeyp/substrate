@@ -36,7 +36,6 @@ from . import PromptFragment
 from .roles import resolve_role_prompt_with_source
 from .vocabulary import PromptSource
 
-
 _PRECEDENCE = 0  # reserved band from session-vocabulary.md § I
 
 

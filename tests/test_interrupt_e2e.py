@@ -27,11 +27,12 @@ import asyncio
 import time
 from typing import Any
 
+import pytest
+
 from substrate import api
 from substrate.adapters import DeterministicResponder
-from substrate.topologies.session import InterruptRequested, session_topology, UserMessage
+from substrate.topologies.session import InterruptRequested, UserMessage, session_topology
 from substrate.topologies.tool_loop.tools import Tool
-import pytest
 
 # A short scripted run inside one K-window: the documented exception to session_topology's
 # record_root warning (UI sprint 107 states it here instead of letting it print on every run).

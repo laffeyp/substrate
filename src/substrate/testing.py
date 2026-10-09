@@ -10,19 +10,10 @@ assertions work on a live attached record.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
-from .record.record import read_record
-
-
-def _load(rec: Any) -> list[dict[str, Any]]:
-    if isinstance(rec, (str, Path)):
-        return list(read_record(rec))
-    if isinstance(rec, Iterable):
-        return list(rec)
-    raise TypeError(f"expected a record root path or an iterable of envelopes, got {type(rec)!r}")
+from .record.record import load_envelopes
 
 
 def _matches(env: dict[str, Any], kind: str, partial: dict[str, Any]) -> bool:
@@ -35,7 +26,7 @@ def _matches(env: dict[str, Any], kind: str, partial: dict[str, Any]) -> bool:
 def assert_event(rec: Any, kind: str, **partial: Any) -> dict[str, Any]:
     """Assert at least one event of `kind` with the given partial payload exists;
     return the first match. Raises AssertionError citing what was searched."""
-    for env in _load(rec):
+    for env in load_envelopes(rec, resolve_blobs=True):
         if _matches(env, kind, partial):
             return env
     raise AssertionError(f"no event kind={kind!r} with payload⊇{partial}")
@@ -44,14 +35,14 @@ def assert_event(rec: Any, kind: str, **partial: Any) -> dict[str, Any]:
 def assert_no_event(rec: Any, kind: str, **partial: Any) -> None:
     """Assert NO event of `kind` with the given partial payload exists; raises AssertionError
     citing the offending seq if one does."""
-    for env in _load(rec):
+    for env in load_envelopes(rec, resolve_blobs=True):
         if _matches(env, kind, partial):
             raise AssertionError(f"unexpected event kind={kind!r} at seq={env.get('seq')}")
 
 
 def assert_sequence(rec: Any, kinds: Sequence[str]) -> list[dict[str, Any]]:
     """Assert the record's event-kind sequence equals `kinds` exactly."""
-    envs = _load(rec)
+    envs = load_envelopes(rec, resolve_blobs=True)
     got = [e.get("kind") for e in envs]
     if got != list(kinds):
         raise AssertionError(f"sequence mismatch:\n  expected {list(kinds)}\n  got      {got}")

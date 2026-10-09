@@ -26,11 +26,10 @@ import msgspec
 from msgspec import Struct
 from ulid import ULID
 
-from ..record import locking
-from ..constants import RunStatus
 from ..constants import (
     BUDGET_US,
     HYSTERESIS_K,
+    INITIAL_TRIGGER_ID,
     INPUT_BUILD_FAILED,
     PRODUCER_CANCELLED,
     PRODUCER_COMPLETED,
@@ -41,25 +40,27 @@ from ..constants import (
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
     VOCAB_VERSION,
+    RunStatus,
     is_reserved,
 )
 from ..encoding import content_hash, to_canonical_builtins, try_canonical
 from ..errors import FsyncError, ReentrantAppendError
-from .policies import Decision, TermContext, quiescence_with_watchdog
+from ..record import locking
 from ..record.record import (
     FsyncPolicy,
     Interval,
     RecordWriter,
-    _hot_segment,
+    hot_segment,
     read_record,
     recover_open_segment,
 )
-from .runstate import RunPhase, RunState
 from ..record.sealing import seal
-from .sequencer import AppendCycle, _Emission, _Lifecycle
 from ..record.sidecar import DiagnosticSidecar, WriterStatsSidecar
-from .topology import Registration, RegistrationError, TopologyBuilder
 from ..types import Event, ProducerRef
+from .policies import Decision, TermContext, quiescence_with_watchdog
+from .runstate import RunPhase, RunState
+from .sequencer import AppendCycle, _Emission, _Lifecycle
+from .topology import Registration, RegistrationError, TopologyBuilder
 
 _QUIESCENCE_POLL_S = 0.01  # writer idle-poll for the quiescence/watchdog check
 # Sprint 199a (SDD vocabulary-as-contract, fold): a `Budget.wall_seconds` breach adds a
@@ -255,7 +256,7 @@ class Runtime:
         # aimed at a root that already holds a crash-torn open segment (operator error / a reused
         # persistent root), recover too — otherwise new frames append AFTER the torn bytes, embedding
         # a permanently-corrupt line. recover_open_segment is non-destructive of good frames.
-        if resuming or (self._record_root.exists() and _hot_segment(self._record_root) is not None):
+        if resuming or (self._record_root.exists() and hot_segment(self._record_root) is not None):
             recover_open_segment(self._record_root)
         try:
             record = RecordWriter(self._record_root, fsync=self._fsync, resume=resuming)
@@ -299,7 +300,7 @@ class Runtime:
             if st is not None:
                 st.phase = RunPhase.FAILED
                 st.record_closed = True  # _do_fsync already closed the fd; do not re-close
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — the writer boundary: a failure in user code or the record is recorded, never a crash
             # The writer itself raised (a kernel bug, §6.3 "the writer itself raises"). The
             # run did not finalise normally; record the kernel error on the log if the record
             # exists and is still open, so the failure is not silent.
@@ -413,7 +414,7 @@ class Runtime:
                     "payload": {"reason": "kernel_error", "error": repr(exc)},
                 }
             )
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — the writer boundary: a failure in user code or the record is recorded, never a crash
             pass  # already failing; do not mask the original error or block the finally
 
     def _fail_stuck_quiescent(self) -> None:
@@ -448,7 +449,7 @@ class Runtime:
                         "payload": {"reason": "stuck_quiescent", "policy": policy, "error": msg},
                     }
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — the writer boundary: a failure in user code or the record is recorded, never a crash
                 pass  # best-effort; the finally still closes the record
         st.phase = RunPhase.FAILED
 
@@ -469,13 +470,13 @@ class Runtime:
                 # the logical value the Producer runs with (D-5).
                 input_fields = self._cyc._resolved_input_fields(init.input)
                 input_hash = content_hash(init.input)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — the writer boundary: a failure in user code or the record is recorded, never a crash
                 self._cyc.cycle(
                     _Lifecycle(
                         INPUT_BUILD_FAILED,
                         {
-                            "trigger_id": "__initial__",
-                            "firing_key": "__initial__",
+                            "trigger_id": INITIAL_TRIGGER_ID,
+                            "firing_key": INITIAL_TRIGGER_ID,
                             "error": repr(exc),
                         },
                     )
@@ -485,8 +486,8 @@ class Runtime:
                 _Lifecycle(
                     TRIGGER_FIRED,
                     {
-                        "trigger_id": "__initial__",
-                        "firing_key": "__initial__",
+                        "trigger_id": INITIAL_TRIGGER_ID,
+                        "firing_key": INITIAL_TRIGGER_ID,
                         "factory": init.kind,
                         "instance": instance,
                         **input_fields,
@@ -658,6 +659,11 @@ class Runtime:
         producer_kind = self._reg.producer_kinds[kind]
         budget = producer_kind.budget
         wall_cap = budget.wall_seconds if budget is not None else None
+        # The wall budget's own timer. `expired()` tells its firing apart from a TimeoutError the
+        # Producer's code raised (a socket or urllib timeout): asyncio.TimeoutError IS TimeoutError
+        # on 3.11+, and the old `assert wall_cap is not None` turned the second case into an
+        # AssertionError that recorded nothing and left the run waiting forever (lens audit F014).
+        wall_timer = asyncio.timeout(float(wall_cap.limit)) if wall_cap is not None else None
         try:
             start = producer_kind.factory()
 
@@ -665,8 +671,9 @@ class Runtime:
                 async for obj in start(inp):
                     await self._submit_emission(ref, obj)
 
-            if wall_cap is not None:
-                await asyncio.wait_for(_consume(), timeout=float(wall_cap.limit))
+            if wall_timer is not None:
+                async with wall_timer:
+                    await _consume()
             else:
                 await _consume()
             inbox.put_nowait(_Lifecycle(PRODUCER_COMPLETED, {"producer": ref}))
@@ -686,8 +693,11 @@ class Runtime:
                     cancel_payload["caller"] = reason["caller"]
             inbox.put_nowait(_Lifecycle(PRODUCER_CANCELLED, cancel_payload))
             raise
-        except asyncio.TimeoutError:
-            assert wall_cap is not None  # only reachable when the budget wrapped _consume
+        except TimeoutError as exc:
+            if wall_cap is None or wall_timer is None or not wall_timer.expired():
+                # The Producer's own code timed out: an ordinary failure, not a budget breach.
+                inbox.put_nowait(_Lifecycle(PRODUCER_FAILED, {"producer": ref, "error": repr(exc)}))
+                return
             payload: dict[str, Any] = {
                 "producer": ref,
                 "error": BUDGET_EXCEEDED_ERROR_TAG,
@@ -698,7 +708,7 @@ class Runtime:
                 },
             }
             inbox.put_nowait(_Lifecycle(PRODUCER_FAILED, payload))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — the writer boundary: a failure in user code or the record is recorded, never a crash
             payload = {"producer": ref, "error": repr(exc)}
             # Composition (§20): an embedded substrate's inner-run failure surfaces as ONE
             # outer ProducerFailed carrying the inner run_id (the exception carries it).
@@ -821,7 +831,7 @@ class Runtime:
             drop_reason: str | None = None
             try:
                 fp = self._termination.finalisation_payload(ctx)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — the writer boundary: a failure in user code or the record is recorded, never a crash
                 drop_reason = f"finalisation callback raised: {exc!r}"
             if fp is not None and drop_reason is None:
                 sc = try_canonical(fp)

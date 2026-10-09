@@ -158,7 +158,7 @@ class TaskTable:
             from ... import api
 
             self._base = api.substrate_home() / "bash"
-        d = self._base / hashlib.sha1(owner.encode()).hexdigest()[:16]
+        d = self._base / hashlib.sha1(owner.encode(), usedforsecurity=False).hexdigest()[:16]
         d.mkdir(parents=True, exist_ok=True)
         return d
 

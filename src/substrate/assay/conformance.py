@@ -20,7 +20,7 @@ from .. import api
 from .run import CaseResult
 from .suite import Suite
 
-PASS = "pass"
+PASS = "pass"  # noqa: S105 — a verdict word, not a credential
 FAIL = "fail"
 NO_CONTROL = "no-control-ran"
 

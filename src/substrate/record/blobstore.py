@@ -34,8 +34,9 @@ class BlobStore:
     """The `blobs/sha256/<first-2-hex>/<full-hex>` tree under a run root."""
 
     def __init__(self, root: Path) -> None:
+        # No mkdir here: a reader redeeming a stub must not create directories in the record it
+        # reads; `put` creates what it writes.
         self._dir = Path(root) / "blobs" / "sha256"
-        self._dir.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, hex_digest: str) -> Path:
         # On the WRITE path hex_digest is content-derived; on the READ path (`get`) it comes from a
@@ -67,7 +68,7 @@ class BlobStore:
         finally:
             os.close(fd)
         os.replace(tmp, path)
-        _fsync_dir(path.parent)
+        fsync_dir(path.parent)
         return BlobRef(sha256=f"sha256:{hex_digest}", bytes=len(data))
 
     def get(self, ref: BlobRef) -> bytes:
@@ -99,7 +100,7 @@ def _read_all(fd: int) -> bytes:
         chunks.append(chunk)
 
 
-def _fsync_dir(directory: Path) -> None:
+def fsync_dir(directory: Path) -> None:
     """fsync a directory so a create/rename is itself durable (technical §5.2)."""
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     dfd = os.open(directory, flags)

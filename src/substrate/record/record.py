@@ -29,17 +29,17 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
 from msgspec import Struct
 
-from .blobstore import BlobStore, _fsync_dir
 from ..constants import SEGMENT_MAX_BYTES
 from ..errors import CRCMismatchError, FsyncError, RecordGapError, TornFrameError
 from ..types import BlobRef
 from . import framing
+from .blobstore import BlobStore, fsync_dir
 
 
 # ── fsync policies (technical §5.1; design §4.8) ───────────────────────────────
@@ -97,23 +97,45 @@ class RecordWriter:
         self._first_seq: int | None = None
         self._last_seq: int | None = None
         self._sealed: list[dict[str, Any]] = []
-        existing_hot = _hot_segment(self.root) if resume else None
+        # The manifest's ceiling and extra fields (run_id, …). A resumed record keeps what its
+        # manifest already says until the runtime writes a new value.
+        self._manifest_ceiling = "3a"
+        self._manifest_extra: dict[str, Any] = {}
+        if resume:
+            self._load_manifest_fields()
+        existing_hot = hot_segment(self.root) if resume else None
         if existing_hot is not None:
             # RESUME: continue the EXISTING hot segment (append-only) rather than opening a
             # fresh events-000001 — so a resumed run continues the same record/segment, and
             # seq continuity is preserved (the runtime restores next_seq from the log tail).
             # The torn tail (if any) was already recovered by the resume path before this.
-            self._seg_index = _segment_index(existing_hot)
+            self._seg_index = segment_index(existing_hot)
             self._open_path = existing_hot
             self._seg_bytes = existing_hot.stat().st_size
-            for seg in _sealed_segments(self.root):  # rebuild the sealed-segment manifest list
+            for seg in sealed_segments(self.root):  # rebuild the sealed-segment manifest list
                 self._sealed.append({"file": seg.name})
         else:
             self._seg_index = 1
             self._open_path = self._segment_path(self._seg_index, hot=True)
             self._seg_bytes = 0
         self._fd = os.open(self._open_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
-        _fsync_dir(self.root)
+        fsync_dir(self.root)
+
+    def _load_manifest_fields(self) -> None:
+        path = self.root / "manifest.json"
+        if not path.is_file():
+            return
+        try:
+            data = json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            return  # an unreadable manifest is advisory; the log is the record
+        if isinstance(data, dict):
+            self._manifest_ceiling = str(data.get("replay_ceiling", "3a"))
+            self._manifest_extra = {
+                k: v
+                for k, v in data.items()
+                if k not in ("sealed_segments", "hot_segment", "replay_ceiling")
+            }
 
     def _segment_path(self, index: int, *, hot: bool) -> Path:
         infix = ".open" if hot else ""
@@ -180,39 +202,43 @@ class RecordWriter:
         os.close(self._fd)
         sealed_path = self._segment_path(self._seg_index, hot=False)
         os.replace(self._open_path, sealed_path)
-        _fsync_dir(self.root)
+        fsync_dir(self.root)
         self._sealed.append(
             {"file": sealed_path.name, "first_seq": self._first_seq, "last_seq": self._last_seq}
         )
         self._seg_index += 1
         self._open_path = self._segment_path(self._seg_index, hot=True)
         self._fd = os.open(self._open_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
-        _fsync_dir(self.root)
+        fsync_dir(self.root)
         self._seg_bytes = 0
         self._first_seq = None
         self._last_seq = None
         self._write_manifest()
 
     def write_manifest(
-        self, *, replay_ceiling: str = "3a", extra: dict[str, Any] | None = None
+        self, *, replay_ceiling: str | None = None, extra: dict[str, Any] | None = None
     ) -> None:
-        """Public manifest write (e.g. when the runtime updates replay_ceiling)."""
-        self._write_manifest(replay_ceiling=replay_ceiling, extra=extra)
+        """Set the manifest's replay ceiling and extra fields (run_id, …) and write it. They are
+        kept on the record, so every later write (a segment roll, close) carries them; before
+        2026-10-08 roll and close rewrote the manifest with the defaults, so no manifest on disk
+        had a run_id and a 3b run read as 3a (lens audit F009, F015)."""
+        if replay_ceiling is not None:
+            self._manifest_ceiling = replay_ceiling
+        if extra:
+            self._manifest_extra.update(extra)
+        self._write_manifest()
 
-    def _write_manifest(
-        self, *, replay_ceiling: str = "3a", extra: dict[str, Any] | None = None
-    ) -> None:
+    def _write_manifest(self) -> None:
         manifest: dict[str, Any] = {
+            **self._manifest_extra,
             "sealed_segments": self._sealed,
             "hot_segment": self._open_path.name,
-            "replay_ceiling": replay_ceiling,
+            "replay_ceiling": self._manifest_ceiling,
         }
-        if extra:
-            manifest.update(extra)
         tmp = self.root / "manifest.json.tmp"
         tmp.write_bytes(json.dumps(manifest, sort_keys=True).encode())
         os.replace(tmp, self.root / "manifest.json")
-        _fsync_dir(self.root)
+        fsync_dir(self.root)
 
     def close(self) -> None:
         """Final durable fsync + manifest write. The hot segment stays `.open`
@@ -223,16 +249,16 @@ class RecordWriter:
 
 
 # ── reading & recovery ─────────────────────────────────────────────────────────
-def _sealed_segments(root: Path) -> list[Path]:
+def sealed_segments(root: Path) -> list[Path]:
     return sorted(p for p in root.glob("events-*.jsonl") if not p.name.endswith(".open.jsonl"))
 
 
-def _hot_segment(root: Path) -> Path | None:
+def hot_segment(root: Path) -> Path | None:
     hot = sorted(root.glob("events-*.open.jsonl"))
     return hot[-1] if hot else None
 
 
-def _segment_index(path: Path) -> int:
+def segment_index(path: Path) -> int:
     """The numeric segment index from `events-NNNNNN[.open].jsonl` (roll-stable across seal)."""
     return int(path.name.split("-", 1)[1].split(".", 1)[0])
 
@@ -253,14 +279,38 @@ def _read_bytes_nofollow(path: Path) -> bytes:
         os.close(fd)
 
 
+def load_envelopes(record: Any, *, resolve_blobs: bool = False) -> list[dict[str, Any]]:
+    """The one loader the record readers share: a record root (read, with blob stubs redeemed
+    when `resolve_blobs`) or an iterable of envelopes (taken as given). Lens audit F036: five
+    copies of this, two that resolved blobs and three that did not."""
+    if isinstance(record, (str, Path)):
+        return list(read_record(record, resolve_blobs=resolve_blobs))
+    if isinstance(record, Iterable):
+        return list(record)
+    raise TypeError(
+        f"expected a record root path or an iterable of envelopes, got {type(record)!r}"
+    )
+
+
+def has_torn_tail(root: Path | str) -> bool:
+    """True when the hot segment ends inside a frame: a writer died mid-append. Every frame ends in
+    a newline, so a non-empty hot segment whose last byte is not one holds a cut frame. Read-only
+    (unlike `recover_open_segment`, which truncates the tail); `read_record` skips that frame."""
+    hot = hot_segment(Path(root))
+    if hot is None:
+        return False
+    data = _read_bytes_nofollow(hot)
+    return bool(data) and not data.endswith(b"\n")
+
+
 def read_first_envelope(root: Path | str) -> dict[str, Any] | None:
     """The record's first envelope (seq 0, normally `substrate.RunStarted`), reading and CRC-checking
     only its first line. None when the record has no complete first frame. For catalog-style
     readers that need one fact per record across thousands of records; `read_record` loads and
     verifies whole segments (UI sprint 097: list_records took 7.8 s over 4,394 sessions)."""
     root = Path(root)
-    segs = _sealed_segments(root)
-    first = segs[0] if segs else _hot_segment(root)
+    segs = sealed_segments(root)
+    first = segs[0] if segs else hot_segment(root)
     if first is None:
         return None
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -277,6 +327,62 @@ def read_first_envelope(root: Path | str) -> dict[str, Any] | None:
     except (CRCMismatchError, TornFrameError):
         return None
     return env if int(env.get("seq", -1)) == 0 else None
+
+
+def read_last_envelope(root: Path | str) -> dict[str, Any] | None:
+    """The record's last complete envelope, reading backwards from the end of its newest segment
+    and CRC-checking only that frame. A cut final frame (a writer died mid-append) is skipped, as
+    `read_record` skips it. None when no segment holds a complete frame, or when the last complete
+    frame fails its CRC; a caller that needs certainty then reads the whole record.
+
+    Seqs are dense and append-only, so this frame's seq is the record's highest. The one
+    disagreement with `read_record`: when the hot segment holds a corrupt frame BEFORE its last,
+    `read_record` stops at the corruption and this still returns the last frame. For per-request
+    tail cursors over long records (lens audit F310: the console read every session's whole record
+    twice per turn to find this one number).
+    """
+    root = Path(root)
+    segments = sorted(sealed_segments(root), key=segment_index)
+    hot = hot_segment(root)
+    if hot is not None:
+        segments.append(hot)
+    for seg in reversed(segments):
+        line = _last_complete_line(seg)
+        if line is None:
+            continue
+        try:
+            return framing.verify_line(line)
+        except (CRCMismatchError, TornFrameError):
+            return None
+    return None
+
+
+def _last_complete_line(path: Path) -> bytes | None:
+    """The last newline-terminated line of `path`, without its newline; None if it has none.
+    Reads a window from the end and doubles it until the window holds a whole line."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as f:
+        size = f.seek(0, os.SEEK_END)
+        window = 64 * 1024
+        while True:
+            start = max(0, size - window)
+            f.seek(start)
+            data = f.read(size - start)
+            end = data.rfind(b"\n")  # bytes after it are a cut frame, skipped
+            if end == -1:
+                if start == 0:
+                    return None
+                window *= 2
+                continue
+            begin = data.rfind(b"\n", 0, end)
+            if begin == -1 and start > 0:
+                window *= 2  # the line starts before this window
+                continue
+            return data[begin + 1 : end]
 
 
 def _is_blob_stub(payload: Any) -> bool:
@@ -345,7 +451,7 @@ def _read_record_raw(root: Path | str) -> Iterator[dict[str, Any]]:
         expected += 1
         return env
 
-    for seg in _sealed_segments(root):
+    for seg in sealed_segments(root):
         data = _read_bytes_nofollow(seg)
         if data and not data.endswith(b"\n"):
             raise RecordGapError(
@@ -363,7 +469,7 @@ def _read_record_raw(root: Path | str) -> Iterator[dict[str, Any]]:
                         f"corruption in sealed segment {seg.name} at line {offset}: {exc}"
                     ) from exc
                 yield _checked(env)
-    hot = _hot_segment(root)
+    hot = hot_segment(root)
     if hot is not None:
         frames, _cut = framing.recover(_read_bytes_nofollow(hot))
         for env in frames:
@@ -375,10 +481,10 @@ def recover_open_segment(root: Path | str) -> int:
     the last complete, crc-valid frame. Returns the number of frames kept. Sealed
     segments are never touched."""
     root = Path(root)
-    hot = _hot_segment(root)
+    hot = hot_segment(root)
     if hot is None:
         return 0
-    data = hot.read_bytes()
+    data = _read_bytes_nofollow(hot)
     frames, cut = framing.recover(data)
     if cut < len(data):
         fd = os.open(hot, os.O_RDWR)
@@ -387,5 +493,5 @@ def recover_open_segment(root: Path | str) -> int:
             os.fsync(fd)
         finally:
             os.close(fd)
-        _fsync_dir(root)
+        fsync_dir(root)
     return len(frames)

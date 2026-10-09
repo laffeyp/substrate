@@ -25,22 +25,20 @@ enters the comparison — only kind and the canonical payload hash.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 from msgspec import Struct
 
-from ..constants import PRODUCER_STARTED, RUN_STARTED, TRIGGER_FIRED
+from ..constants import INITIAL_TRIGGER_ID, PRODUCER_STARTED, RUN_STARTED, TRIGGER_FIRED
 from ..encoding import content_hash
 from ..errors import ProducerNotFound, SequenceOutOfRange
 from ..protocols import View
-from ..record.record import read_record
+from ..record.record import load_envelopes
 
 # Producer-creating causes (F-OBS-2): a Producer traces to one of these.
 _TRIGGER_FIRED = TRIGGER_FIRED
 _RUN_STARTED = RUN_STARTED
-_INITIAL = "__initial__"  # the synthetic trigger_id for topology-declared initial Producers
+_INITIAL = INITIAL_TRIGGER_ID
 
 
 class Explanation(Struct, frozen=True):
@@ -78,16 +76,6 @@ class Divergence(Struct, frozen=True):
     kind_b: str | None
     hash_a: str | None
     hash_b: str | None
-
-
-def _load(record: Any, *, resolve_blobs: bool = False) -> list[dict[str, Any]]:
-    if isinstance(record, (str, Path)):
-        return list(read_record(record, resolve_blobs=resolve_blobs))
-    if isinstance(record, Iterable):
-        return list(record)
-    raise TypeError(
-        f"expected a record root path or an iterable of envelopes, got {type(record)!r}"
-    )
 
 
 def _parse_producer_id(producer: str) -> str:
@@ -155,7 +143,7 @@ def explain_producer(record: Any, producer: str) -> Explanation:
     """The typed cause of `producer`'s existence: the TriggerFired that scheduled it
     (or the run open, for an initial Producer), with its resolved-input hash. O(record)
     once. Raises ProducerNotFound if the instance has no firing on the record."""
-    envelopes = _load(record)
+    envelopes = load_envelopes(record)
     instance = _parse_producer_id(producer)
     return _explain_one(instance, _firing_index(envelopes), _started_index(envelopes))
 
@@ -165,7 +153,7 @@ def trace_ancestry(record: Any, producer: str) -> tuple[Explanation, ...]:
     itself, each subsequent entry its parent, ending at the initial Producer (cause
     RunStarted). Acyclic by construction; a missing link raises ProducerNotFound. The
     chain is the provenance-closure witness (conformance check 11)."""
-    envelopes = _load(record)
+    envelopes = load_envelopes(record)
     firings = _firing_index(envelopes)
     starts = _started_index(envelopes)
     chain: list[Explanation] = []
@@ -194,7 +182,7 @@ def view_at(record: Any, seq: int, view: View) -> Any:
 
     Blob Claim Checks are redeemed before folding (Sprint 095), so view_at at a seq equals the
     live View value at that seq. An already-loaded envelope iterable is folded as given."""
-    envelopes = _load(record, resolve_blobs=True)
+    envelopes = load_envelopes(record, resolve_blobs=True)
     max_seq = max((int(e["seq"]) for e in envelopes if "seq" in e), default=-1)
     if seq < 0 or seq > max_seq:
         raise SequenceOutOfRange(
@@ -215,7 +203,7 @@ def decisions_between(record: Any, a: int, b: int) -> tuple[Any, ...]:
     sequence window — Level-2 reads, no re-execution."""
     if a > b:
         raise SequenceOutOfRange(f"decisions_between: a={a} > b={b}")
-    envelopes = _load(record)
+    envelopes = load_envelopes(record)
     out: list[Any] = []
     for env in envelopes:
         s = int(env.get("seq", -1))
@@ -229,8 +217,8 @@ def first_divergence(rec_a: Any, rec_b: Any) -> Divergence | None:
     they are equivalent (technical §14, conformance check 13). The comparison sequence is
     (kind, canonical payload hash) per frame in seq order; supplementary metadata (t,
     host, config) is excluded by construction (it is never hashed here)."""
-    env_a = _load(rec_a)
-    env_b = _load(rec_b)
+    env_a = load_envelopes(rec_a)
+    env_b = load_envelopes(rec_b)
     seq_a = [(str(e.get("kind")), _payload_hash(e)) for e in env_a]
     seq_b = [(str(e.get("kind")), _payload_hash(e)) for e in env_b]
     # (seq_a / seq_b are the D-8 comparison sequences: (kind, decision-identity hash).)

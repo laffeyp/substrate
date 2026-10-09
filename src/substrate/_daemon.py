@@ -62,14 +62,14 @@ def _uds_path() -> Path:
     return Path(os.environ.get("SUBSTRATE_DAEMON_SOCK", str(substrate_home() / "daemon.sock")))
 
 
-def _tcp_host_port() -> tuple[str, int]:
+def tcp_host_port() -> tuple[str, int]:
     return (
         os.environ.get("SUBSTRATE_DAEMON_HOST", "127.0.0.1"),
         int(os.environ.get("SUBSTRATE_DAEMON_PORT", "8765")),
     )
 
 
-def _connect(timeout: float | None = 5.0) -> http.client.HTTPConnection:
+def connect(timeout: float | None = 5.0) -> http.client.HTTPConnection:
     """Return a connected HTTPConnection. UDS first, TCP second. Never returns
     an unconnected connection — every path calls `.connect()` and raises
     `DaemonNotRunning` if neither transport is up. `timeout=None` disables
@@ -84,7 +84,7 @@ def _connect(timeout: float | None = 5.0) -> http.client.HTTPConnection:
             return conn
         except (OSError, ConnectionRefusedError):
             pass
-    host, port = _tcp_host_port()
+    host, port = tcp_host_port()
     try:
         conn = http.client.HTTPConnection(host, port, timeout=timeout)
         conn.connect()
@@ -96,7 +96,7 @@ def _connect(timeout: float | None = 5.0) -> http.client.HTTPConnection:
 
 def is_running(timeout: float = 1.0) -> bool:
     try:
-        conn = _connect(timeout=timeout)
+        conn = connect(timeout=timeout)
         conn.close()
         return True
     except DaemonNotRunning:
@@ -106,7 +106,7 @@ def is_running(timeout: float = 1.0) -> bool:
 def _request(
     method: str, path: str, body: dict[str, Any] | None = None, timeout: float | None = 30.0
 ) -> tuple[int, dict[str, Any]]:
-    conn = _connect(timeout=timeout)
+    conn = connect(timeout=timeout)
     try:
         data = json.dumps(body).encode() if body is not None else b""
         headers = {"Content-Type": "application/json"} if body is not None else {}

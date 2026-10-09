@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import sys
 import uuid
 from enum import StrEnum
@@ -24,8 +25,7 @@ from typing import Any, Callable
 import click
 from rich.console import Console
 
-
-from substrate import api
+from substrate import api, app
 
 
 class ListTarget(StrEnum):
@@ -94,8 +94,8 @@ def _load_topology(spec: str) -> Callable[[Any], None]:
     # imports, not a runtime importlib call). If the bundled package is unavailable, fall through
     # to whatever is already registered.
     try:
-        importlib.import_module("substrate.topologies.bundled").register_all()
-    except Exception:  # noqa: BLE001 - bundled topologies are optional; never block a real run
+        app.bundled.register_all()
+    except Exception:  # noqa: BLE001, S110 - bundled topologies are optional; never block a real run
         pass
     try:
         return api.get_topology(spec)
@@ -134,12 +134,7 @@ def _load_attr(spec: str) -> Callable[..., Any]:
     return getattr(module, attr_name)  # type: ignore[no-any-return]
 
 
-_FAILURE_KINDS = (
-    api.PRODUCER_FAILED,
-    api.INPUT_BUILD_FAILED,
-    api.PREDICATE_QUARANTINED,
-    api.PRODUCER_EMITTED_INVALID,
-)
+_FAILURE_KINDS = api.FAILURE_KINDS
 
 
 def _failure_summary(root: Path) -> tuple[dict[str, int], int]:
@@ -594,7 +589,7 @@ def validate(topology_module: str) -> None:
     except click.ClickException as exc:
         _err.print(f"[FAIL] {exc.message}")
         sys.exit(EXIT_CONFIG)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — the CLI's top level: any failure becomes an [FAIL] line and an exit code
         _err.print(f"[FAIL] {type(exc).__name__}: {exc}")
         sys.exit(EXIT_CONFIG)
 
@@ -662,7 +657,7 @@ def conformance(no_perf: bool) -> None:
     v1.0"; SKIPPED is a run-time skip (e.g. check 15 under --no-perf) and is NOT spec-amended.
     Neither prints green; neither is a pass. Exit: 0 iff no check FAILED, 1 if any FAILED.
     Run WITHOUT --no-perf in CI so the N-PERF-1 floor miss cannot be masked."""
-    report = asyncio.run(api.run_conformance(include_perf=not no_perf))
+    report = asyncio.run(app.run_conformance(include_perf=not no_perf))
     n = len(report.results)
     _err.print(f"Running {n} conformance checks (product §7)...")
     tags = {
@@ -791,7 +786,7 @@ def topology_list() -> None:
     names: list[str]
     try:
         # dynamic import keeps the CLI's static surface substrate.api-only (F-API-6).
-        names = importlib.import_module("substrate.topologies.bundled").names()
+        names = app.bundled.names()
     except Exception:  # noqa: BLE001 - bundled topologies are optional
         names = []
     for name in names:
@@ -808,7 +803,7 @@ def demo() -> None:
 @click.pass_context
 def demo_replay(ctx: click.Context, name: str) -> None:
     """Replay a bundled topology's committed CI record — tail it (no run, no network)."""
-    record = importlib.import_module("substrate.topologies.bundled").record_path(name)
+    record = app.bundled.record_path(name)
     if not record.exists():
         _err.print(
             f"[config] no committed record for {name!r}. Try `substrate topology list`, "
@@ -851,18 +846,15 @@ def score(root: str, rule_name: str) -> None:
     if not grades:
         _err.print("[config] no Grade events here; run a topology with scoring on first")
         sys.exit(EXIT_CONFIG)
-    # dynamic import keeps the CLI's static surface substrate.api-only (F-API-6).
-    scoring = importlib.import_module("substrate.topologies.instruments.scoring")
-    grader = importlib.import_module("substrate.topologies.instruments.grader")
     try:
-        rule = scoring.select_scoring_rule(rule_name)
+        rule = app.select_scoring_rule(rule_name)
     except Exception as exc:  # noqa: BLE001 - unknown rule -> clean config error
         _err.print(f"[config] {exc}")
         sys.exit(EXIT_CONFIG)
     try:
         # record payload fields are attacker-controllable; a malformed Grade (non-numeric /
         # out-of-range confidence) is a clean config error, not an uncaught traceback (review #20).
-        losses = grader.score_grades(grades, rule)
+        losses = app.score_grades(grades, rule)
     except Exception as exc:  # noqa: BLE001 - any malformed Grade payload -> clean [config]
         _err.print(f"[config] malformed Grade payload in record: {exc}")
         sys.exit(EXIT_CONFIG)
@@ -946,16 +938,15 @@ def _double_fork_daemon(server_path: str) -> None:
     _os.dup2(devnull, 0)
     _os.dup2(devnull, 1)
     _os.dup2(devnull, 2)
-    _os.execv(sys.executable, [sys.executable, server_path])
+    _os.execv(sys.executable, [sys.executable, server_path])  # noqa: S606 — the daemon replaces this process
 
 
 def _ensure_daemon_running() -> None:
     """Try to connect to the daemon; if neither UDS nor TCP is up, auto-launch
     per `[daemon] server_path` and wait up to 3 s. Exit 64 on any failure to
     reach a running daemon after the launch attempt."""
-    from substrate import _daemon
 
-    if _daemon.is_running(timeout=1.0):
+    if app.daemon_client.is_running(timeout=1.0):
         return
     server_path = _daemon_server_path()
     if not server_path:
@@ -972,7 +963,7 @@ def _ensure_daemon_running() -> None:
     import time as _time
 
     for _ in range(30):
-        if _daemon.is_running(timeout=0.5):
+        if app.daemon_client.is_running(timeout=0.5):
             return
         _time.sleep(0.1)
     _err.print("[config] daemon failed to start; try `substrate daemon --foreground`")
@@ -1006,18 +997,18 @@ def _render_stream_line(env: dict[str, Any], *, verbose: bool = False) -> None:
     payload = env.get("payload") or {}
     if not isinstance(payload, dict):
         return
-    if kind == api.MODEL_REPLY:
+    if kind == app.MODEL_REPLY:
         text = str(payload.get("text", ""))
         if text:
             click.echo(text)
-    elif kind == api.FINAL_ANSWER:
+    elif kind == app.FINAL_ANSWER:
         return  # already streamed via ModelReply
-    elif kind == api.TOOL_CALL:
+    elif kind == app.TOOL_CALL:
         tool_name = str(payload.get("tool", "?"))
         args = payload.get("args", [])
         args_str = ", ".join(repr(a) for a in args) if isinstance(args, list) else str(args)
         _err.print(f"→ {tool_name}({args_str})")
-    elif kind == api.TOOL_RESULT:
+    elif kind == app.TOOL_RESULT:
         ok = bool(payload.get("ok", True))
         if ok:
             output = payload.get("output", "")
@@ -1040,10 +1031,8 @@ def _sse_stream(session_id: str, stop_event: Any, *, verbose: bool = False) -> N
     a partial SSE frame does not block past its bytes."""
     import json as _json
 
-    from substrate import _daemon
-
     try:
-        conn = _daemon._connect(timeout=None)
+        conn = app.daemon_client.connect(timeout=None)
         conn.request("GET", f"/api/session/{session_id}/events?since_seq=-1")
         resp = conn.getresponse()
     except Exception:  # noqa: BLE001 — daemon dropped; end the stream quietly
@@ -1113,7 +1102,6 @@ def _slash_route(
     `pending_context` is the mutable dict the REPL keeps across turns; a
     `/context` slash stores here and the next `/turn` call reads + clears it.
     """
-    from substrate import _daemon
 
     stripped = line.strip()
     if not stripped.startswith("/"):
@@ -1139,9 +1127,9 @@ def _slash_route(
             _err.print("[repl] /model requires exactly one driver name")
             return True
         try:
-            _daemon.patch_session(sid, driver=args[0])
+            app.daemon_client.patch_session(sid, driver=args[0])
             _err.print(f"[repl] driver → {args[0]} (next turn)")
-        except _daemon.DaemonError as exc:
+        except app.daemon_client.DaemonError as exc:
             _err.print(f"[repl] /model failed: HTTP {exc.status}: {exc.body}")
         return True
 
@@ -1153,9 +1141,9 @@ def _slash_route(
             return True
         tool_list = [t.strip() for t in args[0].split(",") if t.strip()]
         try:
-            _daemon.patch_session(sid, tools=tool_list)
+            app.daemon_client.patch_session(sid, tools=tool_list)
             _err.print(f"[repl] tools → {tool_list} (next turn)")
-        except _daemon.DaemonError as exc:
+        except app.daemon_client.DaemonError as exc:
             _err.print(f"[repl] /tools failed: HTTP {exc.status}: {exc.body}")
         return True
 
@@ -1207,22 +1195,20 @@ def _slash_route(
             return True
         if target is ListTarget.SESSIONS:
             try:
-                data = _daemon.list_sessions()
+                data = app.daemon_client.list_sessions()
                 for bucket, entries in data.items():
                     for entry in entries:
                         _err.print(
                             f"[{bucket}] {entry.get('name') or entry['session_id']} "
                             f"({entry['driver']})"
                         )
-            except _daemon.DaemonError as exc:
+            except app.daemon_client.DaemonError as exc:
                 _err.print(f"[repl] /list failed: HTTP {exc.status}")
         elif target is ListTarget.TOPOLOGIES:
-            # Dynamic import: F-API-6 checks STATIC substrate imports, so a
-            # runtime `importlib.import_module` call is not a violation. The
-            # bundled registry is optional; if it fails, list what is
+            # The bundled registry is optional; if it fails, list what is
             # already registered via `api.get_topology`'s registry side.
             try:
-                bundled_mod = importlib.import_module("substrate.topologies.bundled")
+                bundled_mod = app.bundled
                 names = getattr(bundled_mod, "names", None)
                 if callable(names):
                     for n in names():
@@ -1257,7 +1243,7 @@ def _slash_route(
         # Drift-grooming 2026-09-02: the earlier "typed marker" pattern set
         # pending_context["_deferred"] = "run"; no downstream reader consumed
         # it, but the next real turn's context body carried the marker into
-        # `_daemon.turn(..., context={"_deferred": "run"})`, which
+        # `app.daemon_client.turn(..., context={"_deferred": "run"})`, which
         # substrate-ui's `_session_turn` refused with 400 for the missing
         # parent_seq_range. The marker + refusal reached the user as a
         # cryptic HTTP 400 on the next unrelated message. The stderr hint
@@ -1287,8 +1273,6 @@ def _repl(session: dict[str, Any], *, verbose: bool = False) -> None:
     import signal as _signal
     import threading as _threading
 
-    from substrate import _daemon
-
     sid = str(session["session_id"])
     label = str(session.get("name") or sid)
     stop_event = _threading.Event()
@@ -1303,10 +1287,10 @@ def _repl(session: dict[str, Any], *, verbose: bool = False) -> None:
     def _sigint_handler(_signum: int, _frame: Any) -> None:
         if turn_in_flight.is_set():
             try:
-                _daemon.interrupt(sid, max_wait_ms=3000)
-            except _daemon.DaemonError as exc:
+                app.daemon_client.interrupt(sid, max_wait_ms=3000)
+            except app.daemon_client.DaemonError as exc:
                 _err.print(f"[repl] interrupt failed: HTTP {exc.status}: {exc.body}")
-            except _daemon.DaemonNotRunning as exc:
+            except app.daemon_client.DaemonNotRunning as exc:
                 _err.print(f"[repl] daemon unreachable: {exc}")
         else:
             _err.print("(no turn in flight; type /exit or press Ctrl+D to end)")
@@ -1340,10 +1324,10 @@ def _repl(session: dict[str, Any], *, verbose: bool = False) -> None:
             except EOFError:
                 # Ctrl+D → end the session cleanly.
                 try:
-                    _daemon.end_session(sid, source="user_end")
-                except _daemon.DaemonError as exc:
+                    app.daemon_client.end_session(sid, source="user_end")
+                except app.daemon_client.DaemonError as exc:
                     _err.print(f"[repl] end failed: HTTP {exc.status}: {exc.body}")
-                except _daemon.DaemonNotRunning as exc:
+                except app.daemon_client.DaemonNotRunning as exc:
                     _err.print(f"[repl] daemon unreachable at end: {exc}")
                 break
             except KeyboardInterrupt:
@@ -1360,18 +1344,18 @@ def _repl(session: dict[str, Any], *, verbose: bool = False) -> None:
             pending_context.clear()
             turn_in_flight.set()
             try:
-                result = _daemon.turn(sid, line, context=turn_context)
-            except _daemon.DaemonError as exc:
+                result = app.daemon_client.turn(sid, line, context=turn_context)
+            except app.daemon_client.DaemonError as exc:
                 _err.print(f"[repl] turn failed: HTTP {exc.status}: {exc.body}")
                 turn_in_flight.clear()
                 continue
-            except _daemon.DaemonNotRunning as exc:
+            except app.daemon_client.DaemonNotRunning as exc:
                 _err.print(f"[repl] daemon unreachable: {exc}")
                 break
             finally:
                 turn_in_flight.clear()
             status = result.get("status")
-            if status == api.SessionStatus.ENDED:
+            if status == app.SessionStatus.ENDED:
                 break
     finally:
         stop_event.set()
@@ -1398,23 +1382,27 @@ def chat(
     defaults from `~/.substrate/config.toml [defaults]` for any option not
     passed. Piece D: sprint 218 shipped the create step; sprint 219 wires
     the REPL + SSE streaming."""
-    from substrate import _daemon
 
     defaults = _defaults()
     driver = driver or defaults["driver"]
     workspace_val = workspace or defaults["workspace"]
+    if not workspace_val.startswith("~"):
+        # A relative workspace names a directory under the CLI's cwd. The daemon refuses one: it
+        # would resolve against the daemon's own cwd (lens audit F002). A `~` path goes as written
+        # so the daemon maps `~/.substrate/sandbox` into its own state root.
+        workspace_val = os.path.abspath(workspace_val)  # symlinks kept, as the daemon keeps them
     _ensure_daemon_running()
     try:
-        session = _daemon.create_session(
+        session = app.daemon_client.create_session(
             driver=driver,
             name=name,
             workspace=workspace_val,
             seed_text=seed,
         )
-    except _daemon.DaemonError as exc:
+    except app.daemon_client.DaemonError as exc:
         _err.print(f"[config] create session failed: HTTP {exc.status}: {exc.body}")
         raise SystemExit(EXIT_CONFIG) from exc
-    except _daemon.DaemonNotRunning as exc:
+    except app.daemon_client.DaemonNotRunning as exc:
         _err.print(f"[config] daemon unreachable after auto-launch: {exc}")
         raise SystemExit(EXIT_CONFIG) from exc
     click.echo(session["session_id"])
@@ -1444,7 +1432,7 @@ def daemon(foreground: bool) -> None:
     if foreground:
         import os as _os
 
-        _os.execv(sys.executable, [sys.executable, server_path])
+        _os.execv(sys.executable, [sys.executable, server_path])  # noqa: S606 — foreground daemon replaces the CLI
     _double_fork_daemon(server_path)
     _err.print(f"[daemon] launched {server_path}")
 
@@ -1462,17 +1450,16 @@ def _resolve_session(name_or_id: str) -> dict[str, Any]:
     index. Raises SystemExit(EXIT_CONFIG) with a message if the name misses
     or the daemon is unreachable.
     """
-    from substrate import _daemon
 
     try:
         if name_or_id.startswith("s_"):
             return {"session_id": name_or_id}
-        record = _daemon.by_name(name_or_id)
+        record = app.daemon_client.by_name(name_or_id)
         if record is None:
             _err.print(f"[config] no session named {name_or_id!r}")
             raise SystemExit(EXIT_CONFIG)
         return record
-    except _daemon.DaemonNotRunning as exc:
+    except app.daemon_client.DaemonNotRunning as exc:
         _err.print(f"[config] daemon unreachable: {exc}")
         raise SystemExit(EXIT_CONFIG) from exc
 
@@ -1485,11 +1472,10 @@ def session_group() -> None:
 @session_group.command("ls")
 def session_ls() -> None:
     """List every session bucketed by status. One row per session."""
-    from substrate import _daemon
 
     try:
-        buckets = _daemon.list_sessions()
-    except _daemon.DaemonNotRunning as exc:
+        buckets = app.daemon_client.list_sessions()
+    except app.daemon_client.DaemonNotRunning as exc:
         _err.print(f"[config] daemon unreachable: {exc}")
         raise SystemExit(EXIT_CONFIG) from exc
     header = f"{'name':<24} {'session_id':<28} {'driver':<20} {'status':<12} {'shape':<10}"
@@ -1516,14 +1502,13 @@ def session_ls() -> None:
 @click.argument("name_or_id")
 def session_end(name_or_id: str) -> None:
     """End a session — inject SessionEndRequested{user_end} via POST /end."""
-    from substrate import _daemon
 
     resolved = _resolve_session(name_or_id)
     sid = resolved["session_id"]
     try:
-        _daemon.end_session(sid, source="user_end")
+        app.daemon_client.end_session(sid, source="user_end")
         _err.print(f"[session] {name_or_id} ended")
-    except _daemon.DaemonError as exc:
+    except app.daemon_client.DaemonError as exc:
         _err.print(f"[session] end failed: HTTP {exc.status}: {exc.body}")
         raise SystemExit(EXIT_FAILED) from exc
 
@@ -1540,14 +1525,12 @@ def session_rm(name_or_id: str, force: bool) -> None:
     """
     import time as _time
 
-    from substrate import _daemon
-
     resolved = _resolve_session(name_or_id)
     sid = resolved["session_id"]
     if not force:
         try:
-            buckets = _daemon.list_sessions()
-        except _daemon.DaemonNotRunning as exc:
+            buckets = app.daemon_client.list_sessions()
+        except app.daemon_client.DaemonNotRunning as exc:
             _err.print(f"[config] daemon unreachable: {exc}")
             raise SystemExit(EXIT_CONFIG) from exc
         created_at: float | None = None
@@ -1566,9 +1549,9 @@ def session_rm(name_or_id: str, force: bool) -> None:
             )
             raise SystemExit(EXIT_CONFIG)
     try:
-        _daemon.delete_session(sid)
+        app.daemon_client.delete_session(sid)
         _err.print(f"[session] {name_or_id} removed (record dir preserved on disk)")
-    except _daemon.DaemonError as exc:
+    except app.daemon_client.DaemonError as exc:
         _err.print(f"[session] rm failed: HTTP {exc.status}: {exc.body}")
         raise SystemExit(EXIT_FAILED) from exc
 
@@ -1578,12 +1561,11 @@ def session_rm(name_or_id: str, force: bool) -> None:
 @click.argument("new_name")
 def session_set_name(session_id: str, new_name: str) -> None:
     """Rename a session in the by-name.json index (PATCH /api/session/<id>)."""
-    from substrate import _daemon
 
     try:
-        _daemon.patch_session(session_id, name=new_name)
+        app.daemon_client.patch_session(session_id, name=new_name)
         _err.print(f"[session] {session_id} renamed to {new_name}")
-    except _daemon.DaemonError as exc:
+    except app.daemon_client.DaemonError as exc:
         _err.print(f"[session] rename failed: HTTP {exc.status}: {exc.body}")
         raise SystemExit(EXIT_FAILED) from exc
 
@@ -1664,13 +1646,8 @@ def _run_bundle_wizard(name: str, target: Path, template_name: str) -> None:
     body. The template body uses `== <filename> ==` headers to demarcate
     which slice writes to which slot file — one template renders four
     files."""
-    # Dynamic import: F-API-6 checks STATIC substrate imports; the
-    # importlib.import_module call is a runtime lookup and passes the
-    # cli-imports-only-api contract (same pattern as _load_topology's
-    # bundled-registry hook).
-    interpolate_mod = importlib.import_module("substrate.templates.interpolate")
-    parse_template_header = interpolate_mod.parse_template_header
-    render = interpolate_mod.render
+    parse_template_header = app.parse_template_header
+    render = app.render_template
 
     template_path = Path(__file__).parent / "templates" / "bundles" / f"{template_name}.tmpl.md"
     if not template_path.is_file():
@@ -1797,10 +1774,9 @@ def builder() -> None:
         subprocess.run([opener, str(studio)], check=False)
         _err.print(f"[builder] opened {studio}")
         return
-    from substrate import _daemon
 
     try:
-        _host, _port = _daemon._tcp_host_port()
+        _host, _port = app.daemon_client.tcp_host_port()
         _err.print(
             f"[builder] no {studio} on disk; if the daemon is running, "
             f"open http://{_host}:{_port}/studio.html in your browser"

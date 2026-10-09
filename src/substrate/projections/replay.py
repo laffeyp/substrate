@@ -28,17 +28,17 @@ iterable of envelope dicts (Level 1/2 only — no blob resolution, no manifest).
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
 from msgspec import Struct
 
 from ..constants import RUN_FINALISED, RUN_STARTED, TRIGGER_FIRED
-from ..record.blobstore import is_blob_hex
 from ..encoding import content_hash, sha256_hex
-from ..errors import RecordIncompleteError, SubstrateError
-from ..record.record import read_record
+from ..errors import CRCMismatchError, RecordIncompleteError, SubstrateError
+from ..record.blobstore import BlobStore
+from ..record.record import load_envelopes
+from ..types import BlobRef
 
 ReplayLevel = Literal["1", "2", "3a", "3b"]
 
@@ -79,14 +79,9 @@ class ReplayResult(Struct, frozen=True):
 
 
 def _load(record: Any) -> tuple[list[dict[str, Any]], Path | None]:
-    if isinstance(record, (str, Path)):
-        root = Path(record)
-        return list(read_record(root)), root
-    if isinstance(record, Iterable):
-        return list(record), None
-    raise TypeError(
-        f"expected a record root path or an iterable of envelopes, got {type(record)!r}"
-    )
+    """The envelopes, raw (the hashes compare recorded builtins), and the root when there is one."""
+    root = Path(record) if isinstance(record, (str, Path)) else None
+    return load_envelopes(record), root
 
 
 def _level1(envelopes: list[dict[str, Any]]) -> tuple[dict[str, int], bool]:
@@ -116,19 +111,16 @@ def _resolved_input_hash(payload: dict[str, Any], root: Path | None) -> str | No
         blob = payload["input_blob"]
         if root is None:
             return _UNRESOLVABLE  # can't resolve a blob from a bare envelope iterable
-        hex_digest = str(blob.get("$blob", "")).removeprefix("sha256:")
-        # SECURITY (review #20): $blob comes from the (attacker-controllable) record. A sha256 is
-        # ALWAYS 64 lowercase hex chars; reject anything else BEFORE it becomes a path component, so
-        # a crafted "../../etc/passwd" digest cannot path-traverse to an arbitrary file read.
-        if not is_blob_hex(hex_digest):
+        # Read through the BlobStore, the one blob reader: it refuses a non-hex digest before it
+        # becomes a path (review #20), does not follow symlinks, and verifies the content hash
+        # (lens audit F031: this rebuilt the blob path by hand and read the file directly).
+        try:
+            data = BlobStore(root).get(
+                BlobRef(sha256=str(blob.get("$blob", "")), bytes=int(blob.get("bytes", 0)))
+            )
+        except (ValueError, OSError, CRCMismatchError):
             return _UNRESOLVABLE
-        blob_path = root / "blobs" / "sha256" / hex_digest[:2] / hex_digest
-        # defense-in-depth: even with the hex guard, never read outside the record root.
-        if not blob_path.resolve().is_relative_to(root.resolve()):
-            return _UNRESOLVABLE
-        if not blob_path.exists():
-            return _UNRESOLVABLE
-        return sha256_hex(blob_path.read_bytes())
+        return sha256_hex(data)
     if "resolved_input" in payload:
         return content_hash(payload["resolved_input"])
     return None  # D-5 violated: exactly one of resolved_input | input_blob MUST be present

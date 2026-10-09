@@ -40,9 +40,17 @@ from ...record.record import read_record
 from ..tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 from .vocabulary import (
     BACKGROUND_TASK_ENDED,
+)
+from .vocabulary import (
     MODEL_REPLY as _KIND_MODEL_REPLY,
+)
+from .vocabulary import (
     PARK as _KIND_PARK,
+)
+from .vocabulary import (
     TRANSCRIPT_COMPACTED as _KIND_TRANSCRIPT_COMPACTED,
+)
+from .vocabulary import (
     USER_MESSAGE as _KIND_USER_MESSAGE,
 )
 

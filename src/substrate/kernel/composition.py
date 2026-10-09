@@ -48,10 +48,9 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
-from ..constants import RUN_FINALISED, RUN_STARTED
-from ..projections.attach import LiveRecord
-from ..constants import RunStatus
+from ..constants import RUN_FINALISED, RUN_STARTED, RunStatus
 from ..errors import SubstrateError
+from ..record.live import LiveRecord
 from .runtime import Runtime
 from .topology import TopologyBuilder
 

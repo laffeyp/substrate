@@ -181,7 +181,8 @@ async def test_oversized_payload_is_blob_offloaded(tmp_path):
     # store and the frame carries a BlobRef.
     result = await Runtime(tmp_path / "run").run(_big_topo)
     assert result.status == "finalised"
-    big = assert_event(tmp_path / "run", "Big")
+    # the record as stored: `assert_event` redeems blob stubs, so read the raw envelopes
+    big = next(e for e in read_record(tmp_path / "run") if e["kind"] == "Big")
     assert set(big["payload"].keys()) == {"$blob", "bytes"}
     assert big["payload"]["$blob"].startswith("sha256:")
     assert big["payload"]["bytes"] > 16 * 1024

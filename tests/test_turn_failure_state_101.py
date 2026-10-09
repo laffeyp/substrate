@@ -18,8 +18,8 @@ import pytest
 
 from substrate import api
 from substrate.adapters import DeterministicResponder
-from substrate.session_registry import SessionManifest, SessionRegistry, SessionStatus
 from substrate.topologies.session import UserMessage, session_topology
+from substrate.topologies.session_registry import SessionManifest, SessionRegistry, SessionStatus
 
 
 class _SlowOnCue(DeterministicResponder):

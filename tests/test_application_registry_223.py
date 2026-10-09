@@ -21,7 +21,6 @@ from substrate.topologies.applications.registry import (
     spec_to_wire,
 )
 
-
 _VALID_MANIFEST = """
 name = "code_review"
 description = "Fan-out review of a diff by N reviewer models."

@@ -27,8 +27,8 @@ from ulid import ULID
 
 from ..constants import (
     BLOB_THRESHOLD_BYTES,
-    INPUT_BUILD_FAILED,
     INJECTION_APPLIED,
+    INPUT_BUILD_FAILED,
     PREDICATE_QUARANTINED,
     PRODUCER_CANCELLED,
     PRODUCER_COMPLETED,
@@ -37,15 +37,16 @@ from ..constants import (
     PRODUCER_STARTED,
     RUN_FINALISED,
     TRIGGER_FIRED,
+    InvalidReason,
     is_reserved,
 )
 from ..encoding import SafeCanonical, content_hash, safe_raw, try_canonical
 from ..protocols import TriggerContext
-from .runstate import RunPhase, RunState
 from ..record.sealing import seal
 from ..record.sidecar import DiagnosticSidecar
-from .triggers import Logical
 from ..types import Event, ProducerRef
+from .runstate import RunPhase, RunState
+from .triggers import Logical
 
 if TYPE_CHECKING:
     from ..record.record import RecordWriter
@@ -123,7 +124,7 @@ class AppendCycle:
                     continue
                 try:
                     view.update(event)
-                except Exception as exc:  # §6.3: a View raising in update() is fatal
+                except Exception as exc:  # noqa: BLE001 — §6.3: a View raising in update() is fatal
                     self._view_failure(vname, event.seq, exc)
                     return
             self._stage_routes(event)  # step 4
@@ -150,7 +151,6 @@ class AppendCycle:
         consumers never see a blob stub where they expect real fields."""
         st = self._st
         seq = st.next_seq
-        st.next_seq += 1
         now = time.time()
         envelope = {
             "seq": seq,
@@ -161,6 +161,10 @@ class AppendCycle:
             "payload": disk_payload,
         }
         self._record.append(envelope)
+        # Advance only after the frame is on the record: an append that raises (FrameTooLargeError)
+        # consumed a seq before, and the next frame left a gap that made the whole record unreadable
+        # (lens audit F020, probe: a 2 MB injected event).
+        st.next_seq = seq + 1
         event = Event(
             seq=seq,
             kind=kind,
@@ -183,18 +187,32 @@ class AppendCycle:
         payload exceeds the blob threshold — the disk side gets a BlobRef stub, the
         memory side keeps the full inline data."""
         if isinstance(pending, _Lifecycle):
+            # Externally injected events (resume_event, inject_event: any kind outside the
+            # reserved namespace) carry payloads from outside the topology; an oversized one is
+            # offloaded like an emission (lens audit F019: a 100 KB resume_event was written
+            # inline, a 2 MB one failed the frame). The kernel's own lifecycle frames are small
+            # by construction and skip the extra canonicalization.
+            if not is_reserved(pending.kind):
+                sc = try_canonical(pending.payload)
+                if sc.ok:
+                    disk_payload, _ = self._maybe_offload(sc)
+                    return pending.kind, f"{pending.kind}@1", None, disk_payload, pending.payload
             return pending.kind, f"{pending.kind}@1", None, pending.payload, pending.payload
         # a Producer emission — validate at the bus boundary (technical §8.1)
         ref = pending.producer
         obj = pending.obj
         reg = self._reg.producer_kinds.get(ref["kind"])
         event_kind = type(obj).__name__
-        invalid: str | None = None
+        invalid: InvalidReason | None = None
         at_path: str | None = None
         if reg is None or not isinstance(obj, Struct) or is_reserved(event_kind):
-            invalid = "unknown_kind"
+            invalid = InvalidReason.UNKNOWN_KIND
         elif event_kind not in reg.schemas or not isinstance(obj, reg.schemas[event_kind][0]):
-            invalid = "unknown_kind" if event_kind not in reg.schemas else "schema_violation"
+            invalid = (
+                InvalidReason.UNKNOWN_KIND
+                if event_kind not in reg.schemas
+                else InvalidReason.SCHEMA_VIOLATION
+            )
         if invalid is None:
             # Guarded canonicalization (the shared sanitize-or-log path): a non-canonical
             # emission becomes a recorded ProducerEmittedInvalidEvent, never a crash.
@@ -214,11 +232,14 @@ class AppendCycle:
         wrapper: dict[str, Any] = {"reason": invalid, "raw_payload": raw, "producer": ref}
         if at_path is not None:
             wrapper["at_path"] = at_path
+        # `raw` is canonical-safe by construction (safe_raw); an oversized one is offloaded.
+        wsc = try_canonical(wrapper)
+        disk_wrapper = self._maybe_offload(wsc)[0] if wsc.ok else wrapper
         return (
             PRODUCER_EMITTED_INVALID,
             f"{PRODUCER_EMITTED_INVALID}@1",
             None,
-            wrapper,
+            disk_wrapper,
             wrapper,
         )
 
@@ -306,7 +327,7 @@ class AppendCycle:
                 continue
             try:
                 message = r.transform(event)
-            except Exception as exc:  # design §6.3: route transform raises -> InputBuildFailed
+            except Exception as exc:  # noqa: BLE001 — design §6.3: route transform raises -> InputBuildFailed
                 st.control.append(
                     _Lifecycle(
                         INPUT_BUILD_FAILED,
@@ -348,7 +369,7 @@ class AppendCycle:
             t0 = time.perf_counter()
             try:
                 fired = t.predicate(ctx)
-            except Exception as exc:  # design §6.3: predicate raises -> immediate quarantine
+            except Exception as exc:  # noqa: BLE001 — design §6.3: predicate raises -> immediate quarantine
                 self._quarantine(idx, t.id, reason="exception", error=repr(exc))
                 continue
             elapsed_us = (time.perf_counter() - t0) * 1e6
@@ -390,7 +411,7 @@ class AppendCycle:
             # crashing the writer (technical §10, §6.3).
             try:
                 do_fire, firing_key = t.policy.admit(event, append_index)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — user code (View, Route, Predicate, policy, input builder) raising is recorded per §6.3, never a writer crash
                 st.control.append(
                     _Lifecycle(
                         INPUT_BUILD_FAILED,
@@ -411,7 +432,7 @@ class AppendCycle:
                 sealed = seal(resolved)  # immutability by construction (§8.3)
                 input_fields = self._resolved_input_fields(resolved)
                 input_hash = content_hash(resolved)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — user code (View, Route, Predicate, policy, input builder) raising is recorded per §6.3, never a writer crash
                 st.control.append(
                     _Lifecycle(
                         INPUT_BUILD_FAILED,

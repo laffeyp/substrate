@@ -27,3 +27,17 @@ def ui_server_module() -> ModuleType:
     import server  # type: ignore[import-not-found]
 
     return server
+
+
+def ui_daemon(base: Path) -> tuple[object, object]:
+    """substrate-ui's App with a session registry under `base`, served on 127.0.0.1:<ephemeral>
+    by a started `AppHTTPServer`. Returns `(app, srv)`; the caller shuts `srv` down. The daemon's
+    state lives on the App (UI sprint 111), not on the `server` module."""
+    import threading
+
+    server = ui_server_module()
+    app = server.App()
+    app.install_registry(base)
+    srv = server.AppHTTPServer(("127.0.0.1", 0), app)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return app, srv

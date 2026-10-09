@@ -13,7 +13,6 @@ import json
 import time
 from pathlib import Path
 
-
 from substrate.topologies.tool_loop.substrate_tools import (
     make_list_applications,
     make_list_records,

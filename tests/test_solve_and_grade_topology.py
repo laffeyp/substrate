@@ -39,10 +39,8 @@ def _fixture_repo() -> str:
 def test_solve_and_grade_topology_builds(tmp_path):
     """The topology function returns a callable that the TopologyBuilder consumes without
     error. Registers the grader producer with the correct schemas (GradeResult)."""
+    from substrate.assay.swebench_solve_and_grade import swebench_solve_and_grade_topology
     from substrate.kernel.topology import TopologyBuilder
-    from substrate.topologies.swebench_solver.assemble import (
-        swebench_solve_and_grade_topology,
-    )
 
     build = swebench_solve_and_grade_topology(
         base_checkout=_fixture_repo(),

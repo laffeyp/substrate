@@ -22,13 +22,13 @@ from typing import Any
 import pytest
 
 from substrate.adapters import DeterministicResponder
-from substrate.session_registry import (
+from substrate.topologies.session import session_topology
+from substrate.topologies.session_registry import (
     NameCollision,
     SessionManifest,
     SessionRegistry,
     SessionStatus,
 )
-from substrate.topologies.session import session_topology
 
 
 def _session_factory(

@@ -77,6 +77,10 @@ def frame(envelope: dict[str, Any]) -> bytes:
     return line
 
 
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"non-JSON constant {name} in a frame")
+
+
 def verify_line(line: bytes) -> dict[str, Any]:
     """Verify one frame line (no trailing newline) and return its crc-less envelope.
 
@@ -85,7 +89,10 @@ def verify_line(line: bytes) -> dict[str, Any]:
     no crc) or CRCMismatchError.
     """
     try:
-        obj = json.loads(line)
+        # NaN/Infinity are not JSON (RFC 8259) and never written by the framer; json.loads
+        # accepts them, and the canonicalizer below then raised outside recover()'s catch, so a
+        # corrupt frame crashed recovery instead of being cut (lens audit F012).
+        obj = json.loads(line, parse_constant=_reject_constant)
     except (json.JSONDecodeError, ValueError) as exc:
         raise TornFrameError(f"unparseable frame line: {exc}") from exc
     if not isinstance(obj, dict) or "crc" not in obj:

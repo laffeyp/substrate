@@ -36,9 +36,8 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol
 
-from .records import ReproductionTest
+from .records import Reproduction, ReproductionTest
 from .select_exec import reproduction_status
-from .records import Reproduction
 
 _Factory = Callable[[], Any]
 

@@ -2,11 +2,12 @@
 # Copyright (C) 2026 Peter Laffey
 """Tests for the frame format and torn-tail recovery (technical §3.3)."""
 
-import substrate.record.framing as framing
-from hypothesis import given, strategies as st
-
-from substrate.errors import CRCMismatchError, FrameTooLargeError, TornFrameError
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+import substrate.record.framing as framing
+from substrate.errors import CRCMismatchError, FrameTooLargeError, TornFrameError
 
 
 def _env(seq, payload=None):

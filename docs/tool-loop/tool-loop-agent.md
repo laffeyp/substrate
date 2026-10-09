@@ -125,8 +125,8 @@ Run it: `cd substrate && uv run python your_script.py`.
 - **Programmatically:** `read_record(record)` yields every event — `ToolCall` (tool + args),
   `ToolResult` (output/ok/error), `FinalAnswer`, plus the runtime lifecycle events. This is the ground
   truth: what the model actually did, replayable.
-- **Visually:** point the console at it — `cd substrate && SUBSTRATE_UI_PORT=8799 uv run python
-  ../substrate-ui/server.py`, open `http://127.0.0.1:8799/`, and the run's graph + event stream +
+- **Visually:** point the console at it — `cd substrate && uv run python
+  ../substrate-ui/server.py --port 8799`, open `http://127.0.0.1:8799/`, and the run's graph + event stream +
   scene render from the same record. (The console reads records; it does not yet *drive* the agent —
   §5.)
 

@@ -3,7 +3,8 @@
 ```yaml
 ---
 id: 250
-status: open
+status: closed
+closed_at: 2026-10-08
 opened_at: 2026-10-08
 pass_kind: remediation
 roadmap: substrate-ui/process/planning/ROADMAP-2026-10-08-lens-audit-remediation.md
@@ -56,4 +57,41 @@ Each row closes as named; a row the sprint cannot close halts the sprint.
 
 ## result
 
-(filled at close)
+**The Claim Check covers injected events (F019, F020, F040).**
+- The sequencer offloads lifecycle payloads too: a `resume_event`, an `inject_event` and the invalid-emission wrapper each pass `_maybe_offload`.
+- A 2 MB resume event is now a blob stub in the record; the record reads back whole and the resolved payload equals the input.
+- `_emit` advances the seq only after `record.append` returns, so an append that raises leaves no hole.
+- The api docstring's claim that FrameTooLargeError cannot reach a caller is now true, and says why.
+
+**The manifest keeps what the run wrote (F009, F015, F284).** The writer loads the manifest's ceiling and extra fields when it opens a root. Roll and close write them back, where they wrote the defaults (`"3a"`, no run_id) over the runtime's manifest.
+
+**One loader, blobs redeemed in one place (F030, F031, F036, F038).**
+- `record.load_envelopes` takes a record root or an iterable of envelopes. graph, inspect, narrate and the testing helpers use it; the four `_load` copies are gone. Narrate and the testing helpers pass `resolve_blobs=True`, so a 20 KiB application event narrates as its fields, not `$blob=sha256:…`.
+- replay reads blobs through `BlobStore.get`, not a hand-built `blobs/sha256/xx/hex` path.
+- `record/live.py` imports the segment helpers rather than copying them.
+
+**Readers (F011, F012, F013).**
+- `recover_open_segment` reads without following a symlink.
+- A frame holding NaN is cut by recovery, not raised.
+- `read_sidecar` skips a torn last line.
+
+**run_graph (F029, F034, F035).**
+- A pause is the run's state only while it is the last event, so a resumed session mid-turn reads INCOMPLETE with its live Producer `running`. Before, it read PAUSED, with that Producer `interrupted`.
+- `ProducerStatus` (StrEnum) types the five instance statuses.
+- The docstring names `is_initial`.
+
+**One copy of each name (F010, F039).**
+- `INITIAL_TRIGGER_ID` and `FAILURE_KINDS` live in constants; narrate and the CLI use them.
+- The record package's shared helpers are public names (`fsync_dir`, `sealed_segments`, `hot_segment`, `segment_index`); record.py and live.py no longer import another module's private names.
+
+**Found on the way.** The patch's own `_load` removal cut `ProducerNode`, `TriggerEdge`, `RouteEdge` and `TopologyGraph` out of graph.py. The cut ended at the next `def`, not at the next top-level block. Restored from HEAD before any test ran on it.
+
+**Tests.** `tests/test_record_integrity_250.py`, 7 tests. Each fails on HEAD (b04f8b2a) for its own finding:
+- the oversized event and the failed append both end in a seq gap;
+- the closed manifest has no `run_id`;
+- the mid-turn session reads PAUSED;
+- NaN raises NonCanonicalValueError;
+- the torn sidecar raises JSONDecodeError;
+- narration prints the blob stub.
+
+**Gates.** ruff, format, mypy --strict (138 files) and lint-imports (2 contracts) are clean. The kernel suite's deterministic tests (`-m "not realmodel"`): 1,271 passed, 4 skipped, 43 deselected.

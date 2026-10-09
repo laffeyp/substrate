@@ -26,8 +26,8 @@ runner around `run_suite_with_salvage`, cutting it from 1045 lines to ~350.
 from __future__ import annotations
 
 import asyncio
-import time
 import enum
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +40,7 @@ from .oracle import Oracle, Result, Verdict
 from .suite import Arm, Case, Suite
 
 
-class CellSource(str, enum.Enum):
+class CellSource(enum.StrEnum):
     """Sprint 199 (canonical-home move from `assay/cells.py`, SDD vocabulary-as-contract):
     the closed lexicon naming HOW a cell landed on disk. Str-subclass so the wire form on
     cells.jsonl stays `"run"` / `"salvage"` / `"error"` — reader compatibility with every
@@ -322,7 +322,7 @@ async def run_suite_with_salvage(
                         reproduction=project_reproduction_for_selected(events),
                         budget=budget,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — the cell boundary: any arm or oracle error is classified into the report or halts the sweep
                     reason, halt = _classify_or_halt(classify_exception, exc)
                     outcome = CellOutcome(
                         arm=arm,
@@ -353,7 +353,7 @@ async def run_suite_with_salvage(
                         reproduction=cr.reproduction,
                         budget=budget,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — the cell boundary: any arm or oracle error is classified into the report or halts the sweep
                     reason, halt = _classify_or_halt(classify_exception, exc)
                     outcome = CellOutcome(
                         arm=arm,
@@ -375,7 +375,8 @@ async def run_suite_with_salvage(
             if outcome.source is CellSource.ERROR and outcome.halt:
                 # Re-raise the classified-as-halt exception so asyncio.gather propagates and the
                 # sweep unwinds with the original traceback (not a synthetic RuntimeError).
-                assert outcome.exception is not None
+                if outcome.exception is None:
+                    raise RuntimeError("a halting cell outcome carries no exception")
                 raise outcome.exception
 
     if todo:

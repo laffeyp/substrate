@@ -23,6 +23,7 @@ Tests pin the additive + typed contract:
 from __future__ import annotations
 
 from msgspec import Struct
+
 from substrate import api
 from substrate.kernel.topology import ProducerKindReg, TopologyBuilder
 

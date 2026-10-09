@@ -27,27 +27,9 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from ..record import framing
-from ..record.record import resolve_blob_payload
 from ..constants import POLL_INTERVAL_MS, RUN_FINALISED
-
-
-def _sealed_segments(root: Path) -> list[Path]:
-    """Sealed segments in seq order (by filename), excluding the hot `.open` one."""
-    return sorted(p for p in root.glob("events-*.jsonl") if not p.name.endswith(".open.jsonl"))
-
-
-def _hot_segment(root: Path) -> Path | None:
-    hot = sorted(root.glob("events-*.open.jsonl"))
-    return hot[-1] if hot else None
-
-
-def _segment_index(path: Path) -> int:
-    """The numeric segment index from `events-NNNNNN[.open].jsonl`. ROLL-STABLE: a segment
-    keeps its index when it seals (`.open` is dropped, the number is unchanged), so the
-    follower's per-segment cursor must key on this — NOT the basename, which changes on
-    seal and would otherwise reset the cursor to 0 and re-yield the whole segment."""
-    return int(path.name.split("-", 1)[1].split(".", 1)[0])
+from . import framing
+from .record import hot_segment, sealed_segments, segment_index, resolve_blob_payload
 
 
 class LiveRecord:
@@ -89,7 +71,7 @@ class LiveRecord:
             fd = os.open(path, flags)
         except FileNotFoundError:
             return
-        idx = _segment_index(path)
+        idx = segment_index(path)
         start = self._cursors.get(idx, 0)
         try:
             size = os.fstat(fd).st_size
@@ -115,9 +97,9 @@ class LiveRecord:
         segments (newly-appearing ones are picked up), then the recoverable prefix of the
         hot segment. A sealed segment is read once and not re-read (its cursor saturates)."""
         out: list[dict[str, Any]] = []
-        for seg in _sealed_segments(self.root):
+        for seg in sealed_segments(self.root):
             out.extend(self._read_segment_new(seg))
-        hot = _hot_segment(self.root)
+        hot = hot_segment(self.root)
         if hot is not None:
             out.extend(self._read_segment_new(hot))
         if self._resolve_blobs:

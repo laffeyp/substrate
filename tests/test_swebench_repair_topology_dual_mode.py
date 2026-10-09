@@ -24,7 +24,6 @@ from pathlib import Path
 from substrate.api import Runtime, read_record
 from substrate.topologies.swebench_solver.assemble import swebench_repair_topology
 
-
 _FIX = "# path: m.py\n<<<<<<< SEARCH\n    return x\n=======\n    return x + 1\n>>>>>>> REPLACE\n"
 
 

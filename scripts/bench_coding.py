@@ -284,7 +284,7 @@ async def main() -> None:
                     row = _row(
                         arm, case, trial, passed, CellSource.SALVAGE.value, _ZERO, 0, str(salv)
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001 — the cell boundary: any failure is an ERROR row, the sweep goes on
                     row = _row(arm, case, trial, False, CellSource.ERROR.value, _ZERO, 0, str(salv))
             else:
                 root = base / f"{arm.name}__{case.case_id}__t{trial}"
@@ -303,7 +303,7 @@ async def main() -> None:
                         r.elapsed_ms,
                         r.root,
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001 — the cell boundary: any failure is an ERROR row, the sweep goes on
                     row = _row(
                         arm,
                         case,

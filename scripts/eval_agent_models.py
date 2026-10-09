@@ -21,8 +21,8 @@ import re
 import tempfile
 from pathlib import Path
 
-from substrate.api import Runtime, read_record
 from substrate.adapters import OllamaResponder
+from substrate.api import Runtime, read_record
 from substrate.topologies.tool_loop import tool_loop_topology
 from substrate.topologies.tool_loop.tools import FULL_SUITE
 

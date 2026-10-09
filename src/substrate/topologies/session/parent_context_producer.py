@@ -36,7 +36,6 @@ from ... import api
 from . import PromptFragment
 from .vocabulary import PromptSource
 
-
 _PRECEDENCE = 30  # reserved band from session-vocabulary.md § I
 _CONTEXT_SLICE_CAP_BYTES = 64 * 1024  # matches delegate.py's default
 

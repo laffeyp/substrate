@@ -403,7 +403,7 @@ def _repair_and_grade_topology_from_payload(
     topology emits `GradeResult` on the cell's record; the paired `swebench_log_projection_oracle`
     reads it off. `instance_id` comes from the payload's `image` (which encodes it) — the
     payload's `image` is deterministic per instance_id via `instance_image`."""
-    from ..topologies.swebench_solver.assemble import swebench_solve_and_grade_topology
+    from .swebench_solve_and_grade import swebench_solve_and_grade_topology
 
     # Extract instance_id from the image string (`swebench.eval.<arch>.<instance>.<hash>`).
     # Sprint 197: the payload doesn't carry instance_id directly; it's on the Case's
@@ -468,7 +468,7 @@ def swebench_solve_and_grade_arm(
             else str(case.ground_truth)
         )
         run_id = f"{name}-{safe_case_id(instance_id)}"
-        from ..topologies.swebench_solver.assemble import swebench_solve_and_grade_topology
+        from .swebench_solve_and_grade import swebench_solve_and_grade_topology
 
         return swebench_solve_and_grade_topology(
             responders=responders,

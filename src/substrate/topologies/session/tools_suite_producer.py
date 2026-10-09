@@ -30,7 +30,6 @@ from ..tool_loop.tools import Tool, suite_describe
 from . import PromptFragment
 from .vocabulary import PromptSource
 
-
 _PRECEDENCE = 20  # reserved band from session-vocabulary.md § I
 
 

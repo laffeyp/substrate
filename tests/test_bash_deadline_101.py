@@ -19,11 +19,10 @@ import pytest
 
 from substrate.topologies.tool_loop.background import TABLE
 from substrate.topologies.tool_loop.tools import (
-    BASH_MAX_TIMEOUT_S,
     _TOOL_CANCEL_HOOKS,
+    BASH_MAX_TIMEOUT_S,
     _bash,
 )
-
 
 OWNER = "test:bash_deadline_101"
 

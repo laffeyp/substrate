@@ -3,7 +3,8 @@
 ```yaml
 ---
 id: 258
-status: open
+status: closed
+closed_at: 2026-10-08
 opened_at: 2026-10-08
 pass_kind: remediation
 roadmap: substrate-ui/process/planning/ROADMAP-2026-10-08-lens-audit-remediation.md
@@ -53,4 +54,45 @@ Each row closes as named; a row the sprint cannot close halts the sprint.
 
 ## result
 
-(filled at close)
+**Packaging (F001).** `[tool.hatch.build.targets.sdist]` lists the package, tests and project files. The 1.1.2 sdist is now 889 KB; it was 95 MB compressed, because process/runs (18,336 files) shipped inside it.
+
+**Layering (F042, F051, F061, F199, F200, F233).** One import-linter "layers" contract now covers the whole package: cli > app > assay | conformance > topologies | reference > _daemon | adapters > api > bundles | projections | testing > kernel | naming | home > record > encoding | protocols | errors > constants | types. It passes. A planted `topologies → assay` import breaks it and names the line. To get there:
+- **topologies ↔ assay.** The firewall moved to `topologies/swebench_solver/firewall.py`; it is a rule on the solver's inputs. The grade producer and the solve-and-grade composition moved into assay (`assay/swebench_grade_producer.py`, `assay/swebench_solve_and_grade.py`).
+- **The registry.** `session_registry` moved from the package root to `topologies/session_registry.py` (64 importers updated).
+- **`substrate.app`** is new: the application facade, holding the session registry names, the daemon client, the session and tool-loop kind names, the bundled-topology registry, the calibration scorers and the conformance suite. `api` is the kernel's facade again; it no longer depends on the applications above it.
+- **api ↔ bundles.** `substrate_home` moved to the leaf module `home.py`, which api re-exports.
+- **kernel ↔ projections (F025).** `LiveRecord` moved into `record/live.py` and now imports record.py's segment helpers instead of copying them (F030).
+- **The CLI contract** is an allowlist of `{api, app}` over every top-level unit, where it was a denylist that missed seven. The CLI's AST test now counts `importlib.import_module("substrate…")` as an import. The CLI's reaches through importlib and the private `_daemon` are gone; `connect` and `tcp_host_port` are public on the daemon client.
+- The kernel pre-commit hook runs `lint-imports`.
+
+**Rules that run (F008, F006).**
+- ruff selects BLE and S in both repos. S603/S607 are ignored with the reason stated: argv-list subprocess calls only.
+- Each of the 28 blind excepts in kernel src, and the 3 in the UI server, either names the boundary it guards or became typed `except` clauses. The UI's create, turn and end handlers used `isinstance` dispatch inside `except Exception`; they now catch by type.
+- Production asserts became explicit raises: 5 in the kernel, 6 in server.py. Among them is F014's runtime assert, fixed under `asyncio.timeout(...).expired()`, with a test that hangs or mislabels on the old code.
+- `sha1` naming hashes say `usedforsecurity=False`; web_fetch refuses non-http(s) schemes.
+- The coding gate runs in its own process group and kills the whole group on timeout (F176, with a test). Its one `shell=True` call says why.
+- encoding.py's catches are narrowed or justified.
+
+**Vocabulary (F003, F004, F005, F234).**
+- The constants and package docstrings name vocabulary 0.3.
+- `InvalidReason` (StrEnum) is the one set of invalid-emission reasons, used by encoding, the sequencer and conformance.
+- Every enum in src is a StrEnum: Verdict, Decision, Status, RunPhase, CellSource, Reproduction and RepairOutcome were converted.
+
+**Gates (F292, F293).**
+- `scripts/check_status_literals.sh` is the one status-literal gate. It catches both quote styles in .py, .ts and .tsx; planted lines in each were caught.
+- Both repos' hooks run it.
+- The server's three single-quoted comparisons now use SessionStatus.
+- reveal_component.ts is excluded by name until U112 replaces it.
+- mypy logs to a `mktemp` file.
+
+**Tests in the right repo (F428, F429).** The six kernel-only UI test files now live in substrate/tests (24 tests).
+
+**Gates run.**
+
+| Gate | Result |
+|---|---|
+| kernel ruff, format, mypy --strict (138 files), lint-imports (2 contracts) | clean / kept |
+| UI suite | 214 (238 − 24 moved) |
+| vm_smoke | 12/12 |
+| electron_smoke | 0 defects |
+| kernel suite | see BLACKBOARD |

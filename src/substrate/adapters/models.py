@@ -48,6 +48,7 @@ __all__ = [
     "call_responder_metered",
     "ContextTokensUnknown",
     "DriverIntrospectionUnavailable",
+    "ollama_base_url",
 ]
 
 
@@ -129,6 +130,19 @@ class DeterministicResponder:
 # done_reason "length" and no answer. A looping small model still stops when the window fills.
 
 
+def ollama_base_url(base_url: str | None = None) -> str:
+    """The Ollama server's base URL: `base_url`, else `OLLAMA_BASE_URL`, else localhost:11434.
+
+    `OLLAMA_BASE_URL` lets a run reach Ollama across a boundary (the container test arena points it
+    at host.docker.internal) without touching call sites. A trailing `/v1` from the old
+    OpenAI-compat default is dropped; the native routes are `<base>/api/...`. The console's model
+    listing and capability probe call this too, so one setting moves every Ollama call (lens
+    audit F304).
+    """
+    base = (base_url or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")
+    return base[:-3] if base.endswith("/v1") else base
+
+
 class OllamaResponder:
     """A real local-LLM responder over Ollama's native `/api/chat` (walkthrough mode).
 
@@ -163,16 +177,7 @@ class OllamaResponder:
         max_retries: int = 3,
         system: str | None = None,
     ) -> None:
-        # tolerate a trailing `/v1` from the old OpenAI-compat default so existing call sites keep
-        # working; the native chat route is `<base>/api/chat`. `OLLAMA_BASE_URL` lets a run reach
-        # Ollama across a boundary (the container test arena points it at host.docker.internal)
-        # without touching call sites; an explicit base_url still wins.
-        base = (base_url or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip(
-            "/"
-        )
-        if base.endswith("/v1"):
-            base = base[:-3]
-        self._endpoint = f"{base}/api/chat"
+        self._endpoint = f"{ollama_base_url(base_url)}/api/chat"
         self._model = model
         self._api_key = api_key
         self._temperature = temperature
@@ -439,7 +444,6 @@ class CliResponder:
     async def arespond(self, prompt: str) -> str:
         """Async, cancellable call over an asyncio subprocess (the path `call_responder` prefers)."""
         import asyncio as _asyncio
-
         import os as _os
         import signal as _signal
 

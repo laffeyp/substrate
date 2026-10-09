@@ -29,7 +29,7 @@ from ..best_of_n import Candidate, Verdict, best_of_n_correction
 # verifier when the answer is mechanically checkable — no model in the validator slot.
 Check = Callable[[str], tuple[bool, str]]
 
-_PASS = "PASS"
+_PASS = "PASS"  # noqa: S105 — a verdict word, not a credential
 _PASS_RE = re.compile(r"\bPASS\b", re.IGNORECASE)
 _FAIL_RE = re.compile(r"\bFAIL\b", re.IGNORECASE)
 
@@ -62,7 +62,7 @@ def _drafter_factory(task: str, drafter: Responder) -> Callable[[], Any]:
         try:
             response, usage = await call_responder_metered(drafter, prompt)
             yield usage  # metered onto the record (inert) — only on a real call
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a model failure becomes a recorded candidate; K254 retires this (ledger F127, F189)
             response = f"(draft failed: {type(exc).__name__})"
         yield Candidate(round=rnd, slot=slot, response=response)
 
@@ -101,7 +101,7 @@ def _validator_factory(task: str, verify: Check | Responder) -> Callable[[], Any
                 )
                 yield usage
                 passed, reason = _verdict_passed(verdict_text)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a model failure becomes a recorded candidate; K254 retires this (ledger F127, F189)
             passed, reason = False, f"(verify failed: {type(exc).__name__})"
         yield Verdict(
             round=rnd,

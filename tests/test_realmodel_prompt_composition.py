@@ -32,7 +32,6 @@ from substrate.adapters import OllamaResponder
 from substrate.topologies.session import session_topology
 from substrate.topologies.tool_loop.tools import CALCULATOR
 
-
 _MODEL = "kimi-k2.6:cloud"  # daily-driver cloud model per project convention
 _TIMEOUT = 300.0
 

@@ -84,6 +84,7 @@ async def test_parent_seq_at_call_reads_the_parent_record_tail(tmp_path: Path) -
     parent → child via this number.
     """
     from collections.abc import AsyncIterator
+
     from msgspec import Struct
 
     class Bumper(Struct, frozen=True):

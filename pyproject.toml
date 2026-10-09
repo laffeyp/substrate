@@ -65,6 +65,21 @@ substrate = "substrate.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/substrate"]
 
+# The sdist carries the package, its tests and the project files, nothing else. Without this
+# list hatch packed everything git tracks, process/runs included: 18,336 assay record files,
+# 95 MB compressed, since 1.0.1 (1.0.0's sdist was 1.3 MB; PyPI's default limit is 100 MB).
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/substrate",
+  "tests",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "pyproject.toml",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # pytest-asyncio 1.4 warns while this is unset; "function" (its announced future default) gives each
@@ -110,6 +125,20 @@ line-length = 100
 # rule 12); they are not part of the package and are excluded from both lint and format gates.
 extend-exclude = ["docs/specs/kernel_spec", "docs/proof"]
 
+[tool.ruff.lint]
+# ruff's defaults plus BLE (blind except) and S (bandit). Until 2026-10-08 neither ran, so the
+# 82 `# noqa: BLE001` and 10 `# noqa: S…` comments, and the pre-commit BLE001-rationale gate,
+# policed rules that were off (lens audit F008).
+extend-select = ["BLE", "S"]
+# S603/S607: every subprocess call here passes an argv list (no shell) to a tool the code names
+# (git, docker, uv, the interpreter). The one shell=True call (the coding gate) is marked where it is.
+ignore = ["S603", "S607"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, write scratch paths, exec fixtures and open local URLs by design.
+"tests/**" = ["S101", "S102", "S108", "S310", "S110", "BLE001"]
+"scripts/**" = ["S101", "S108", "S310", "S311"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
@@ -136,21 +165,39 @@ ignore_missing_imports = true
 root_package = "substrate"
 
 [[tool.importlinter.contracts]]
-name = "cli imports only substrate.api"
+name = "cli imports only substrate.api and substrate.app"
 type = "forbidden"
 source_modules = ["substrate.cli"]
-# Only DIRECT cli imports are constrained: cli -> api is allowed, and api -> internals is fine
-# (that is the whole point — api is the facade). Without this, the cli -> api -> internal chain
-# would be flagged. The rule we enforce is "cli's own imports touch no private module".
+# Only DIRECT cli imports are constrained: cli -> api/app -> internals is the point of a facade.
 allow_indirect_imports = true
-# Every internal surface EXCEPT substrate.api. cli may import only the public facade. Naming the
-# four internal SUBPACKAGES (kernel/record/projections/conformance) forbids all their submodules at
-# once, so a new private module dropped inside one is covered automatically — no per-module denylist
-# to keep in sync (the old flat list had to enumerate all ~25). The remaining top-level leaves
-# (types/protocols/errors/constants/encoding) + testing are named directly. A miss is still caught
-# by the CLI's own AST import-lint test, tests/test_cli.py::test_cli_imports_only_substrate_api.
+# Every top-level unit except the two facades. A new top-level module is caught by the CLI's AST
+# test (tests/test_cli.py::test_cli_imports_only_substrate_api), which also counts string imports
+# through importlib (lens audit F061, F200: the old list omitted adapters, topologies, assay, the
+# registry, bundles, _daemon and reference, and the CLI reached topologies through importlib).
 forbidden_modules = [
-  "substrate.kernel", "substrate.record", "substrate.projections", "substrate.conformance",
-  "substrate.types", "substrate.protocols", "substrate.errors", "substrate.constants",
-  "substrate.encoding", "substrate.testing",
+  "substrate._daemon", "substrate.adapters", "substrate.assay", "substrate.bundles",
+  "substrate.conformance", "substrate.constants", "substrate.encoding", "substrate.errors",
+  "substrate.home", "substrate.kernel", "substrate.naming", "substrate.projections",
+  "substrate.protocols", "substrate.record", "substrate.reference", "substrate.testing",
+  "substrate.topologies", "substrate.types",
+]
+
+[[tool.importlinter.contracts]]
+name = "layers: each unit imports only units below it"
+type = "layers"
+# Top to bottom. Units in one layer separated by | are independent: neither imports the other.
+# Until 2026-10-08 no layers contract existed; topologies and assay imported each other, api and
+# bundles, api and conformance, and kernel and projections did too (lens audit F025, F042, F199).
+layers = [
+  "substrate.cli",
+  "substrate.app",
+  "substrate.assay | substrate.conformance",
+  "substrate.topologies | substrate.reference",
+  "substrate._daemon | substrate.adapters",
+  "substrate.api",
+  "substrate.bundles | substrate.projections | substrate.testing",
+  "substrate.kernel | substrate.naming | substrate.home",
+  "substrate.record",
+  "substrate.encoding | substrate.protocols | substrate.errors",
+  "substrate.constants | substrate.types",
 ]

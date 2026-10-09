@@ -17,7 +17,6 @@ import pytest
 from substrate import api
 from substrate.topologies import bundled
 
-
 APPLICATION_NAMES = ("fanout_review", "best_of_n_verified", "research_sweep", "daily")
 
 

@@ -12,7 +12,7 @@ producer to a SessionEnded and terminate the run.
 
 Sprint 205 registered the four Producers, three Views, and eight Structs. Sprint 206
 adds the ten triggers, composes termination as
-`any_of(pause_await_input(on Park, resume_condition="UserMessage"), threshold_count("SessionEnded", 1))`,
+`any_of(pause_await_input(on Park, resume_condition="UserMessage"), finalise_on("SessionEnded"))`,
 and refuses `all_completed` at build time — a pausable topology on `all_completed`
 hangs on resume because the paused Producer's ProducerStarted has no durable end
 (policies.py:90-97). Producer bodies stay scaffolded; sprint 207 replaces them with
@@ -41,6 +41,7 @@ from .vocabulary import (
     PRODUCER_KIND_BUNDLE_METHODOLOGY_FRAGMENT,
     PRODUCER_KIND_BUNDLE_PERSONALITY_FRAGMENT,
     PRODUCER_KIND_FRAGMENT_ERROR_WARNING,
+    PRODUCER_KIND_INTERRUPT_FRAGMENT,
     PRODUCER_KIND_MODEL,
     PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT,
     PRODUCER_KIND_PARK,
@@ -53,7 +54,6 @@ from .vocabulary import (
     PRODUCER_KIND_SESSION_WARNING,
     PRODUCER_KIND_TOOL,
     PRODUCER_KIND_TOOLS_SUITE_FRAGMENT,
-    PRODUCER_KIND_INTERRUPT_FRAGMENT,
     PRODUCER_KIND_USER_MESSAGE_FRAGMENT,
     SESSION_END_REQUESTED,
     SESSION_ENDED,
@@ -1288,7 +1288,9 @@ def session_topology(
                 when=lambda tctx: tctx.event is not None and tctx.event.kind == PARK,
                 resume_condition=USER_MESSAGE,
             ),
-            api.threshold_count(SESSION_ENDED, 1),
+            # Not threshold_count(SESSION_ENDED, 1): a resume restores counts from the whole
+            # record, so an ended-then-resumed session would finalise on its next event.
+            api.finalise_on(SESSION_ENDED),
         )
         _refuse_all_completed(termination)
         b.termination(termination)
@@ -1309,13 +1311,6 @@ def session_topology(
 # session Structs so the file reads top-down: session's own vocabulary first, then
 # the tool_loop borrow. tool_loop's schemas are already frozen msgspec Structs.
 from ..tool_loop import FinalAnswer, ToolCall, ToolResult  # noqa: E402
-from .transcript import (  # noqa: E402
-    RenderedTranscript,
-    TranscriptCompacted,
-    _est_tokens,
-    render_transcript,
-    resolve_driver_context_tokens,
-)
 from .bundle_producer import (  # noqa: E402  # sprint 062
     bundle_methodology_producer_factory,
     bundle_personality_producer_factory,
@@ -1328,6 +1323,13 @@ from .parent_context_producer import parent_context_producer_factory  # noqa: E4
 from .per_turn_producer import per_turn_producer_factory  # noqa: E402  # sprint 060
 from .role_producer import role_producer_factory  # noqa: E402  # sprint 061
 from .tools_suite_producer import tools_suite_producer_factory  # noqa: E402  # sprint 064
+from .transcript import (  # noqa: E402
+    RenderedTranscript,
+    TranscriptCompacted,
+    _est_tokens,
+    render_transcript,
+    resolve_driver_context_tokens,
+)
 from .user_message_fragment_producer import (  # noqa: E402  # sprint 064
     user_message_fragment_producer_factory,
 )

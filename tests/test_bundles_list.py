@@ -3,8 +3,8 @@
 """Sprint 238 — tests for `substrate.bundles.list_bundles`."""
 
 from __future__ import annotations
-from pathlib import Path
 
+from pathlib import Path
 
 from substrate.bundles import Bundle, list_bundles
 

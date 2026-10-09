@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-class Decision(enum.Enum):
+class Decision(enum.StrEnum):
     """The verdict a TerminationPolicy returns each cycle. v1.0 ships four of the kernel §8
     outcomes: CONTINUE (do nothing), FINALISE_RUN (end the run), CANCEL_OTHERS (cancel every
     other live Producer), PAUSE_AWAIT_INPUT (halt, resumable). Recorded on
@@ -86,6 +86,25 @@ def threshold_count(kind: str, n: int) -> TerminationPolicy:
     return TerminationPolicy(
         f"threshold_count({kind},{n})",
         lambda c: Decision.FINALISE_RUN if c.counts(kind) >= n else Decision.CONTINUE,
+    )
+
+
+def finalise_on(kind: str) -> TerminationPolicy:
+    """Finalise when the event just appended is of `kind`.
+
+    For a terminal event a RESUMABLE run can see more than once. `threshold_count(kind, 1)` reads
+    the run's count of `kind`, which a resume restores from the whole log, so a record that
+    already holds one such event finalises the resumed run on its first new event. This policy
+    reads only the event that just landed: an earlier one in the record never ends the run (lens
+    audit F309: the console rebuilt the session's termination with a raised threshold, counted
+    by reading the whole record on every turn)."""
+    return TerminationPolicy(
+        f"finalise_on({kind})",
+        lambda c: (
+            Decision.FINALISE_RUN
+            if c.event is not None and getattr(c.event, "kind", None) == kind
+            else Decision.CONTINUE
+        ),
     )
 
 

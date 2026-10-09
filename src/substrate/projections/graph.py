@@ -25,14 +25,13 @@ inspect provenance surface uses).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from pathlib import Path
+from enum import StrEnum
 from typing import Any
 
 from msgspec import Struct
 
-from ..constants import RunStatus
 from ..constants import (
+    INITIAL_TRIGGER_ID,
     PRODUCER_CANCELLED,
     PRODUCER_COMPLETED,
     PRODUCER_FAILED,
@@ -41,33 +40,35 @@ from ..constants import (
     RUN_STARTED,
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
+    RunStatus,
 )
-from ..kernel.policies import Decision
 from ..errors import RecordIncompleteError
-from ..record.record import read_record
+from ..kernel.policies import Decision
+from ..record.record import load_envelopes
 
 _RUN_STARTED = RUN_STARTED
 _TRIGGER_FIRED = TRIGGER_FIRED
-_INITIAL = "__initial__"
+_INITIAL = INITIAL_TRIGGER_ID
+
+
+class ProducerStatus(StrEnum):
+    """A Producer instance's status in `run_graph` (lens audit F034: a five-value string set)."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    RUNNING = "running"
+    INTERRUPTED = "interrupted"
+
+
 _END_KINDS = {
-    PRODUCER_COMPLETED: "completed",
-    PRODUCER_FAILED: "failed",
-    PRODUCER_CANCELLED: "cancelled",
+    PRODUCER_COMPLETED: ProducerStatus.COMPLETED,
+    PRODUCER_FAILED: ProducerStatus.FAILED,
+    PRODUCER_CANCELLED: ProducerStatus.CANCELLED,
 }
 # RunFinalised reasons that mean the RUN ITSELF failed (RunStatus.FAILED), as opposed to a clean
 # finalise that nonetheless had Producer-level failures inside it (finished != worked).
 _RUN_FAILURE_REASONS = frozenset({"view_failure", "kernel_error", "stuck_quiescent"})
-
-
-def _load(record: Any) -> list[dict[str, Any]]:
-    """Accept a record root path or an iterable of envelopes (the inspect-surface contract)."""
-    if isinstance(record, (str, Path)):
-        return list(read_record(record))
-    if isinstance(record, Iterable):
-        return list(record)
-    raise TypeError(
-        f"expected a record root path or an iterable of envelopes, got {type(record)!r}"
-    )
 
 
 # ── static structure (topology_graph) ───────────────────────────────────────────────────────
@@ -122,9 +123,9 @@ class TopologyGraph(Struct, frozen=True):
 def topology_graph(record: Any) -> TopologyGraph:
     """The STATIC topology structure, from the RunStarted manifest (the only place a run records
     its topology). Producer kinds are nodes (with what they emit and whether any Trigger starts
-    them — `is_root`); Triggers and Routes are the edges. Raises ValueError if the record has no
+    them — `is_initial`); Triggers and Routes are the edges. Raises ValueError if the record has no
     RunStarted manifest (an empty or truncated record has no topology to project)."""
-    envelopes = _load(record)
+    envelopes = load_envelopes(record)
     manifest: dict[str, Any] | None = None
     initial_kinds: set[str] = set()
     for env in envelopes:
@@ -207,7 +208,7 @@ class ProducerInstance(Struct, frozen=True):
     fired_seq: int | None
     started_seq: int | None
     ended_seq: int | None
-    status: str
+    status: ProducerStatus
     emitted: tuple[str, ...]
 
 
@@ -237,20 +238,23 @@ def run_graph(record: Any) -> RunGraph:
     TriggerFired / ProducerStarted-Completed-Failed-Cancelled lifecycle events (the same instance/
     parent links the inspect provenance surface uses). Instances are returned in spawn order
     (by started_seq)."""
-    envelopes = _load(record)
+    envelopes = load_envelopes(record)
     fired: dict[str, dict[str, Any]] = {}  # instance -> TriggerFired payload (+ its seq)
     started: dict[str, dict[str, Any]] = {}  # instance -> {ref, seq}
-    ended: dict[str, tuple[str, int]] = {}  # instance -> (status, end seq)
+    ended: dict[str, tuple[ProducerStatus, int]] = {}  # instance -> (status, end seq)
     emitted: dict[str, list[str]] = {}  # instance -> app event kinds, seq order
     finalised = False
     final_reason: str | None = None
     paused = False
+    paused_at: int | None = None
     paused_resume_condition: str | None = None
+    last_seq = -1
 
     for env in envelopes:
         kind = str(env.get("kind", ""))
         payload = env.get("payload") or {}
         seq = int(env.get("seq", -1))
+        last_seq = max(last_seq, seq)
         if kind == _TRIGGER_FIRED:
             inst = payload.get("instance")
             if isinstance(inst, str):
@@ -271,7 +275,7 @@ def run_graph(record: Any) -> RunGraph:
             kind == TERMINATION_MATCHED
             and payload.get("decision") == Decision.PAUSE_AWAIT_INPUT.value
         ):
-            paused = True
+            paused_at = seq
             rc = payload.get("resume_condition")
             paused_resume_condition = str(rc) if rc else None
         elif not kind.startswith("substrate."):
@@ -279,6 +283,10 @@ def run_graph(record: Any) -> RunGraph:
             if isinstance(ref, dict) and isinstance(ref.get("instance"), str):
                 emitted.setdefault(ref["instance"], []).append(kind)
 
+    # A pause is the run's state only while nothing follows it: a session pauses at the end of
+    # every turn and resumes on the next, so a pause that a resume followed is history (lens
+    # audit F029: a live session mid-turn read as PAUSED, its running Producers "interrupted").
+    paused = paused_at is not None and paused_at == last_seq
     instances: list[ProducerInstance] = []
     for inst in set(fired) | set(started):  # the union: a firing and/or a start witnesses it
         f = fired.get(inst, {})
@@ -291,7 +299,10 @@ def run_graph(record: Any) -> RunGraph:
             # no end-record: "running" only while the run is still INCOMPLETE (genuinely un-ended);
             # in a terminal/paused run it will NEVER end -> "interrupted" (e.g. a Producer cut off by
             # a pause: started, never completed, run over). A finished run must not show live work. #38
-            status, end_seq = ("interrupted" if (finalised or paused) else "running"), None
+            status, end_seq = (
+                (ProducerStatus.INTERRUPTED if (finalised or paused) else ProducerStatus.RUNNING),
+                None,
+            )
         started_seq = s["seq"] if s else f.get("_seq")
         instances.append(
             ProducerInstance(
@@ -318,9 +329,11 @@ def run_graph(record: Any) -> RunGraph:
     # Producer-level failures INSIDE it is still "finalised"; that finished-!=-worked case is the
     # per-instance statuses + the failure tally, not the run-level status. (review #30 finding 1.)
     if finalised:
-        status = RunStatus.FAILED if final_reason in _RUN_FAILURE_REASONS else RunStatus.FINALISED
+        run_status = (
+            RunStatus.FAILED if final_reason in _RUN_FAILURE_REASONS else RunStatus.FINALISED
+        )
     elif paused:
-        status = RunStatus.PAUSED
+        run_status = RunStatus.PAUSED
     else:
         # no terminal RunFinalised: the record is INCOMPLETE — either still being written (if it
         # is being live-followed) OR torn/medium-failed (the fsync-gate path fails the run WITHOUT
@@ -328,10 +341,10 @@ def run_graph(record: Any) -> RunGraph:
         # cannot distinguish the two; that is out-of-band (the follow/liveness context). The §7.2-
         # safe default for a STATIC read is "incomplete" (indeterminate / not a clean "running"),
         # so a torn record never reads as fine. (review #31.)
-        status = RunStatus.INCOMPLETE
+        run_status = RunStatus.INCOMPLETE
     return RunGraph(
         instances=tuple(instances),
-        status=status,
+        status=run_status,
         final_reason=final_reason,
-        paused_on=paused_resume_condition if status == RunStatus.PAUSED else None,
+        paused_on=paused_resume_condition if run_status == RunStatus.PAUSED else None,
     )

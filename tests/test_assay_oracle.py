@@ -15,9 +15,9 @@ from substrate.assay.oracle import (
     EXTERNAL_GRADER,
     LOG_PROJECTION,
     ExternalGraderOracle,
-    Verdict,
     LogProjectionOracle,
     Result,
+    Verdict,
 )
 from substrate.topologies.tool_loop import tool_loop_topology
 

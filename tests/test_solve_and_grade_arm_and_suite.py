@@ -53,8 +53,8 @@ def _fixture_case():
 
 def test_solve_and_grade_arm_build_returns_a_topology(tmp_path):
     """The arm's `build(case)` returns a callable topology function."""
-    from substrate.assay.swebench_suite import swebench_solve_and_grade_arm
     from substrate.assay.suite import FULL
+    from substrate.assay.swebench_suite import swebench_solve_and_grade_arm
 
     arm = swebench_solve_and_grade_arm(
         name="solve_grade_test",
@@ -74,8 +74,8 @@ def test_solve_and_grade_arm_build_returns_a_topology(tmp_path):
 def test_solve_and_grade_arm_registers_grader_producer(tmp_path):
     """Building the arm's topology on a fresh TopologyBuilder registers the grader
     producer kind — the piece Sprint 195 landed that emits `GradeResult`."""
-    from substrate.assay.swebench_suite import swebench_solve_and_grade_arm
     from substrate.assay.suite import FULL
+    from substrate.assay.swebench_suite import swebench_solve_and_grade_arm
     from substrate.kernel.topology import TopologyBuilder
 
     arm = swebench_solve_and_grade_arm(
@@ -100,12 +100,12 @@ def test_solve_and_grade_arm_registers_grader_producer(tmp_path):
 def test_solve_and_grade_suite_uses_log_projection_oracle(tmp_path):
     """The suite's oracle is `SwebenchLogProjectionOracle` — reads GradeResult off the
     record instead of running the harness externally."""
+    from substrate.assay.suite import FULL
     from substrate.assay.swebench import SwebenchLogProjectionOracle
     from substrate.assay.swebench_suite import (
         swebench_solve_and_grade_arm,
         swebench_solve_and_grade_suite,
     )
-    from substrate.assay.suite import FULL
 
     arm = swebench_solve_and_grade_arm(
         name="solve_grade_test",

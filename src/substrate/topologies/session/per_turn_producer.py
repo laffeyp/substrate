@@ -25,7 +25,6 @@ from typing import Any
 from . import PromptFragment
 from .vocabulary import PromptSource
 
-
 _PRECEDENCE = 10  # reserved band from session-vocabulary.md § I
 
 

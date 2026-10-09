@@ -45,14 +45,13 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from pathlib import Path
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 # `asyncio` is still imported: `_run_resume_sync` runs Runtime.resume on a fresh
 # per-call event loop inside a worker thread. The per-session lock itself is a
 # threading.Lock (see the __init__ note), not an asyncio.Lock.
-
 from msgspec import Struct
 
 from substrate import api
@@ -361,9 +360,17 @@ class SessionRegistry:
         Returns the list of session directories whose manifests were skipped
         because they could not be parsed — the daemon reports the count on
         stderr so a corrupt manifest does not vanish silently (review finding 12).
+
+        The daemon runs this on a background thread while requests are served (lens audit F319).
+        Each entry is published as a compare-and-set under `_manifest_write_lock`: the scan
+        notes the in-memory manifest before reading disk and publishes only if that entry is
+        still the same object, so a create, PATCH or turn that landed meanwhile is never
+        overwritten by the scan's older copy. The name index is pruned under its flock against
+        the index as it stands at the end, so a name created mid-scan survives.
         """
         skipped: list[str] = []
-        self._by_name = self._read_by_name_index()
+        with self._manifest_write_lock:
+            self._by_name = {**self._read_by_name_index(), **self._by_name}
         for session_dir in sorted(self._base.iterdir()):
             if not session_dir.is_dir():
                 continue
@@ -372,6 +379,7 @@ class SessionRegistry:
             manifest_path = session_dir / _MANIFEST_FILENAME
             if not manifest_path.exists():
                 continue
+            seen = self._manifests.get(session_dir.name)
             try:
                 raw = json.loads(manifest_path.read_text(encoding="utf-8"))
                 manifest = _manifest_from_dict(raw)
@@ -388,17 +396,24 @@ class SessionRegistry:
                 true_status = SessionStatus.ENDED
             else:
                 true_status = _scan_record_status(Path(manifest.record_root))
-            if true_status != manifest.status:
-                manifest = _replace(manifest, status=true_status)
-                _atomic_write_json(manifest_path, _manifest_to_dict(manifest))
-            self._manifests[manifest.session_id] = manifest
+            with self._manifest_write_lock:
+                if self._manifests.get(manifest.session_id) is not seen:
+                    continue  # a request changed this session during the scan; its copy is newer
+                if true_status != manifest.status:
+                    manifest = _replace(manifest, status=true_status)
+                    _atomic_write_json(manifest_path, _manifest_to_dict(manifest))
+                self._manifests[manifest.session_id] = manifest
             # Sprint 094: the next turn_index is NOT derived here. Scanning
             # every record at boot cost 6.9 of 7.1 s over 3,079 sessions
             # (measured 2026-10-01) for a number only a session that takes
             # another turn needs. `next_turn_index` derives it on first use.
-        # Prune stale by-name entries whose manifests dropped off disk.
-        self._by_name = {name: sid for name, sid in self._by_name.items() if sid in self._manifests}
-        self._write_by_name_index()
+        # Prune by-name entries whose manifests dropped off disk, against the index as it stands
+        # now: a name a request created during the scan is in it and its manifest is published.
+        # Lock order is the write lock, then the flock, as in set_name and delete.
+        with self._manifest_write_lock, _flocked(self._base / _BY_NAME_FILENAME) as index:
+            for name in [n for n, sid in index.items() if sid not in self._manifests]:
+                del index[name]
+            self._by_name = dict(index)
         return skipped
 
     # ── create / rename ────────────────────────────────────────────────────
@@ -683,14 +698,15 @@ class SessionRegistry:
         return self._manifests.get(session_id)
 
     def list_all(self) -> list[SessionManifest]:
-        return list(self._manifests.values())
+        with self._manifest_write_lock:
+            return list(self._manifests.values())
 
     def list_children(self, parent_id: str) -> list[SessionManifest]:
         """Sprint 225b: return every manifest whose composite_of == parent_id.
         Used by the daemon's end/delete cascade. O(n) scan of the in-memory
         catalog — a small n; the daemon holds sessions in the hundreds, not
         millions."""
-        return [m for m in self._manifests.values() if m.composite_of == parent_id]
+        return [m for m in self.list_all() if m.composite_of == parent_id]
 
     # ── standing-session turn (delegate path 1 + POST /api/session/<id>/turn) ─
 
@@ -773,7 +789,8 @@ class SessionRegistry:
 
             record_state, torn_cause = _record_state(record_root)
             if record_state == "torn":
-                assert torn_cause is not None
+                if torn_cause is None:
+                    raise RuntimeError("_record_state reported a torn record without its cause")
                 # Halt in place: flip the manifest to "interrupted" so
                 # subsequent turns short-circuit instead of retrying the
                 # same dispatch and re-crashing on the same torn tail.
@@ -825,7 +842,7 @@ class SessionRegistry:
                 self._next_turn_index.pop(session_id, None)
                 try:
                     self.update_status(session_id, _scan_record_status(record_root))
-                except Exception:  # noqa: BLE001 — never mask the turn's own failure
+                except Exception:  # noqa: BLE001, S110 — never mask the turn's own failure
                     pass
                 raise
             finally:
@@ -940,7 +957,7 @@ class SessionRegistry:
         # runs on a worker thread inside asyncio.run — so the discovery
         # path is Runtime.find_active_runtime(record_root).
         if record_root is not None:
-            from .kernel.runtime import find_active_runtime
+            from substrate.api import find_active_runtime
 
             child_runtime = find_active_runtime(record_root)
             if child_runtime is None:
@@ -1000,7 +1017,7 @@ class SessionRegistry:
                     # synthetic ref reports "the request was received" so the
                     # client renders "the model will stop after this tool"
                     # instead of "no turn in flight."
-                    from .topologies.session import InterruptRequested
+                    from .session import InterruptRequested
 
                     runtime.inject_event(
                         InterruptRequested(
@@ -1197,7 +1214,7 @@ def _record_has_envelopes(record_root: Path) -> bool:
 def _stop_background_tasks(session_id: str, because: str) -> None:
     """Stop the bash tool's background tasks this session owns (UI sprint 103). The daemon builds
     session tools with owner=session_id."""
-    from .topologies.tool_loop.background import TABLE
+    from .tool_loop.background import TABLE
 
     TABLE.stop_owner(session_id, because)
 
@@ -1413,10 +1430,14 @@ def _flocked(index_path: Path) -> _FlockedIndex:
 def _scan_record_status(record_root: Path) -> SessionStatus:
     """Return the record's true status per §5.
 
-    The boot scan runs while NO Runtime is live on the record — `running`
-    never surfaces here. The discriminator is the last envelope:
+    The discriminator is the last envelope. The daemon's boot scan runs beside live requests, but
+    a request can reach only a session the scan has already published, so a record read there has
+    no Runtime writing it. A second scan of a registry with live turns has no such guarantee:
 
       - record dir absent → `parked` (session created but never ran)
+      - the hot segment ends inside a frame (a write cut by the daemon's death) → `interrupted`;
+        `read_record` would skip that frame and the last whole envelope could read as a clean
+        pause (UI sprint 109, N002)
       - `read_record` raises (gap, torn seal, malformed frames) → `interrupted`
       - last envelope is `substrate.RunFinalised` → `ended`
       - last envelope is `substrate.TerminationMatched` with decision
@@ -1430,6 +1451,8 @@ def _scan_record_status(record_root: Path) -> SessionStatus:
     """
     if not record_root.exists():
         return SessionStatus.PARKED
+    if api.has_torn_tail(record_root):
+        return SessionStatus.INTERRUPTED
     try:
         envelopes = list(api.read_record(record_root))
     except Exception:  # noqa: BLE001 — a corrupt record is a real state, not a crash
@@ -1466,7 +1489,7 @@ def _next_turn_index_from_record(record_root: Path) -> int:
                 payload = env.get("payload") or {}
                 if isinstance(payload, dict) and "turn_index" in payload:
                     highest = max(highest, int(payload["turn_index"]))
-    except Exception:  # noqa: BLE001 — mid-write record or torn tail: an unreadable envelope reads as "no known turn_index"; boot_scan sees the state one step later.
+    except Exception:  # noqa: BLE001, S110 — mid-write record or torn tail: an unreadable envelope reads as "no known turn_index"; boot_scan sees the state one step later.
         pass
     return highest + 1 if highest >= 0 else 0
 

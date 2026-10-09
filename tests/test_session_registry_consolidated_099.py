@@ -20,8 +20,8 @@ import pytest
 
 from substrate import api
 from substrate.adapters import DeterministicResponder
-from substrate.session_registry import SessionManifest, SessionRegistry, SessionStatus
 from substrate.topologies.session import UserMessage, session_topology
+from substrate.topologies.session_registry import SessionManifest, SessionRegistry, SessionStatus
 
 
 class _RecordingResponder(DeterministicResponder):
@@ -118,7 +118,7 @@ def test_driver_version_is_an_accepted_driver_param(tmp_path: Path) -> None:
 def test_boot_scan_reads_no_record_for_turn_indexes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from substrate import session_registry as sr
+    from substrate.topologies import session_registry as sr
 
     reg = _registry(tmp_path, _RecordingResponder())
     sid = _create(reg, tmp_path)
@@ -134,8 +134,12 @@ def test_boot_scan_reads_no_record_for_turn_indexes(
     assert len(calls) == 1
 
 
-def test_api_and_module_export_the_same_classes() -> None:
-    from substrate import session_registry as sr
+def test_app_and_module_export_the_same_classes() -> None:
+    """The registry's public names are `substrate.app`'s (lens audit K258 moved them off `api`,
+    which is the kernel surface)."""
+    from substrate import app
+    from substrate.topologies import session_registry as sr
 
     for name in sr.__all__:
-        assert getattr(api, name) is getattr(sr, name), name
+        assert getattr(app, name) is getattr(sr, name), name
+        assert not hasattr(api, name), name

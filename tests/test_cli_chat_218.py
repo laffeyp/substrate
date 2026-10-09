@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from substrate import cli
 from substrate import _daemon as daemon_client
+from substrate import cli
 
 
 @pytest.fixture(autouse=True)

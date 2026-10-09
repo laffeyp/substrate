@@ -35,7 +35,7 @@ LOG_PROJECTION = "log-projection"
 EXTERNAL_GRADER = "external-grader"
 
 
-class Verdict(enum.Enum):
+class Verdict(enum.StrEnum):
     """The three-state grade outcome for one inner run (H-1 ratified 2026-08-10; see
     `docs/DESIGN-2026-08-10-swebench-confirmatory-revert-v3.md` and `process/BLACKBOARD.md`
     ## Decisions 2026-08-10). `PASS` and `FAIL` are the ordinary outcomes — the graded run
@@ -49,7 +49,7 @@ class Verdict(enum.Enum):
     the 2026-08-10 postmortem records the cost of that shape (517 silent fails on Verified pass
     1). This enum closes the gap at the vocabulary layer."""
 
-    PASS = "pass"
+    PASS = "pass"  # noqa: S105 — a verdict word, not a credential
     FAIL = "fail"
     NO_VERDICT = "no_verdict"
 

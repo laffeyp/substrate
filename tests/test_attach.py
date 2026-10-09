@@ -144,7 +144,7 @@ async def test_follower_opens_files_read_only(tmp_path, monkeypatch):
         seen_flags.append(flags)
         return real_open(path, flags, *a, **k)
 
-    monkeypatch.setattr("substrate.projections.attach.os.open", spy_open)
+    monkeypatch.setattr("substrate.record.live.os.open", spy_open)
     live = attach(tmp_path / "run")
     live.read_new()
     assert seen_flags, "the follower opened at least one segment"

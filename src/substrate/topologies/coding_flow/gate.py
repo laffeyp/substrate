@@ -138,6 +138,18 @@ def _gate_env() -> dict[str, str]:
     return env
 
 
+def _kill_group(proc: subprocess.Popen[str]) -> None:
+    """SIGKILL the gate's process group (the shell and everything it started), then reap."""
+    import os
+    import signal
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.communicate()
+
+
 def run_gate(artifacts: dict[str, str], gate: str, *, timeout: float = 60.0) -> GateResult:
     """Write `artifacts` into a fresh temp dir, run `gate` there (shell, no network assumed), and
     return the normalized verdict. A timeout or a non-zero exit is a fail, never an exception to the
@@ -164,17 +176,24 @@ def run_gate(artifacts: dict[str, str], gate: str, *, timeout: float = 60.0) -> 
                 )
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content)
+        # The gate runs in its own process group and a timeout kills the whole group: a plain
+        # `subprocess.run(shell=True, timeout=…)` kills only the shell, and the candidate's runaway
+        # pytest lived on in the deleted sandbox (lens audit F176, measured: `sleep` grandchildren
+        # survived a 1 s timeout).
+        proc = subprocess.Popen(  # noqa: S602 — the gate is a shell command line by design
+            gate,
+            shell=True,
+            cwd=sandbox,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=_gate_env(),
+            start_new_session=True,
+        )
         try:
-            proc = subprocess.run(
-                gate,
-                shell=True,
-                cwd=sandbox,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env=_gate_env(),
-            )
+            out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
+            _kill_group(proc)
             return GateResult(
                 passed=False, returncode=-1, summary=f"gate timed out after {timeout:g}s"
             )
@@ -185,10 +204,10 @@ def run_gate(artifacts: dict[str, str], gate: str, *, timeout: float = 60.0) -> 
                 passed=False,
                 returncode=127,
                 summary="gate tool not installed in this environment: "
-                + _normalize(proc.stdout + proc.stderr, sandbox),
+                + _normalize(out + err, sandbox),
             )
         return GateResult(
             passed=proc.returncode == 0,
             returncode=proc.returncode,
-            summary=_normalize(proc.stdout + proc.stderr, sandbox),
+            summary=_normalize(out + err, sandbox),
         )

@@ -18,36 +18,26 @@ are tested by extracting the handler bodies via direct invocation.
 from __future__ import annotations
 
 import os
-import threading
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-
-from tests._ui_daemon import ui_server_module
 from click.testing import CliRunner
+
+from tests._ui_daemon import ui_daemon
 
 
 @pytest.fixture
 def daemon(tmp_path: Path):
     """Spin the daemon in-process. Point the CLI's _daemon client at its TCP."""
-    server = ui_server_module()
-    from substrate.session_registry import SessionRegistry
-
     from substrate import _daemon
 
-    server._SESSION_REGISTRY = SessionRegistry(
-        base=tmp_path,
-        session_topology_factory=server._build_session_topology_from_manifest,
-    )
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    app, srv = ui_daemon(tmp_path)
 
     orig_env = dict(os.environ)
     os.environ["SUBSTRATE_DAEMON_HOST"] = "127.0.0.1"
     os.environ["SUBSTRATE_DAEMON_PORT"] = str(srv.server_address[1])
     os.environ["SUBSTRATE_DAEMON_SOCK"] = "/nonexistent/socket"
-    yield server, tmp_path, _daemon
+    yield app, tmp_path, _daemon
     os.environ.clear()
     os.environ.update(orig_env)
     srv.shutdown()
@@ -59,7 +49,7 @@ def test_ctrl_d_ends_session(daemon) -> None:
     the REPL sends POST /end. The session's record ends with
     `substrate.RunFinalised` and the manifest transitions to `ended`.
     """
-    server, tmp_path, _daemon = daemon
+    app, tmp_path, _daemon = daemon
     from substrate import cli
 
     runner = CliRunner()
@@ -72,7 +62,7 @@ def test_ctrl_d_ends_session(daemon) -> None:
     # Extract the created session_id from stdout (chat prints it on line 1).
     sid = result.output.splitlines()[0].strip()
     assert sid.startswith("s_")
-    manifest = server._SESSION_REGISTRY.get(sid)
+    manifest = app.registry.get(sid)
     assert manifest is not None
     assert manifest.status == "ended"
 
@@ -80,7 +70,7 @@ def test_ctrl_d_ends_session(daemon) -> None:
 def test_substrate_session_env_set_after_first_turn(daemon) -> None:
     """After the REPL's first turn, `os.environ["SUBSTRATE_SESSION"]` carries
     the session's name (if named) or session_id."""
-    server, tmp_path, _daemon = daemon
+    app, tmp_path, _daemon = daemon
     from substrate import cli
 
     runner = CliRunner()
@@ -99,7 +89,7 @@ def test_ctrl_c_idle_does_not_end_session(daemon) -> None:
     When idle, the handler prints a hint and lets the REPL loop continue —
     verified here by driving _repl directly and invoking the handler body.
     """
-    server, tmp_path, _daemon = daemon
+    app, tmp_path, _daemon = daemon
     session = _daemon.create_session(driver="deterministic", workspace=str(tmp_path))
     sid = session["session_id"]
 
@@ -109,5 +99,5 @@ def test_ctrl_c_idle_does_not_end_session(daemon) -> None:
     # nothing changes on the manifest.
     result = _daemon.interrupt(sid, max_wait_ms=100)
     assert result["interrupted"] is False
-    manifest = server._SESSION_REGISTRY.get(sid)
+    manifest = app.registry.get(sid)
     assert manifest.status == "running"  # untouched

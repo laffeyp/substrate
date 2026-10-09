@@ -162,8 +162,8 @@ def test_api_exposes_exception_hierarchy_by_type():
 # any addition here needs its own rationale.
 _CLI_ALLOWED_SUBSTRATE_IMPORTS: frozenset[str] = frozenset(
     {
-        "api",  # the public re-export module
-        "_daemon",  # CLI-adjacent HTTP client for the daemon; sprint 218
+        "api",  # the kernel's facade
+        "app",  # the application facade: sessions, the daemon client, bundled topologies
     }
 )
 
@@ -193,6 +193,17 @@ def test_cli_imports_only_substrate_api():
                     sub = a.name.split(".", 1)[1].split(".", 1)[0]
                     if sub not in _CLI_ALLOWED_SUBSTRATE_IMPORTS:
                         offenders.append(f"import {a.name}")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "import_module"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and str(node.args[0].value).startswith("substrate")
+        ):
+            # A string import is an import (lens audit F061: the CLI reached topologies through
+            # importlib.import_module, with a comment saying it did so to pass this contract).
+            offenders.append(f"importlib.import_module({node.args[0].value!r})")
     assert not offenders, f"cli.py imports non-api substrate modules (F-API-6): {offenders}"
 
 

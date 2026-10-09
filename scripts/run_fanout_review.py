@@ -20,9 +20,9 @@ import tempfile
 from pathlib import Path
 
 from substrate.adapters import OllamaResponder
-from substrate.api import Runtime, read_record
-from substrate.topologies.code_review import DEFAULT_ROLES
+from substrate.api import RunStatus, Runtime, read_record
 from substrate.topologies.applications import changed_files, fanout_review_topology
+from substrate.topologies.code_review import DEFAULT_ROLES
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -61,10 +61,8 @@ async def _run(args: argparse.Namespace) -> int:
         elif k == "substrate.ProducerCancelled":
             print(f"  ✕ cancelled: {(p.get('producer') or {}).get('kind')}")
     print(f"\nfull replayable record: {record}")
-    print(
-        "view it: SUBSTRATE_UI_PORT=8799 uv run python ../substrate-ui/server.py  →  http://127.0.0.1:8799/"
-    )
-    return 0 if result.status == "finalised" else 1
+    print("view it: uv run python ../substrate-ui/server.py --port 8799  →  http://127.0.0.1:8799/")
+    return 0 if result.status == RunStatus.FINALISED else 1
 
 
 def main() -> int:

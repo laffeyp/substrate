@@ -23,9 +23,9 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
-from ...assay.oracle import Verdict as _V
-from ...assay.swebench import HarnessOutcome, run_swebench_one
-from .records import GradeResult
+from ..topologies.swebench_solver.records import GradeResult
+from .oracle import Verdict as _V
+from .swebench import HarnessOutcome, run_swebench_one
 
 _Factory = Callable[[], Any]
 

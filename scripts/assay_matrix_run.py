@@ -18,8 +18,8 @@ from datasets import load_dataset
 from substrate.assay.report import build_report
 from substrate.assay.run import run_suite
 from substrate.assay.suite import BASELINE, FULL
-from substrate.assay.swebench import firewall_check
 from substrate.assay.swebench_matrix import container_arm, host_arm, swebench_matrix_suite
+from substrate.topologies.swebench_solver.firewall import firewall_check
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 5
 MODEL = sys.argv[2] if len(sys.argv) > 2 else "qwen3-coder:480b-cloud"

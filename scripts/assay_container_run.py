@@ -12,9 +12,10 @@ from pathlib import Path
 
 from datasets import load_dataset
 
-from substrate.assay.swebench import firewall_check, grade_patch
+from substrate.assay.swebench import grade_patch
 from substrate.assay.swebench_agent import solve_in_container
 from substrate.reference._models import OllamaResponder
+from substrate.topologies.swebench_solver.firewall import firewall_check
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 5
 MODEL = sys.argv[2] if len(sys.argv) > 2 else "qwen3-coder:480b-cloud"

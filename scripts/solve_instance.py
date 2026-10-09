@@ -24,11 +24,12 @@ from pathlib import Path
 from datasets import load_dataset
 
 from substrate.api import Runtime, read_record
-from substrate.assay.swebench import firewall_check, make_prediction, read_resolved, run_swebench
+from substrate.assay.swebench import make_prediction, read_resolved, run_swebench
 from substrate.reference._models import OllamaResponder
 from substrate.topologies.swebench_solver.assemble import (
     swebench_solver_topology_with_test_selection,
 )
+from substrate.topologies.swebench_solver.firewall import firewall_check
 from substrate.topologies.swebench_solver.localize import full_recall_at_k, recall_at_k
 from substrate.topologies.swebench_solver.select_docker import (
     DockerTestRunner,
@@ -155,7 +156,9 @@ def main() -> None:
     # SKIPS re-evaluation if that dir exists ("1 instances already run, skipping") -> a constant run_id makes
     # a second run silently REUSE the first run's verdict (caught reading the harness log #154). Hash the
     # patch so distinct patches grade fresh and an identical re-run still caches correctly.
-    patch_hash = hashlib.sha1(selected[0]["model_patch"].encode()).hexdigest()[:8]
+    patch_hash = hashlib.sha1(
+        selected[0]["model_patch"].encode(), usedforsecurity=False
+    ).hexdigest()[:8]
     run_id = f"solve-{MODEL.split(':')[0].replace('/', '_')}-{patch_hash}"
     rdir = Path("process/runs/smokes/solves") / IID
     run_swebench(

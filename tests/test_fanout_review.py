@@ -17,8 +17,8 @@ import pytest
 
 from substrate import api
 from substrate.adapters import DeterministicResponder
-from substrate.topologies.code_review import DEFAULT_ROLES
 from substrate.topologies.applications import changed_files, fanout_review_topology
+from substrate.topologies.code_review import DEFAULT_ROLES
 
 
 def _repo_with_change(root: Path) -> Path:

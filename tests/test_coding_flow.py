@@ -12,8 +12,8 @@ import pytest
 
 from substrate.api import Runtime, read_record
 from substrate.topologies.coding_flow import (
-    coding_flow_topology,
     ci_responders,
+    coding_flow_topology,
     walkthrough_responders,
 )
 from substrate.topologies.coding_flow.gate import parse_artifacts, run_gate

@@ -57,7 +57,7 @@ _PROSE_SLOTS: tuple[str, ...] = ("methodology", "personality", "per_turn")
 
 
 def _default_bundles_root() -> Path:
-    from substrate.api import substrate_home
+    from .home import substrate_home
 
     return substrate_home() / "bundles"
 

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from substrate.session_registry import SessionManifest, SessionRegistry
+    from substrate.topologies.session_registry import SessionManifest, SessionRegistry
 
 
 _REVIEWER_TOOLS: tuple[str, ...] = ("read_file", "grep", "list_dir", "web_fetch")

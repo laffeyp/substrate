@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol
 
-from .swebench import firewall_check
+from ..topologies.swebench_solver.firewall import firewall_check
 from .swebench_container import ContainerWorkspace
 from .swebench_workspace import graded_test_files
 

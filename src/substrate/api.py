@@ -14,17 +14,17 @@ ReentrantAppendError, and the encoding-internal NonCanonicalValueError. These ar
 public catch surface — torn/crc faults are handled by recovery and surfaced as recovery
 reports or RecordIncompleteError; a non-canonical emission becomes a recorded
 ProducerEmittedInvalidEvent (never raised to the caller); FrameTooLargeError cannot reach a
-caller (oversized payloads are blob-offloaded before framing); ReentrantAppendError is a
+caller (oversized payloads are blob-offloaded before framing: emissions, injected events and the
+invalid-emission wrapper since 2026-10-08, lens audit F019/F040; a failed append consumes no seq); ReentrantAppendError is a
 programming bug, not a condition to catch. All are reachable via the SubstrateError base if
 truly needed."""
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-from typing import TYPE_CHECKING
-
+from .bundles import BundleError, BundleNotFoundError, list_bundles, load_bundle
 from .constants import (
+    FAILURE_KINDS,
+    INITIAL_TRIGGER_ID,
     INJECTION_APPLIED,
     INPUT_BUILD_FAILED,
     LIFECYCLE_KINDS,
@@ -38,10 +38,8 @@ from .constants import (
     RUN_STARTED,
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
+    RunStatus,
 )
-from .projections.attach import LiveRecord, attach
-from .kernel.composition import EmbeddedRunFailed, embedded_substrate
-from .conformance.conformance import CheckResult, ConformanceReport, Status, run_conformance
 from .encoding import canonical_bytes, content_hash
 from .errors import (
     BusLockedError,
@@ -54,27 +52,8 @@ from .errors import (
     SubstrateError,
     UnsupportedPlatformError,
 )
-from .projections.inspect import (
-    Divergence,
-    Explanation,
-    decisions_between,
-    explain_producer,
-    first_divergence,
-    trace_ancestry,
-    view_at,
-)
-from .constants import RunStatus
-from .projections.graph import (
-    ProducerInstance,
-    ProducerNode,
-    RouteEdge,
-    RunGraph,
-    TopologyGraph,
-    TriggerEdge,
-    run_graph,
-    topology_graph,
-)
-from .projections.narrate import NarrationLine, NarrationSummary, narrate, narration_summary
+from .home import substrate_home
+from .kernel.composition import EmbeddedRunFailed, embedded_substrate
 from .kernel.policies import (
     Decision,
     TerminationPolicy,
@@ -82,25 +61,12 @@ from .kernel.policies import (
     all_of,
     any_of,
     cancel_all_others,
+    finalise_on,
     pause_await_input,
     quiescence_with_watchdog,
     threshold_count,
 )
-from .protocols import Producer, ProducerFactory, Responder, TriggerContext, View
-from .record.record import (
-    Always,
-    Interval,
-    NoFsync,
-    read_first_envelope,
-    read_record,
-    recover_open_segment,
-    resolve_blob_payload,
-)
-from .projections.replay import HashMismatch, ReplayError, ReplayResult, assert_replayable, replay
-from .bundles import BundleError, BundleNotFoundError, list_bundles, load_bundle
-from .kernel.runtime import Runtime, RunResult, find_active_runtime
-from .record.sidecar import read_sidecar
-from .testing import assert_event, assert_no_event, assert_sequence
+from .kernel.runtime import RunResult, Runtime, find_active_runtime
 from .kernel.topology import (
     Budget,
     Cap,
@@ -110,29 +76,51 @@ from .kernel.topology import (
     register_topology,
 )
 from .kernel.triggers import Logical, Once, PerEvent, PerKey, WallClock, WhileTrue
-from .types import BlobRef, Event, ProducerRef, Subscription
 from .kernel.views import BufferView, KindBuffer, KindCount, PerKindLatest, StartedCompletedCounts
-
-if TYPE_CHECKING:
-    from .session_registry import (
-        FreshSessionRequiresUserMessage,
-        NameCollision,
-        SessionEndedMidTurn,
-        SessionManifest,
-        SessionRegistry,
-        SessionStatus,
-        SessionTopologyFactory,
-        TornRecordOnResume,
-        manifest_from_dict,
-        scan_record_status,
-    )
-    from . import _daemon as daemon_client
-    from .topologies.session.vocabulary import MODEL_REPLY
-    from .topologies.tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
+from .projections.graph import (
+    ProducerInstance,
+    ProducerNode,
+    ProducerStatus,
+    RouteEdge,
+    RunGraph,
+    TopologyGraph,
+    TriggerEdge,
+    run_graph,
+    topology_graph,
+)
+from .projections.inspect import (
+    Divergence,
+    Explanation,
+    decisions_between,
+    explain_producer,
+    first_divergence,
+    trace_ancestry,
+    view_at,
+)
+from .projections.narrate import NarrationLine, NarrationSummary, narrate, narration_summary
+from .projections.replay import HashMismatch, ReplayError, ReplayResult, assert_replayable, replay
+from .protocols import Producer, ProducerFactory, Responder, TriggerContext, View
+from .record.live import LiveRecord, attach
+from .record.record import (
+    Always,
+    Interval,
+    NoFsync,
+    has_torn_tail,
+    read_first_envelope,
+    read_last_envelope,
+    read_record,
+    recover_open_segment,
+    resolve_blob_payload,
+)
+from .record.sidecar import read_sidecar
+from .testing import assert_event, assert_no_event, assert_sequence
+from .types import BlobRef, Event, ProducerRef, Subscription
 
 __all__ = [
     # lifecycle kind constants (the locked vocabulary)
     "LIFECYCLE_KINDS",
+    "FAILURE_KINDS",
+    "INITIAL_TRIGGER_ID",
     "RUN_STARTED",
     "TRIGGER_FIRED",
     "INPUT_BUILD_FAILED",
@@ -170,6 +158,7 @@ __all__ = [
     "TerminationPolicy",
     "Decision",
     "threshold_count",
+    "finalise_on",
     "all_completed",
     "quiescence_with_watchdog",
     "pause_await_input",
@@ -186,7 +175,9 @@ __all__ = [
     "RunResult",
     # records
     "read_record",
+    "has_torn_tail",
     "read_first_envelope",
+    "read_last_envelope",
     "resolve_blob_payload",
     "list_bundles",
     "load_bundle",
@@ -205,11 +196,6 @@ __all__ = [
     # composition — substrate as a Producer (technical §20, F-COMP)
     "embedded_substrate",
     "EmbeddedRunFailed",
-    # conformance suite — the v1.0 release gate (product §7)
-    "run_conformance",
-    "ConformanceReport",
-    "CheckResult",
-    "Status",
     # the public exception hierarchy (design §6.3) — so an api-only consumer (the CLI is
     # the standing proof) handles errors BY TYPE, not by string-matching class names.
     "SubstrateError",
@@ -249,6 +235,7 @@ __all__ = [
     "TriggerEdge",
     "RouteEdge",
     "RunGraph",
+    "ProducerStatus",
     "RunStatus",
     "ProducerInstance",
     # test helpers
@@ -260,80 +247,4 @@ __all__ = [
     # bundle loading failures, so a daemon maps them by type (UI sprint 110)
     "BundleError",
     "BundleNotFoundError",
-    # standing sessions — the name index + manifest catalog the daemon serves (UI sprint 099:
-    # one registry, here; substrate-ui's private copy had drifted from it)
-    "FreshSessionRequiresUserMessage",
-    "NameCollision",
-    "SessionEndedMidTurn",
-    "SessionManifest",
-    "SessionRegistry",
-    "SessionStatus",
-    "SessionTopologyFactory",
-    "TornRecordOnResume",
-    "manifest_from_dict",
-    "scan_record_status",
-    # the local daemon's HTTP client module, which the run_topology tools take (UI sprint 107)
-    "daemon_client",
-    # envelope kind names the CLI renders (UI sprint 107)
-    "FINAL_ANSWER",
-    "MODEL_REPLY",
-    "TOOL_CALL",
-    "TOOL_RESULT",
 ]
-
-
-def substrate_home() -> Path:
-    """The root of substrate's per-user state tree.
-
-    Returns ``Path(os.environ["SUBSTRATE_HOME"])`` when set,
-    else ``Path.home() / ".substrate"``.
-    """
-    raw = os.environ.get("SUBSTRATE_HOME")
-    if raw:
-        return Path(raw)
-    return Path.home() / ".substrate"
-
-
-# The session-registry names resolve on first access (PEP 562). session_registry imports this
-# module, so an eager import here would cycle whichever of the two loaded first.
-_SESSION_REGISTRY_NAMES = frozenset(
-    {
-        "FreshSessionRequiresUserMessage",
-        "NameCollision",
-        "SessionEndedMidTurn",
-        "SessionManifest",
-        "SessionRegistry",
-        "SessionStatus",
-        "SessionTopologyFactory",
-        "TornRecordOnResume",
-        "manifest_from_dict",
-        "scan_record_status",
-    }
-)
-# `daemon_client` resolves lazily too (see __getattr__), as do these kind names.
-_KIND_NAMES: dict[str, str] = {
-    "MODEL_REPLY": "substrate.topologies.session.vocabulary",
-    "FINAL_ANSWER": "substrate.topologies.tool_loop.kinds",
-    "TOOL_CALL": "substrate.topologies.tool_loop.kinds",
-    "TOOL_RESULT": "substrate.topologies.tool_loop.kinds",
-}
-
-
-def __getattr__(name: str) -> object:
-    if name in _SESSION_REGISTRY_NAMES:
-        from . import session_registry
-
-        return getattr(session_registry, name)
-    if name in _KIND_NAMES:
-        # The session and tool-loop kind names the CLI renders (UI sprint 107); leaf modules, so
-        # resolving them imports no topology code.
-        from importlib import import_module
-
-        return getattr(import_module(_KIND_NAMES[name]), name)
-    if name == "daemon_client":
-        # The HTTP client for the local daemon (`substrate._daemon`): the `run_topology` tools
-        # take it. UI sprint 107 names it here so the console stops importing a private module.
-        from . import _daemon
-
-        return _daemon
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

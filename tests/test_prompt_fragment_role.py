@@ -38,7 +38,6 @@ from substrate.topologies.session.roles import (
     resolve_role_prompt_with_source,
 )
 
-
 _SHIPPED_PROMPTS = (
     Path(__file__).resolve().parent.parent
     / "src"

@@ -28,7 +28,7 @@ from typing import Any
 import msgspec
 import rfc8785
 
-from .constants import JSON_SAFE_INT_MAX, JSON_SAFE_INT_MIN
+from .constants import JSON_SAFE_INT_MAX, JSON_SAFE_INT_MIN, InvalidReason
 
 
 class NonCanonicalValueError(ValueError):
@@ -115,7 +115,7 @@ class SafeCanonical:
     raw_bytes: bytes = b""
     hash: str = ""
     nbytes: int = 0
-    reason: str | None = None
+    reason: InvalidReason | None = None
     at_path: str | None = None
     raw: Any = None
 
@@ -130,7 +130,7 @@ def safe_raw(obj: Any) -> Any:
     passed through `msgspec.to_builtins` raw (which range-checks nothing)."""
     try:
         builtins = msgspec.to_builtins(obj)
-    except Exception:
+    except Exception:  # noqa: BLE001 — diagnostic rendering of an arbitrary value must never raise
         return repr(obj)
     return _stringify_non_canonical(builtins)
 
@@ -170,23 +170,25 @@ def try_canonical(obj: Any) -> SafeCanonical:
     an uncaught NonCanonicalValueError that would crash the writer."""
     try:
         builtins = msgspec.to_builtins(obj)
-    except Exception as exc:
-        return SafeCanonical(ok=False, reason="unknown_kind", raw=repr(exc))
+    except Exception as exc:  # noqa: BLE001 — the writer's ingestion boundary: any value, never a crash
+        return SafeCanonical(ok=False, reason=InvalidReason.UNKNOWN_KIND, raw=repr(exc))
     try:
         _check(builtins)
     except NonCanonicalValueError as exc:
         return SafeCanonical(
             ok=False,
-            reason="non_canonical_value",
+            reason=InvalidReason.NON_CANONICAL_VALUE,
             at_path=exc.at_path,
             raw=_stringify_non_canonical(builtins),
         )
     try:
         raw_bytes = rfc8785.dumps(builtins)
-    except Exception:  # pragma: no cover - whitelist already guarantees encodability
+    except (
+        rfc8785.CanonicalizationError
+    ):  # pragma: no cover - the whitelist guarantees encodability
         return SafeCanonical(
             ok=False,
-            reason="non_canonical_value",
+            reason=InvalidReason.NON_CANONICAL_VALUE,
             raw=_stringify_non_canonical(builtins),
         )
     return SafeCanonical(

@@ -48,11 +48,10 @@ from pathlib import Path
 from typing import Any
 
 from ... import api
-from .kinds import FINAL_ANSWER
 from ...adapters import DeterministicResponder, DriverFamily, OllamaResponder, Responder
-from ...session_registry import SessionEndedMidTurn, SessionRegistry
+from ..session_registry import SessionEndedMidTurn, SessionRegistry
+from .kinds import FINAL_ANSWER
 from .tools import _TOOL_CANCEL_HOOKS, Tool, full_suite, on_tool_cancel
-
 
 # Sprint 224a — wire-error contract constant. The delegate raises a
 # ValueError containing this tag when the reviewer session ended between
@@ -124,7 +123,7 @@ def _run_child_to_answer(
             box["result"] = loop.run_until_complete(task)
         except asyncio.CancelledError:
             box["cancelled"] = True  # we asked for this on timeout
-        except BaseException as exc:  # carried back to the caller thread, not swallowed
+        except BaseException as exc:  # noqa: BLE001 — carried back to the caller thread, not swallowed
             box["error"] = exc
         finally:
             loop.close()
@@ -631,7 +630,8 @@ def make_delegate(
     if child_factory is not None:
         factory: ChildFactory = child_factory
     else:
-        assert responder is not None  # guarded above; narrows for the type checker
+        if responder is None:  # guarded above
+            raise ValueError("delegate needs a responder or a child_factory")
         factory = _default_child_factory(
             responder,
             suite_factory,
@@ -734,41 +734,36 @@ def make_delegate(
             from ..session.vocabulary import USER_MESSAGE
 
             # Reviewer's turn_index is the reviewer's own per-turn counter, NOT the
-            # parent's record seq. The two records are unrelated numerically (review
-            # finding 1). Read the reviewer's tail UserMessage turn_index off its
-            # record before the turn fires; the new turn is that + 1. When the
-            # reviewer has never seen a UserMessage, this is turn 0.
-            reviewer_manifest = session_registry.get(resolved)
-            reviewer_record_path = (
-                Path(reviewer_manifest.record_root) if reviewer_manifest is not None else None
-            )
-            reviewer_next_turn_index = 0
-            reviewer_tail_seq_before_turn = -1
-            if reviewer_record_path is not None and reviewer_record_path.exists():
-                try:
+            # parent's record seq (review finding 1): the reviewer's tail UserMessage
+            # turn_index + 1, or 0 when it has none. The index and the tail-seq snapshot
+            # are read UNDER the session's turn lock (turn_sync's resume_event_builder):
+            # read before it, two parents delegating at once got the same turn_index, and
+            # a parent could take the other parent's FinalAnswer (UI sprint 109, N003).
+            snapshot = {"tail_seq": -1}
+
+            def _build(_manifest: Any, reviewer_record_path: Path) -> Any:
+                next_turn_index = 0
+                tail_seq = -1
+                if reviewer_record_path.exists():
                     for env in api.read_record(reviewer_record_path):
-                        reviewer_tail_seq_before_turn = max(
-                            reviewer_tail_seq_before_turn, int(env.get("seq", -1))
-                        )
+                        tail_seq = max(tail_seq, int(env.get("seq", -1)))
                         if env.get("kind") == USER_MESSAGE:
                             payload = env.get("payload") or {}
                             if isinstance(payload, dict) and "turn_index" in payload:
-                                reviewer_next_turn_index = int(payload["turn_index"]) + 1
-                except Exception:  # noqa: BLE001 — a stale reviewer record is not the parent's concern
-                    reviewer_next_turn_index = 0
-                    reviewer_tail_seq_before_turn = -1
+                                next_turn_index = int(payload["turn_index"]) + 1
+                snapshot["tail_seq"] = tail_seq
+                return UserMessage(
+                    text=task,
+                    turn_index=next_turn_index,
+                    assembled_prompt=task,
+                    slash_source="delegate",
+                )
 
-            resume_event = UserMessage(
-                text=task,
-                turn_index=reviewer_next_turn_index,
-                assembled_prompt=task,
-                slash_source="delegate",
-            )
             # interrupting the parent's turn interrupts the standing session's turn (UI sprint 102)
             on_tool_cancel(_interrupter(session_registry, resolved))
             try:
                 _final_manifest, reviewer_root = session_registry.turn_sync(
-                    resolved, resume_event, timeout_seconds=per_call_timeout
+                    resolved, timeout_seconds=per_call_timeout, resume_event_builder=_build
                 )
             except SessionEndedMidTurn as exc:
                 # Sprint 054 phase C: the exception is imported directly now
@@ -779,11 +774,11 @@ def make_delegate(
                 raise ValueError(
                     f"delegate: {SESSION_ENDED_MID_DELEGATE} ({per_call_session_name!r}): {exc}"
                 ) from exc
-            # The reviewer's tail FinalAnswer for THIS TURN — scoped to seqs
-            # strictly greater than the pre-turn tail snapshot (review finding 2).
-            # A pre-existing FinalAnswer from an earlier turn cannot masquerade
-            # as this turn's answer; a turn that produced no FinalAnswer raises,
-            # even if the reviewer's record already carries older ones.
+            # This turn's FinalAnswer: the FIRST one past the snapshot taken under the
+            # lock (review finding 2). An earlier turn's answer is at or below the
+            # snapshot; a turn another parent queued after this one writes its answer
+            # later, so it is never the first. A turn with no FinalAnswer raises.
+            reviewer_tail_seq_before_turn = snapshot["tail_seq"]
             this_turn_finals = [
                 e
                 for e in api.read_record(Path(reviewer_root), resolve_blobs=True)  # Sprint 095
@@ -796,7 +791,7 @@ def make_delegate(
                     f"FinalAnswer for this turn (reviewer tail seq at turn start: "
                     f"{reviewer_tail_seq_before_turn})"
                 )
-            answer_text = str(this_turn_finals[-1]["payload"].get("text", ""))
+            answer_text = str(this_turn_finals[0]["payload"].get("text", ""))
             return {
                 "answer": answer_text,
                 "child_root": str(reviewer_root),

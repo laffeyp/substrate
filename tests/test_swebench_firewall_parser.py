@@ -13,7 +13,7 @@ the instance.
 
 from __future__ import annotations
 
-from substrate.assay.swebench import firewall_check
+from substrate.topologies.swebench_solver.firewall import firewall_check
 
 
 def _instance(*, patch: str = "", test_patch: str = "", fail_to_pass: list[str]) -> dict:

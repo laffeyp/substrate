@@ -43,7 +43,7 @@ from .vocabulary import (
 
 _CI_SESSION_ID = "s_CI"
 _CI_SEED = "you are a companion in a terminal session"
-_CI_WORKSPACE = "/tmp/session-ci"
+_CI_WORKSPACE = "/tmp/session-ci"  # noqa: S108 — a label on the record; the CI tools (add, mul) touch no files
 _CI_TURNS_DEFAULT: tuple[str, ...] = (
     "what is (2 + 3) times 4?",
     "and now what is 6 minus 5?",

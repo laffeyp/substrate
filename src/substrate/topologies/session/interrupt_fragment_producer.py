@@ -31,7 +31,6 @@ from typing import Any
 from . import PromptFragment
 from .vocabulary import PromptSource
 
-
 _PRECEDENCE = 95
 
 _DIRECTIVE = (
