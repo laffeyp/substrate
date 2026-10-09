@@ -52,11 +52,7 @@ async def test_localizer_emits_suspects_and_edit_locations(tmp_path) -> None:  #
             deterministic=False,
         )
         b.initial("localizer", input=None)
-        b.termination(
-            api.any_of(
-                api.threshold_count("EditLocations", 1), api.quiescence_with_watchdog(seconds=10)
-            )
-        )
+        b.termination(api.any_of(api.threshold_count("EditLocations", 1), api.quiescence()))
 
     await Runtime(tmp_path / "run").run(topo)
     events = list(read_record(tmp_path / "run"))

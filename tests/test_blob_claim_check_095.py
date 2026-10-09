@@ -18,7 +18,7 @@ from substrate.api import (
     Subscription,
     any_of,
     pause_await_input,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
     resolve_blob_payload,
 )
@@ -86,7 +86,7 @@ def topo(b):
                 lambda ctx: ctx.counts("LiveSaw") >= 1 and ctx.counts("Go") == 0,
                 resume_condition="Go",
             ),
-            quiescence_with_watchdog(seconds=1),
+            quiescence(),
         )
     )
 

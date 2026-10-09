@@ -20,6 +20,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ..constants import RunStatus
+
 if TYPE_CHECKING:
     from ..types import Event
 
@@ -32,9 +34,10 @@ class RunPhase(enum.StrEnum):
     an I/O fact (the fd state), orthogonal to the logical phase."""
 
     RUNNING = "running"
-    PAUSED = "paused"
-    FINALISED = "finalised"
-    FAILED = "failed"
+    # The outcome phases carry RunStatus's strings, the one copy (lens audit F022).
+    PAUSED = RunStatus.PAUSED.value
+    FINALISED = RunStatus.FINALISED.value
+    FAILED = RunStatus.FAILED.value
 
     @property
     def is_terminal(self) -> bool:
@@ -73,6 +76,9 @@ class RunState:
     # Reverse map: instance_id -> producer kind name. Populated alongside task_by_instance
     # in _flush_scheduled; read by cancel bookkeeping to look up a task's kind.
     kind_by_instance: dict[str, str] = field(default_factory=dict)
+    # instance_id -> its parent's instance id (None for a root), beside kind_by_instance, so
+    # `Runtime.cancel_producer` returns the real ProducerRef (lens audit F016).
+    parent_by_instance: dict[str, str | None] = field(default_factory=dict)
     # instance_id -> {"cause": str, "caller": str | None}. Written synchronously by
     # `Runtime.cancel_producer` and by the `_cancel_others` policy path BEFORE the
     # target task's `task.cancel()` fires. Read by `_producer_task`'s CancelledError

@@ -123,7 +123,6 @@ def best_of_n_verified_topology(
     n: int = 3,
     max_rounds: int = 2,
     deterministic: bool = False,
-    watchdog_seconds: float = 30.0,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Best-of-N with verification over `task`. `drafter` generates candidates; `verify` is either a
     deterministic `check(response) -> (passed, reason)` or an independent judge Responder. Composes
@@ -147,7 +146,6 @@ def best_of_n_verified_topology(
             # the judge branch meters its call — declare ModelUsage so the emission validates (F-18)
             validator_schemas=[Verdict, ModelUsage],
             deterministic=deterministic,
-            watchdog_seconds=watchdog_seconds,
         )
 
     return topo

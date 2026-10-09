@@ -570,7 +570,7 @@ def tool_loop_topology(
         b.termination(
             api.any_of(
                 api.threshold_count("FinalAnswer", 1),
-                api.quiescence_with_watchdog(seconds=1),
+                api.quiescence(),
             )
         )
 

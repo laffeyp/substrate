@@ -87,7 +87,7 @@ async def _run(tmp_path, runner: Any, incoming_code: str) -> list[dict]:  # type
         b.termination(
             api.any_of(
                 api.threshold_count("ReproductionTest", 2),
-                api.quiescence_with_watchdog(seconds=5),
+                api.quiescence(),
             )
         )
 

@@ -25,7 +25,9 @@ TOPOS = Path(__file__).resolve().parent.parent / "src" / "substrate" / "topologi
 
 
 def _fresh(name: str) -> Path:
-    root = TOPOS / name / "records" / "ci_mode.record"
+    # bundled.record_path maps a renamed key (pair_coding_chunked) to the directory its committed
+    # record lives in; TOPOS / name wrote a stray copy beside it and left the real one stale.
+    root = bundled.record_path(name)
     if root.exists():
         shutil.rmtree(root)
     root.parent.mkdir(parents=True, exist_ok=True)

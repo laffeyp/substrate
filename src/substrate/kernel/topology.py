@@ -30,7 +30,9 @@ class RegistrationError(SubstrateError):
 
 class Cap(Struct, frozen=True):
     """One named cap in a `Budget`. `limit` is the ceiling value the runtime enforces; `reason`
-    is the human-readable string that rides on `substrate.BudgetExceeded` when the cap trips.
+    is the human-readable string the breach records: a `substrate.ProducerFailed` whose payload
+    carries `budget_exceeded: {axis, limit, reason}` (lens audit F023: these docs named a
+    `substrate.BudgetExceeded` kind that never existed).
     Named fields keep the enforcement site legible: `budget.wall_seconds.reason` reads as
     the reason for the wall-clock cap, not `budget.wall_seconds[1]` — a positional-tuple
     access that hides which slot is which and can silently swap on refactor.
@@ -52,21 +54,14 @@ class Budget(Struct, frozen=True):
 
     `wall_seconds` — `Cap(limit=cap_seconds, reason=...)`. Max elapsed wall-clock from
     `substrate.ProducerStarted` to any terminal for this producer instance. On overrun the
-    enforcement sprint (roadmap v2 Sprint 1b) yields `substrate.BudgetExceeded` with
-    `reason=cap.reason` and cancels the producer factory.
+    Producer is stopped and recorded as `substrate.ProducerFailed` with
+    `budget_exceeded: {axis: "wall_seconds", limit, reason}`.
 
     `event_counts` — `{event_kind_name: Cap(limit=cap_count, reason=...)}`. Per-kind cap
-    on events of that name that this producer instance may emit. The runtime tracks
-    per-instance counts and enforces at the emit boundary. Names are the event Struct's
-    class name, matching the emit-time schema validation. A producer that spawns Docker
-    containers caps `ContainerRequested`; a producer that calls the LLM caps
-    `ModelUsage`; and so on.
-
-    Sprint 164 (initial landing) stored the budget on the `ProducerKindReg` without
-    enforcing it. Sprint 166 (this amendment) replaces the earlier `tuple[float, str]`
-    and `tuple[int, str]` cap types with a named `Cap` struct so the enforcement site
-    reads `cap.limit` and `cap.reason` at every call site. The primitive is still on the
-    shelf; the enforcement sprint (roadmap v2 Sprint 1b) consumes the amended shape.
+    on events of that name that this producer instance may emit; names are the event
+    Struct's class name. The emission that would pass the cap is not recorded; the Producer
+    stops with `substrate.ProducerFailed` carrying
+    `budget_exceeded: {axis: "event_counts", kind, limit, reason}`.
     """
 
     wall_seconds: Cap | None = None
@@ -205,34 +200,21 @@ class TopologyBuilder:
             raise RegistrationError(f'producer_kind "{kind}": no factory')
         # Derive the composition export map from the embedded substrate's OWN map (single
         # source of truth): an embedded_substrate `start` callable carries
-        # __substrate_export_map__; build the factory once (cheap — just constructs the
-        # closure, runs nothing) to read it. Non-embedded factories carry no such attribute.
+        # __substrate_export_map__, so the factory is built once here to read it. A factory
+        # builds a closure and runs nothing (the runtime builds one per instance), so one that
+        # raises is a broken topology, refused now; it used to be swallowed, losing the export
+        # map without a word (lens audit F028).
         export_map: dict[str, str] | None = None
         try:
-            built = factory()  # the start callable carries __substrate_export_map__ if embedded
-            raw = getattr(built, "__substrate_export_map__", None)
-            if isinstance(raw, dict):
-                export_map = dict(raw)
-        except Exception:  # noqa: BLE001 — a factory that cannot be pre-built has no static export map (K251 F028 revisits this sniff)
-            export_map = None  # a factory that can't be pre-built has no static export map
-        if budget is not None and budget.event_counts is not None:
-            # Sprint 199 (roadmap v2 S7a fold-in): wall_seconds enforcement lives at
-            # Runtime._producer_task — a producer exceeding its wall-clock cap yields
-            # ProducerFailed with `error="budget_exceeded: wall_seconds=..."`. The
-            # `event_counts` cap is still on the shelf; its enforcement site is
-            # emit-time inside `_submit_emission` and lands in a later sprint. Warn
-            # for that axis only so a caller who declares an event_counts cap sees
-            # the honest state; wall_seconds callers get real enforcement, no warning.
-            import warnings
-
-            warnings.warn(
-                f'producer_kind "{kind}" declared Budget.event_counts, but per-kind '
-                "emission caps are not yet enforced (Sprint 199 landed wall_seconds "
-                "only). The declaration is stored on the ProducerKindReg; a producer "
-                "that exceeds its event-count cap in the interim will not be terminated.",
-                UserWarning,
-                stacklevel=2,
-            )
+            built = factory()
+        except Exception as exc:  # noqa: BLE001 — any error from author code becomes a RegistrationError naming the kind
+            raise RegistrationError(
+                f'producer_kind "{kind}": its factory raised when built ({exc!r}); a factory '
+                "returns the Producer's start callable and must build without side effects"
+            ) from exc
+        raw = getattr(built, "__substrate_export_map__", None)
+        if isinstance(raw, dict):
+            export_map = dict(raw)
         self._reg.producer_kinds[kind] = ProducerKindReg(
             kind, schema_map, factory, deterministic, author_version, export_map, budget
         )
@@ -359,7 +341,7 @@ class TopologyBuilder:
 
     def termination(self, policy: TerminationPolicy, *, scope: str = "run") -> None:
         """Set the TerminationPolicy that decides when the run ends (see the termination recipes:
-        quiescence_with_watchdog, threshold_count, all_completed, pause_await_input, ...). Only
+        quiescence, threshold_count, all_completed, pause_await_input, ...). Only
         run-scoped termination ships; per-Producer / subtree scoping is deferred post-1.0 (product
         amendment A3.2). A non-"run" scope RAISES rather than being silently ignored (it used to be
         a no-op trap — the caller thought they had scoped termination and didn't)."""

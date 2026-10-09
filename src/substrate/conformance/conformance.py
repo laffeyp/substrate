@@ -48,7 +48,7 @@ from ..constants import (
 )
 from ..errors import BusLockedError, ProducerNotFound
 from ..kernel.composition import embedded_substrate
-from ..kernel.policies import Decision, TerminationPolicy, quiescence_with_watchdog, threshold_count
+from ..kernel.policies import Decision, TerminationPolicy, quiescence, threshold_count
 from ..kernel.runtime import Runtime
 from ..kernel.triggers import Once, PerEvent
 from ..kernel.views import KindCount
@@ -151,7 +151,7 @@ async def _check_1_retry_enrichment(root: Path) -> CheckResult:
             input_builder=lambda ctx: {"reason": ctx.event.payload.get("error", "")},
             policy=PerEvent(),
         )
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(root).run(topo)
     envs = list(read_record(root))
@@ -205,7 +205,7 @@ async def _check_2_single_cascade(root: Path) -> CheckResult:
             input_builder=lambda ctx: {"n": ctx.event.payload["n"]},
             policy=Once(),
         )
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(root).run(topo)
     envs = list(read_record(root))
@@ -241,7 +241,7 @@ async def _check_4_invalid_emission(root: Path) -> CheckResult:
     def topo(b: Any) -> None:
         b.producer_kind("p", schemas=[CountReached], schema_version=1, factory=lambda: bad)
         b.initial("p", input=None)
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(root).run(topo)
     envs = list(read_record(root))
@@ -258,7 +258,7 @@ async def _check_4_invalid_emission(root: Path) -> CheckResult:
 
 
 async def _check_5_quiescence(root: Path) -> CheckResult:
-    # A logical-cooldown run finalises via quiescence-with-watchdog.
+    # A logical-cooldown run finalises via quiescence.
     result = await Runtime(root).run(_basic_topo)
     envs = list(read_record(root))
     if result.status == RunStatus.FINALISED and envs[-1]["kind"] == RUN_FINALISED:
@@ -323,7 +323,7 @@ async def _check_7_export_boundary(root: Path) -> CheckResult:
             factory=lambda: embedded_substrate(inner, exports={"CountReached": OuterTick}),
         )
         b.initial("embedded", input={"inner_root": str(inner_root)})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(root).run(outer)
     outer_kinds = [e["kind"] for e in read_record(root)]
@@ -447,7 +447,7 @@ async def _check_11_provenance(root: Path) -> CheckResult:
             input_builder=lambda ctx: {"n": ctx.event.payload["n"]},
             policy=PerEvent(),
         )
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(root).run(topo)
     envs = list(read_record(root))
@@ -604,7 +604,7 @@ async def _check_17_input_build_failed(root: Path) -> CheckResult:
             input_builder=_raise,
             policy=PerEvent(),
         )
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(root).run(topo)
     envs = list(read_record(root))

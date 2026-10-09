@@ -319,7 +319,7 @@ def pipeline_topology(
                     lambda c: c.counts("RetryExhausted") >= 1 and c.counts("OperatorOverride") == 0,
                     resume_condition="OperatorOverride",
                 ),
-                api.quiescence_with_watchdog(seconds=1),
+                api.quiescence(),
             )
         )
 

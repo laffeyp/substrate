@@ -28,11 +28,7 @@ async def _run(tmp_path, responder: Responder, issue: str) -> list[dict]:  # typ
             deterministic=False,
         )
         b.initial("repro", input=None)
-        b.termination(
-            api.any_of(
-                api.threshold_count("ReproductionTest", 1), api.quiescence_with_watchdog(seconds=5)
-            )
-        )
+        b.termination(api.any_of(api.threshold_count("ReproductionTest", 1), api.quiescence()))
 
     await Runtime(tmp_path / "run").run(topo)
     return list(read_record(tmp_path / "run"))
@@ -187,11 +183,7 @@ async def test_repro_generator_k_greater_than_one_gathers_k_calls(tmp_path):  # 
             deterministic=False,
         )
         b.initial("repro", input=None)
-        b.termination(
-            api.any_of(
-                api.threshold_count("ReproductionTest", 1), api.quiescence_with_watchdog(seconds=5)
-            )
-        )
+        b.termination(api.any_of(api.threshold_count("ReproductionTest", 1), api.quiescence()))
 
     await Runtime(tmp_path / "run").run(topo)
     events = list(read_record(tmp_path / "run"))

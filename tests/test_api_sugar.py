@@ -71,7 +71,7 @@ def test_start_sugar_runs_and_produces_the_events(tmp_path: pathlib.Path) -> Non
     def topo(b: TopologyBuilder) -> None:
         b.producer_kind("ticker", schemas=[Tick], schema_version=1, start=_ticker)
         b.initial("ticker", input=None)
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     root = tmp_path / "a"
     asyncio.run(Runtime(root).run(topo))
@@ -88,7 +88,7 @@ def test_start_sugar_records_the_real_producer_in_the_manifest(tmp_path: pathlib
     def topo(b: TopologyBuilder) -> None:
         b.producer_kind("ticker", schemas=[Tick], schema_version=1, start=_ticker)
         b.initial("ticker", input=None)
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     root = tmp_path / "a"
     asyncio.run(Runtime(root).run(topo))
@@ -133,7 +133,7 @@ def _instrumented(into, **instr_kw):
             into=into,
             **instr_kw,
         )
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     return topo
 
@@ -190,7 +190,7 @@ def test_instrument_stage_route_is_scoped_to_its_own_producer(tmp_path: pathlib.
             into="last",
             via=lambda e: e.payload["saw"],
         )
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     root = tmp_path / "r"
     asyncio.run(Runtime(root).run(topo))

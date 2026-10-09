@@ -2,12 +2,8 @@
 
 The complete public surface (F-API-1). Everything else is private; the CLI imports only
 this module (F-API-6). **This page is GENERATED from the live `substrate.api.__all__` and
-the symbols' own docstrings** (`scripts/gen_api_docs.py`) — so it is faithful WHEN regenerated,
-but nothing gates it: `gen_api_docs` runs in no test or CI step, so a changed public signature
-leaves this page stale until someone reruns it (review C-18). Regenerate
-(`uv run python scripts/gen_api_docs.py`) after any public-surface change. Note the generator is
-interpreter-sensitive on type renderings (e.g. `typing.Any` vs `Any`); regenerate on the same
-Python the committed page targets, or a cross-version diff appears (KIT_DIARY #35).
+the symbols' own docstrings** (`scripts/gen_api_docs.py`) so it cannot drift from the
+code. Regenerate (`uv run python scripts/gen_api_docs.py`) after any public-surface change.
 
 ## Data types
 
@@ -180,13 +176,9 @@ Cooldown counted in append cycles (deterministic, replayable).
 
 Cooldown in seconds. Opt-in; flagged at registration; demotes replay to 3(b).
 
-### `TerminationPolicy(name: 'str', fn: 'Callable[[TermContext], Decision]', resume_condition: 'str | None' = None, watchdog_seconds: 'float | None' = None, finalisation: 'Callable[[TermContext], Any] | None' = None) -> 'None'`
+### `TerminationPolicy(name: 'str', fn: 'Callable[[TermContext], Decision]', resume_condition: 'str | None' = None, finalisation: 'Callable[[TermContext], Any] | None' = None) -> 'None'`
 
 A named decision callback. `name` is recorded in substrate.TerminationMatched.
-
-`watchdog_seconds`, when set, is the writer's idle-poll window (how often the
-writer wakes to test quiescence when the inbox is idle) — set by
-quiescence_with_watchdog(seconds=). None means "use the runtime default poll".
 
 `finalisation`, when set, is a callable run at finalise-run time that produces the
 run's final output payload; it is recorded in substrate.RunFinalised.finalisation_payload
@@ -209,6 +201,17 @@ value would be a silent no-op. See CONTRIBUTING.md's deferral list.)
 
 Finalise once `n` events of `kind` have been appended.
 
+### `finalise_on(kind: 'str') -> 'TerminationPolicy'`
+
+Finalise when the event just appended is of `kind`.
+
+For a terminal event a RESUMABLE run can see more than once. `threshold_count(kind, 1)` reads
+the run's count of `kind`, which a resume restores from the whole log, so a record that
+already holds one such event finalises the resumed run on its first new event. This policy
+reads only the event that just landed: an earlier one in the record never ends the run (lens
+audit F309: the console rebuilt the session's termination with a raised threshold, counted
+by reading the whole record on every turn).
+
 ### `all_completed() -> 'TerminationPolicy'`
 
 Finalise on quiescence once every started Producer has ended.
@@ -219,18 +222,22 @@ across the pause, so on resume `completed >= started` can never be met and the r
 hang. A pausable topology MUST finalise on a process-local terminal instead (quiescence /
 threshold); see `pause_await_input`. (The runtime fails such a run loudly, not silently.)
 
-### `quiescence_with_watchdog(seconds: 'float' = 30.0) -> 'TerminationPolicy'`
+### `quiescence() -> 'TerminationPolicy'`
 
-Finalise when the run goes quiescent (no work in flight). `seconds` is the
-watchdog window the runtime uses to wake and test quiescence (it bounds the writer
-idle-poll interval; see Runtime._poll_s).
+Finalise when the run goes quiescent: no Producer running, nothing queued.
+
+This was `quiescence_with_watchdog(seconds)`. No watchdog ever existed: `seconds` only
+capped the writer's 10 ms idle poll, so every value of 0.01 or more did nothing, and call
+sites passing 2400 s or `watchdog_seconds + grade_timeout_seconds` expected a deadline
+the kernel never set (lens audit F021). A deadline on one Producer is
+`Budget(wall_seconds=Cap(...))`.
 
 ### `pause_await_input(when: 'Callable[[TermContext], bool]', resume_condition: 'str') -> 'TerminationPolicy'`
 
 Pause and emit a typed resume_condition when `when` holds (kernel halt-with-resume).
 
 RESUMABLE-TERMINAL CONSTRAINT: a topology that can PAUSE here and later resume MUST pair
-this with a PROCESS-LOCAL finalisation terminal — quiescence (`quiescence_with_watchdog`)
+this with a PROCESS-LOCAL finalisation terminal — quiescence (`quiescence`)
 or a count threshold (`threshold_count`) — NOT `all_completed`. `all_completed` compares
 started vs ended COUNTS, but a pause trips while the emitting Producer is still inflight, so
 its ProducerStarted has no durable end across the pause: on resume the restored started >
@@ -270,9 +277,9 @@ authoring surface.
 - `build(self) -> 'Registration'` — Freeze and statically validate (design §5.5).
 - `initial(self, kind: 'str', *, input: 'Any' = None) -> 'None'` — Declare an initial Producer started at run open (seq 0), with `input`.
 - `instrument(self, name: 'str', *, on: 'str', schemas: 'Sequence[type]', input_builder: 'Callable[[TriggerContext], Any]', factory: 'Callable[[], Producer] | None' = None, start: 'Producer | None' = None, schema_version: 'int' = 1, deterministic: 'bool' = False, into: 'str | None' = None, via: 'Callable[[Any], Any] | None' = None) -> 'None'` — Wire a side-Producer INSTRUMENT in one call — the common observe-(and-stage) pattern.
-- `producer_kind(self, kind: 'str', *, schemas: 'Sequence[type]', schema_version: 'int', factory: 'Callable[[], Producer] | None' = None, start: 'Producer | None' = None, deterministic: 'bool' = False, author_version: 'str | None' = None) -> 'None'` — Register a Producer kind: its name, the frozen msgspec Struct event schemas it may emit (+ schema_version), and the Producer to run.
+- `producer_kind(self, kind: 'str', *, schemas: 'Sequence[type]', schema_version: 'int', factory: 'Callable[[], Producer] | None' = None, start: 'Producer | None' = None, deterministic: 'bool' = False, author_version: 'str | None' = None, budget: 'Budget | None' = None) -> 'None'` — Register a Producer kind: its name, the frozen msgspec Struct event schemas it may emit (+ schema_version), and the Producer to run.
 - `route(self, id: 'str', *, subscription: 'Subscription', slot: 'str', transform: 'Callable[[Any], Any]') -> 'None'` — Register a Route: on an event matching `subscription`, stage `transform(event)` into the named `slot` so a later Trigger's input_builder can read it (carrying context — e.g. a failure reason — forward into the Producer it starts).
-- `termination(self, policy: 'TerminationPolicy', *, scope: 'str' = 'run') -> 'None'` — Set the TerminationPolicy that decides when the run ends (see the termination recipes: quiescence_with_watchdog, threshold_count, all_completed, pause_await_input, ...).
+- `termination(self, policy: 'TerminationPolicy', *, scope: 'str' = 'run') -> 'None'` — Set the TerminationPolicy that decides when the run ends (see the termination recipes: quiescence, threshold_count, all_completed, pause_await_input, ...).
 - `trigger(self, id: 'str', *, subscription: 'Subscription', predicate: 'Callable[[TriggerContext], bool]', starts: 'str', input_builder: 'Callable[[TriggerContext], Any]', policy: 'FiringPolicy | None' = None, cooldown: 'Cooldown | None' = None) -> 'None'` — Register a Trigger: when an event matching `subscription` is appended and `predicate` (over the Views) holds, start a `starts` Producer with the input from `input_builder`. `policy` (default PerEvent) controls how often it fires — Once, PerEvent, PerKey, WhileTrue; `cooldown` throttles it.
 - `view(self, name: 'str', view: 'View') -> 'None'` — Register a named View — a deterministic incremental projection over the bus (e.g. KindBuffer, KindCount) that Predicates read.
 
@@ -289,10 +296,12 @@ unknown (naming the registered topologies).
 
 Executes one topology and produces one run record (single-use).
 
+- `cancel_producer(self, instance: 'str', *, cause: 'str' = 'external', caller: 'str | None' = None) -> 'dict[str, Any] | None'` — Cancel one live Producer by instance id.
+- `inject_event(self, event: 'Any') -> 'None'` — Inject an APPLICATION event onto a live run's inbox from OUTSIDE any Producer.
 - `resume(self, topology: 'Callable[[TopologyBuilder], None]', *, resume_event: 'Any') -> 'RunResult'` — Resume a PAUSED persistent-bus run at its existing record (F-TERM-3 / F-PERS-2).
-- `run(self, topology: 'Callable[[TopologyBuilder], None]') -> 'RunResult'` — Run a topology to a fresh run record.
+- `run(self, topology: 'Callable[[TopologyBuilder], None]', *, name: 'str | None' = None) -> 'RunResult'` — Run a topology to a fresh run record.
 
-### `RunResult(run_id: str, record_root: str, status: Literal['finalised', 'paused', 'failed'], final_event: substrate.types.Event | None, elapsed_seconds: float, finalisation_payload: typing.Any | None)`
+### `RunResult(run_id: str, record_root: str, status: substrate.constants.RunStatus, final_event: substrate.types.Event | None, elapsed_seconds: float, finalisation_payload: Any | None)`
 
 What `Runtime.run()` / `.resume()` returns: the run's outcome and where its record lives.
 
@@ -301,20 +310,106 @@ resumable), or "failed". `record_root` is the on-disk run record — the canonic
 `final_event` is the last bus event (or None); `finalisation_payload` is the optional output
 a TerminationPolicy attached at finalise. `run_id` survives across a resume.
 
+### `RunStatus(*values)`
+
+A run's outcome, as `run_graph` reads it from the record and as `Runtime.run()` returns it
+(`RunResult.status`, which is never INCOMPLETE). INCOMPLETE is no terminal RunFinalised: the
+record is still being written, or torn. UI sprint 107: bare strings before, compared in eight
+places in the console and typed as a Literal in the runtime.
+
+### `RunFailureReason(*values)`
+
+The RunFinalised reasons that mean the run itself failed (RunStatus.FAILED), as opposed to
+a clean finalise with Producer failures inside it (lens audit F033: three literals written in
+the sequencer and runtime and re-listed in graph.py).
+
+### `Budget(wall_seconds: substrate.kernel.topology.Cap | None = None, event_counts: dict[str, substrate.kernel.topology.Cap] | None = None)`
+
+A producer_kind's declared resource caps. All caps optional; None means unbounded
+on that axis. Additive kernel primitive (Sprint 164, amended Sprint 166 to use the
+named `Cap` struct at the reviewer's F6 request; roadmap v2 S1); every existing
+producer without a budget behaves identically.
+
+`wall_seconds` — `Cap(limit=cap_seconds, reason=...)`. Max elapsed wall-clock from
+`substrate.ProducerStarted` to any terminal for this producer instance. On overrun the
+Producer is stopped and recorded as `substrate.ProducerFailed` with
+`budget_exceeded: {axis: "wall_seconds", limit, reason}`.
+
+`event_counts` — `{event_kind_name: Cap(limit=cap_count, reason=...)}`. Per-kind cap
+on events of that name that this producer instance may emit; names are the event
+Struct's class name. The emission that would pass the cap is not recorded; the Producer
+stops with `substrate.ProducerFailed` carrying
+`budget_exceeded: {axis: "event_counts", kind, limit, reason}`.
+
+### `Cap(limit: int | float, reason: str)`
+
+One named cap in a `Budget`. `limit` is the ceiling value the runtime enforces; `reason`
+is the human-readable string the breach records: a `substrate.ProducerFailed` whose payload
+carries `budget_exceeded: {axis, limit, reason}` (lens audit F023: these docs named a
+`substrate.BudgetExceeded` kind that never existed).
+Named fields keep the enforcement site legible: `budget.wall_seconds.reason` reads as
+the reason for the wall-clock cap, not `budget.wall_seconds[1]` — a positional-tuple
+access that hides which slot is which and can silently swap on refactor.
+
+`limit` typed `int | float` covers both wall-clock caps (seconds, typically float) and
+event-count caps (integer count of an event kind). msgspec preserves the input type
+on the wire.
+
+### `find_active_runtime(record_root: 'str | Path') -> "'Runtime | None'"`
+
+Return the live Runtime for `record_root`, or `None` when no run is
+active at that path in this process. Reads are lock-free (Python's GIL
+covers the dict access); callers cross-thread should NOT cache the
+reference — a run that has just finalised will be unregistered from
+the map even if the caller still holds the object.
+
 ## Records & encoding
 
-### `read_record(root: 'Path | str') -> 'Iterator[dict[str, Any]]'`
+### `read_record(root: 'Path | str', *, resolve_blobs: 'bool' = False) -> 'Iterator[dict[str, Any]]'`
 
-Yield every recoverable envelope in seq order: sealed segments (by filename),
-then the recoverable prefix of the hot segment. Does not depend on the manifest
-(segments are authoritative, §3.5). Read-only, symlink-not-followed (§17); does not
-modify anything.
+Every recoverable envelope in seq order, exactly as stored. With `resolve_blobs=True`,
+a blob-stub payload is replaced by the payload it stands for (`resolve_blob_payload`):
+readers that consume payload CONTENTS pass True; integrity readers (replay, conformance,
+byte comparisons) keep the default and see the record as written.
 
-Validates seq contiguity on the read path (§3.5/§3.6): seqs are dense from 0, so a hole — a
-deleted sealed segment, a mid-frame-truncated one, or a sealed segment that lost its tail —
-raises RecordGapError instead of silently folding the loss away. The hot segment's torn tail is
-the one legitimate truncation (framing.recover trims it to the last good frame); a SEALED
-segment must be complete, so a non-newline-terminated sealed segment is data loss, not a tail.
+### `read_first_envelope(root: 'Path | str') -> 'dict[str, Any] | None'`
+
+The record's first envelope (seq 0, normally `substrate.RunStarted`), reading and CRC-checking
+only its first line. None when the record has no complete first frame. For catalog-style
+readers that need one fact per record across thousands of records; `read_record` loads and
+verifies whole segments (UI sprint 097: list_records took 7.8 s over 4,394 sessions).
+
+### `read_last_envelope(root: 'Path | str') -> 'dict[str, Any] | None'`
+
+The record's last complete envelope, reading backwards from the end of its newest segment
+and CRC-checking only that frame. A cut final frame (a writer died mid-append) is skipped, as
+`read_record` skips it. None when no segment holds a complete frame, or when the last complete
+frame fails its CRC; a caller that needs certainty then reads the whole record.
+
+Seqs are dense and append-only, so this frame's seq is the record's highest. The one
+disagreement with `read_record`: when the hot segment holds a corrupt frame BEFORE its last,
+`read_record` stops at the corruption and this still returns the last frame. For per-request
+tail cursors over long records (lens audit F310: the console read every session's whole record
+twice per turn to find this one number).
+
+### `has_torn_tail(root: 'Path | str') -> 'bool'`
+
+True when the hot segment ends inside a frame: a writer died mid-append. Every frame ends in
+a newline, so a non-empty hot segment whose last byte is not one holds a cut frame. Read-only
+(unlike `recover_open_segment`, which truncates the tail); `read_record` skips that frame.
+
+### `resolve_blob_payload(payload: 'Any', root: 'Path | str') -> 'Any'`
+
+Redeem a blob Claim Check (technical §3.7). A payload over BLOB_THRESHOLD_BYTES is stored
+in the record as `{"$blob": "sha256:<hex>", "bytes": n}`; this returns the payload it stands
+for, read from the run's blob store with its hash verified. Any other payload is returned
+unchanged.
+
+The ONE place a stub is redeemed (Hohpe & Woolf, Claim Check + Content Enricher). Every
+reader that consumes payload contents goes through it — live views get the inline payload
+from the sequencer, resumed views, replayed views, followers and record tools get it here —
+so the same event carries the same payload for every reader (Sprint 095). A missing or
+corrupt blob raises: it is data loss, as a seq gap is.
 
 ### `recover_open_segment(root: 'Path | str') -> 'int'`
 
@@ -346,12 +441,13 @@ used for blob ids, input_sha256, message_sha256, and D-8 comparison (§3.3).
 
 ## Live attach (technical §13)
 
-### `attach(root: 'Path | str', *, poll_ms: 'int' = 100) -> 'LiveRecord'`
+### `attach(root: 'Path | str', *, poll_ms: 'int' = 100, resolve_blobs: 'bool' = False) -> 'LiveRecord'`
 
 Open a read-only follower over a run record that may still be growing (technical
-§13, F-PERS-4). Read-only, lock-free, signal-free by construction.
+§13, F-PERS-4). Read-only, lock-free, signal-free by construction. `resolve_blobs=True`
+redeems blob Claim Checks for readers that consume payload contents (Sprint 095).
 
-### `LiveRecord(root: 'Path | str', *, poll_ms: 'int' = 100) -> 'None'`
+### `LiveRecord(root: 'Path | str', *, poll_ms: 'int' = 100, resolve_blobs: 'bool' = False) -> 'None'`
 
 A read-only follower over a (possibly still-growing) run record (technical §13).
 
@@ -414,28 +510,236 @@ An embedded substrate's inner run did not finalise normally. Raised by the embed
 Producer so the OUTER runtime records ONE substrate.ProducerFailed carrying the inner
 run_id (technical §20). The inner record stays complete at its own root.
 
-## Conformance suite (product §7)
+## Lifecycle kinds and vocabulary (technical §3.4)
 
-### `run_conformance(*, include_perf: 'bool' = True) -> 'ConformanceReport'`
+### `RUN_STARTED`
 
-Run all 17 conformance checks, each in its own temp record root. Returns a typed
-report; the caller (the CLI / CI) decides the exit policy. `include_perf=False` skips the
-perf floor probe (check 15) — used where the dedicated benchmark covers it.
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
 
-### `ConformanceReport(results: 'tuple[CheckResult, ...]') -> None`
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
 
-ConformanceReport(results: 'tuple[CheckResult, ...]')
+### `RUN_FINALISED`
 
-### `CheckResult(number: 'int', name: 'str', status: 'Status', detail: 'str') -> None`
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
 
-CheckResult(number: 'int', name: 'str', status: 'Status', detail: 'str')
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
 
-### `Status(*values)`
+### `TRIGGER_FIRED`
 
-The outcome of one conformance check: PASS, FAIL, DEFERRED (spec-amended "not shippable
-in v1.0" — only check 6's Level-3b clause, A1.1), or SKIPPED (not exercised on this
-invocation, e.g. check 15 under --no-perf). DEFERRED and SKIPPED are deliberately distinct
-so a skip never reads as a ruled deferral.
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `PRODUCER_STARTED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `PRODUCER_COMPLETED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `PRODUCER_FAILED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `PRODUCER_CANCELLED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `PRODUCER_EMITTED_INVALID`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `TERMINATION_MATCHED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `INPUT_BUILD_FAILED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `INJECTION_APPLIED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `PREDICATE_QUARANTINED`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+### `LIFECYCLE_KINDS`
+
+Built-in immutable sequence.
+
+If no argument is given, the constructor returns an empty tuple.
+If iterable is specified the tuple is initialized from iterable's items.
+
+If the argument is a tuple, the return value is the same object.
+
+### `FAILURE_KINDS`
+
+Build an immutable unordered collection of unique elements.
+
+### `INITIAL_TRIGGER_ID`
+
+str(object='') -> str
+str(bytes_or_buffer[, encoding[, errors]]) -> str
+
+Create a new string object from the given object. If encoding or
+errors is specified, then the object must expose a data buffer
+that will be decoded using the given encoding and error handler.
+Otherwise, returns the result of object.__str__() (if defined)
+or repr(object).
+encoding defaults to 'utf-8'.
+errors defaults to 'strict'.
+
+## Bundles and the state root
+
+### `list_bundles(bundles_root: 'Path | None' = None) -> 'list[Bundle]'`
+
+Enumerate every shipped and user bundle. Returns Bundles sorted by name.
+
+Sources, in name-shadowing order (later wins if a name collides):
+  1. Shipped defaults under `topologies/session/bundle/` (name "session")
+     and `topologies/applications/<app>.bundle/` (name "<app>").
+  2. User bundles under `_bundles_root(bundles_root)` — every direct
+     subdirectory that contains a `bundle.toml` file is loaded via
+     `load_bundle(name)`; per `load_bundle`, a user bundle of the same
+     name shadows the shipped default.
+
+A missing bundles root yields the shipped list only. A subdirectory
+without a `bundle.toml` is skipped silently (matches `load_bundle`'s
+"no manifest → BundleNotFoundError" contract only when the caller
+asks for that specific name; enumeration does not raise).
+
+Sprint 238: added as the substrate-side prerequisite for substrate-ui
+sprint 034a's `GET /api/bundles` endpoint. The daemon calls this and
+surfaces `[{name, description, slot_count}]` to the UI's bundle picker.
+
+### `load_bundle(name: 'str', *, bundles_root: 'Path | None' = None) -> 'Bundle'`
+
+Load one bundle from `<bundles_root>/<name>/`. Reads
+`bundle.toml` plus the three prose slots plus the corpus/retrieval/
+tools blocks. Raises `BundleNotFoundError` if the directory is
+absent; `BundleShapeError` on a duplicate slot; propagates
+`tomllib.TOMLDecodeError` on a malformed `bundle.toml`.
+
+### `BundleError`
+
+Base class for bundle loading failures. Carries the bundle name
+and the failing path for the operator to debug.
+
+### `BundleNotFoundError`
+
+No `<bundles_root>/<name>/` directory exists on disk.
+
+### `substrate_home() -> 'Path'`
+
+The root of substrate's per-user state tree.
+
+Returns ``Path(os.environ["SUBSTRATE_HOME"])`` when set,
+else ``Path.home() / ".substrate"``.
 
 ## Replay (technical §12)
 
@@ -496,8 +800,11 @@ and return its value() (technical §14, conformance check 12 — view-at fidelit
 Takes a View INSTANCE, not a name: a record stores event payloads, not View code, so
 the caller supplies the View whose update()/subscription define the fold. (Spec §16
 signature is `view_at(record, seq, view: str)` assuming the topology's View code is
-available by name; the instance form is the honest dependency — flagged as a tech-spec
+available by name; the instance form is the honest dependency — flagged as a spec
 flow-back in BLACKBOARD.) The View should be fresh; folding is not idempotent.
+
+Blob Claim Checks are redeemed before folding (Sprint 095), so view_at at a seq equals the
+live View value at that seq. An already-loaded envelope iterable is folded as given.
 
 ### `decisions_between(record: 'Any', a: 'int', b: 'int') -> 'tuple[Any, ...]'`
 
@@ -564,7 +871,7 @@ non-substrate.* kind to its count — the work the topology actually produced.
 
 The STATIC topology structure, from the RunStarted manifest (the only place a run records
 its topology). Producer kinds are nodes (with what they emit and whether any Trigger starts
-them — `is_root`); Triggers and Routes are the edges. Raises ValueError if the record has no
+them — `is_initial`); Triggers and Routes are the edges. Raises ValueError if the record has no
 RunStarted manifest (an empty or truncated record has no topology to project).
 
 ### `run_graph(record: 'Any') -> 'RunGraph'`
@@ -604,7 +911,7 @@ A Route: stages data forward into `slot` for a later Trigger's input. The manife
 the route's id and target slot (the citable identity); the source subscription and transform
 are code, surfaced at runtime as the InjectionApplied events in the run-as-graph.
 
-### `RunGraph(instances: tuple[substrate.projections.graph.ProducerInstance, ...], status: str, final_reason: str | None, paused_on: str | None)`
+### `RunGraph(instances: tuple[substrate.projections.graph.ProducerInstance, ...], status: substrate.constants.RunStatus, final_reason: str | None, paused_on: str | None)`
 
 The dynamic run-as-graph: every Producer instance (the spawn forest, in spawn-seq order)
 with its span and emitted events, plus the run-level outcome the handoff's outcome surface
@@ -617,9 +924,9 @@ being written (if live-followed) OR torn/medium-failed (the fsync-gate path fail
 terminal — absence-of-terminal encodes medium failure); a static "incomplete" read is NOT a
 clean "running", so a torn record never reads as fine (§7.2). "paused" awaits external input.
 `final_reason` is the RunFinalised reason (None for an ordinary finalise; the failure reason
-for a "failed" run). `paused_on` is the resume_condition when status == "paused".
+for a "failed" run). `paused_on` is the resume_condition when status is PAUSED.
 
-### `ProducerInstance(kind: str, instance: str, parent: str | None, trigger_id: str | None, firing_key: str | None, input_sha256: str | None, fired_seq: int | None, started_seq: int | None, ended_seq: int | None, status: str, emitted: tuple[str, ...])`
+### `ProducerInstance(kind: str, instance: str, parent: str | None, trigger_id: str | None, firing_key: str | None, input_sha256: str | None, fired_seq: int | None, started_seq: int | None, ended_seq: int | None, status: substrate.projections.graph.ProducerStatus, emitted: tuple[str, ...])`
 
 One Producer INSTANCE in a run: its kind, its spawn link (`parent` instance + the
 `trigger_id` that started it — `__initial__` for an initial Producer), its lifecycle SPAN
@@ -639,6 +946,10 @@ SPAWN STRUCTURE — Producers spawned by one firing / at adjacent seqs (e.g. all
 trigger_id and spawning at adjacent `fired_seq`) are concurrent siblings — NOT from
 span-overlap alone, or a fast run will flatten the parallelism the UI must show. Anchor each
 lifespan at `fired_seq` (when it was scheduled), the t-free firing anchor the design uses.
+
+### `ProducerStatus(*values)`
+
+A Producer instance's status in `run_graph` (lens audit F034: a five-value string set).
 
 ## Test helpers (technical §15)
 

@@ -42,15 +42,10 @@ class TermContext:
     started: int
     completed: int
     counts: Callable[[str], int]
-    resume_condition: str | None = None
 
 
 class TerminationPolicy:
     """A named decision callback. `name` is recorded in substrate.TerminationMatched.
-
-    `watchdog_seconds`, when set, is the writer's idle-poll window (how often the
-    writer wakes to test quiescence when the inbox is idle) — set by
-    quiescence_with_watchdog(seconds=). None means "use the runtime default poll".
 
     `finalisation`, when set, is a callable run at finalise-run time that produces the
     run's final output payload; it is recorded in substrate.RunFinalised.finalisation_payload
@@ -63,13 +58,11 @@ class TerminationPolicy:
         name: str,
         fn: Callable[[TermContext], Decision],
         resume_condition: str | None = None,
-        watchdog_seconds: float | None = None,
         finalisation: Callable[[TermContext], Any] | None = None,
     ) -> None:
         self.name = name
         self._fn = fn
         self.resume_condition = resume_condition
-        self.watchdog_seconds = watchdog_seconds
         self.finalisation = finalisation
 
     def decide(self, ctx: TermContext) -> Decision:
@@ -139,15 +132,17 @@ def cancel_all_others(when: Callable[[TermContext], bool]) -> TerminationPolicy:
     )
 
 
-def quiescence_with_watchdog(seconds: float = 30.0) -> TerminationPolicy:
-    """Finalise when the run goes quiescent (no work in flight). `seconds` is the
-    watchdog window the runtime uses to wake and test quiescence (it bounds the writer
-    idle-poll interval; see Runtime._poll_s)."""
+def quiescence() -> TerminationPolicy:
+    """Finalise when the run goes quiescent: no Producer running, nothing queued.
+
+    This was `quiescence_with_watchdog(seconds)`. No watchdog ever existed: `seconds` only
+    capped the writer's 10 ms idle poll, so every value of 0.01 or more did nothing, and call
+    sites passing 2400 s or `watchdog_seconds + grade_timeout_seconds` expected a deadline
+    the kernel never set (lens audit F021). A deadline on one Producer is
+    `Budget(wall_seconds=Cap(...))`."""
     return TerminationPolicy(
-        f"quiescence_with_watchdog({seconds})",
+        "quiescence",
         lambda c: Decision.FINALISE_RUN if (c.quiescent and c.running == 0) else Decision.CONTINUE,
-        resume_condition=None,
-        watchdog_seconds=seconds,
     )
 
 
@@ -157,7 +152,7 @@ def pause_await_input(
     """Pause and emit a typed resume_condition when `when` holds (kernel halt-with-resume).
 
     RESUMABLE-TERMINAL CONSTRAINT: a topology that can PAUSE here and later resume MUST pair
-    this with a PROCESS-LOCAL finalisation terminal — quiescence (`quiescence_with_watchdog`)
+    this with a PROCESS-LOCAL finalisation terminal — quiescence (`quiescence`)
     or a count threshold (`threshold_count`) — NOT `all_completed`. `all_completed` compares
     started vs ended COUNTS, but a pause trips while the emitting Producer is still inflight, so
     its ProducerStarted has no durable end across the pause: on resume the restored started >
@@ -188,14 +183,7 @@ def any_of(*policies: TerminationPolicy) -> TerminationPolicy:
     # wrapper still records its typed resume_condition on TerminationMatched (observability:
     # the paused run names what input it awaits). The first member that declares one wins.
     resume_condition = next((p.resume_condition for p in policies if p.resume_condition), None)
-    # Likewise propagate the tightest watchdog window so quiescence is tested promptly.
-    watchdogs = [p.watchdog_seconds for p in policies if p.watchdog_seconds is not None]
-    return TerminationPolicy(
-        name,
-        fn,
-        resume_condition=resume_condition,
-        watchdog_seconds=min(watchdogs) if watchdogs else None,
-    )
+    return TerminationPolicy(name, fn, resume_condition=resume_condition)
 
 
 def all_of(*policies: TerminationPolicy) -> TerminationPolicy:

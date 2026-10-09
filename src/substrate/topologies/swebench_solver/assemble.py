@@ -267,7 +267,6 @@ def swebench_repair_topology(
     n: int = 3,
     max_rounds: int = 2,
     top_k: int = 5,
-    watchdog_seconds: float = 60.0,
     firewall_instance: Any = None,
 ) -> Callable[[api.TopologyBuilder], None]:
     """The SIMPLE coding topology: LOCALIZE -> best-of-N REPAIR -> emit the first patch that applied. A real
@@ -344,7 +343,7 @@ def swebench_repair_topology(
             # RepairSummary, not the loop's Solved/Exhausted. Pass a placeholder termination
             # that never fires — the topology's own b.termination(...) below owns the run's
             # terminal, matching the pre-Sprint-191 wire.
-            termination=api.quiescence_with_watchdog(seconds=watchdog_seconds * 10),
+            termination=api.quiescence(),
         )
 
         b.producer_kind(
@@ -395,7 +394,7 @@ def swebench_repair_topology(
         b.termination(
             api.any_of(
                 api.threshold_count("RepairSummary", 1),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds),
+                api.quiescence(),
             )
         )
 
@@ -424,7 +423,6 @@ def swebench_solver_topology_with_test_selection(
     # full solver (repair + Docker test execution per candidate) had 60s. A test or script that
     # instantiated the solver topology at defaults got guillotined before select_exec finished
     # even one candidate. Solver needs the longer budget; repair keeps the shorter one.
-    watchdog_seconds: float = 600.0,
     firewall_instance: Any = None,
 ) -> Callable[[api.TopologyBuilder], None]:
     """The whole solver. `responders[0]` localizes; `responders` (per slot) draft. `runner` runs tests in
@@ -671,7 +669,7 @@ def swebench_solver_topology_with_test_selection(
             api.any_of(
                 api.threshold_count("SelectedPatch", 1),
                 api.threshold_count("Exhausted", 1),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds),
+                api.quiescence(),
             )
         )
 

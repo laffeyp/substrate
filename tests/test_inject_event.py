@@ -69,7 +69,7 @@ def _inject_topo() -> Any:
             input_builder=lambda ctx: {"label": ctx.event.payload.get("label", "")},
             policy=api.PerEvent(),
         )
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     return topo
 

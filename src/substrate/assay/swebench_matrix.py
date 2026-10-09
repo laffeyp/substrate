@@ -78,7 +78,7 @@ def _solve_factory(solve: Callable[[], str]) -> _Factory:
 
 def _backend_topology(solve: Callable[[], str]) -> Callable[[api.TopologyBuilder], None]:
     """A trivial one-producer topology that emits the backend's patch as a SelectedPatch. Terminates the
-    instant the patch lands; a watchdog backstops a wedge."""
+    instant the patch lands, or on quiescence if the producer ends without one."""
 
     def topo(b: api.TopologyBuilder) -> None:
         b.producer_kind(
@@ -92,7 +92,7 @@ def _backend_topology(solve: Callable[[], str]) -> Callable[[api.TopologyBuilder
         b.termination(
             api.any_of(
                 api.threshold_count("SelectedPatch", 1),
-                api.quiescence_with_watchdog(seconds=3600.0),
+                api.quiescence(),
             )
         )
 
@@ -110,7 +110,6 @@ def _backend_topology_with_grade(
     grade_timeout_seconds: int,
     split: str = "test",
     namespace: str = "swebench",
-    watchdog_seconds: float = 3600.0,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Sprint 199d (roadmap v2 S7b follow-on): the backend topology + grade producer.
 
@@ -164,7 +163,7 @@ def _backend_topology_with_grade(
         b.termination(
             api.any_of(
                 api.threshold_count("GradeResult", 1),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds + grade_timeout_seconds),
+                api.quiescence(),
             )
         )
 
@@ -289,7 +288,6 @@ def _build_solver_arm_from_payload(
         known_files=set(payload["known_files"]),
         n=n,
         max_rounds=max_rounds,
-        watchdog_seconds=900.0,
     )
 
 

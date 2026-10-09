@@ -18,7 +18,7 @@ from substrate.api import (
     Subscription,
     assert_event,
     assert_no_event,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
     threshold_count,
 )
@@ -77,7 +77,7 @@ async def emits_bad_int(_input):
 def _bad_int_topo(b):
     b.producer_kind("p", schemas=[BadInt], schema_version=1, factory=lambda: emits_bad_int)
     b.initial("p", input=None)
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_emission_non_canonical_value_is_logged_not_crashed(tmp_path):
@@ -109,7 +109,7 @@ def _bad_resolved_input_topo(b):
         input_builder=lambda ctx: {"big": 2**60},
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_non_canonical_resolved_input_becomes_input_build_failed(tmp_path):
@@ -127,7 +127,7 @@ async def test_non_canonical_resolved_input_becomes_input_build_failed(tmp_path)
 def _bad_initial_input_topo(b):
     b.producer_kind("p", schemas=[Ok], schema_version=1, factory=lambda: producer_ok)
     b.initial("p", input={"big": 2**60})  # non-canonical initial input
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_non_canonical_initial_input_becomes_input_build_failed(tmp_path):
@@ -151,7 +151,7 @@ def _bad_perkey_topo(b):
         input_builder=lambda ctx: None,
         policy=PerKey(lambda event: 2**60),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_non_canonical_perkey_firing_key_does_not_crash(tmp_path):
@@ -173,7 +173,7 @@ async def emits_big(_input):
 def _big_topo(b):
     b.producer_kind("p", schemas=[Big], schema_version=1, factory=lambda: emits_big)
     b.initial("p", input=None)
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_oversized_payload_is_blob_offloaded(tmp_path):
@@ -245,7 +245,7 @@ def _cooldown_topo(b):
         policy=PerEvent(),
         cooldown=Logical(100),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_trigger_logical_cooldown_suppresses_rapid_refire(tmp_path):
@@ -287,7 +287,7 @@ def _cooldown_two_topo(b):
         policy=PerEvent(),
         cooldown=Logical(2),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_logical_cooldown_counts_subscription_matched_appends(tmp_path):
@@ -327,7 +327,7 @@ def _perkey_cooldown_topo(b):
         policy=PerKey(lambda event: event.payload["n"]),
         cooldown=Logical(2),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_perkey_cooldown_does_not_consume_a_suppressed_key(tmp_path):
@@ -358,7 +358,7 @@ def _big_resolved_topo(b):
         input_builder=lambda ctx: {"big": "y" * (20 * 1024)},
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_oversized_resolved_input_uses_top_level_blob_field(tmp_path):
@@ -399,7 +399,7 @@ def _view_failure_topo(b):
     b.producer_kind("p", schemas=[Ok], schema_version=1, factory=lambda: count_three)
     b.view("boom", BoomView())
     b.initial("p", input=None)
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_view_failure_finalises_and_reports_failed(tmp_path):
@@ -437,7 +437,7 @@ def _view_failure_midcascade_topo(b):
     b.producer_kind("p", schemas=[Ok], schema_version=1, factory=lambda: count_three)
     b.view("boom", BoomOnControlView())
     b.initial("p", input=None)
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_view_failure_midcascade_appends_nothing_after_terminal(tmp_path):

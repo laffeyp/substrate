@@ -162,7 +162,6 @@ def research_sweep_topology(
     critic: Responder,
     synthesizer: Responder,
     deterministic: bool = False,
-    watchdog_seconds: float = 30.0,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Fan a reader over each of `documents` for `question`, run a completeness critic over all the
     findings, then synthesize the answer. `reader`/`critic`/`synthesizer` are Responders (may be the
@@ -246,7 +245,7 @@ def research_sweep_topology(
             api.any_of(
                 api.threshold_count("Synthesis", 1),
                 api.all_completed(),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds),
+                api.quiescence(),
             )
         )
 

@@ -134,9 +134,9 @@ def embedded_substrate(
         rules[_RUN_FINALISED] = _to_rule(default_export)
 
     async def start(input: Any) -> AsyncIterator[Any]:
-        # Resolve the inner record root: from the input (the outer TriggerFired's resolved
-        # input records it, §20) or a fresh child of the cwd. Each embedding gets its OWN
-        # root — the inner record is complete and independent there.
+        # The inner record root comes from the input (the outer TriggerFired's resolved input
+        # records it, §20); an input without one is refused. Each embedding gets its OWN root —
+        # the inner record is complete and independent there.
         inner_root = _inner_root_from_input(input)
         inner_rt = Runtime(inner_root)
         run_task: asyncio.Task[Any] = asyncio.ensure_future(inner_rt.run(topology))

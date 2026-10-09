@@ -281,7 +281,6 @@ def code_evolution_topology(
     timeout: float = 60.0,
     cost_fn: Callable[[dict[str, str]], int] | None = None,
     deterministic: bool = False,
-    watchdog_seconds: float = 30.0,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the evolutionary code-writing topology. A seeder fans out N Spawns; each is mutated into a
     Genome (model), gate-evaluated into a Fitness (correctness + cost); when a generation's N fitnesses
@@ -365,7 +364,7 @@ def code_evolution_topology(
             api.any_of(
                 api.threshold_count("Evolved", 1),
                 api.threshold_count("Exhausted", 1),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds),
+                api.quiescence(),
             )
         )
 

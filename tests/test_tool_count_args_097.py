@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from msgspec import Struct
 
-from substrate.api import Runtime, quiescence_with_watchdog
+from substrate.api import Runtime, quiescence
 from substrate.topologies.tool_loop.substrate_tools import (
     _INSPECT_RECORD_SCHEMA,
     _LIST_RECORDS_SCHEMA,
@@ -65,7 +65,7 @@ async def _ticks(_input):
 def _topo(b):
     b.producer_kind("p", schemas=[Tick], schema_version=1, factory=lambda: _ticks)
     b.initial("p", input=None)
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_inspect_record_pages_by_limit(tmp_path: Path) -> None:

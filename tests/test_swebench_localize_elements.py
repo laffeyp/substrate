@@ -122,7 +122,7 @@ async def _run(tmp_path, responder, issue, repo_skeleton, base_checkout, known_f
         b.termination(
             api.any_of(
                 api.threshold_count("EditLocations", 1),
-                api.quiescence_with_watchdog(seconds=5),
+                api.quiescence(),
             )
         )
 

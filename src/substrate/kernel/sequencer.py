@@ -38,6 +38,7 @@ from ..constants import (
     RUN_FINALISED,
     TRIGGER_FIRED,
     InvalidReason,
+    RunFailureReason,
     is_reserved,
 )
 from ..encoding import SafeCanonical, content_hash, safe_raw, try_canonical
@@ -67,16 +68,6 @@ class _Lifecycle:
 
     kind: str
     payload: dict[str, Any]
-
-
-def subscribed(sub: Any, event: Event) -> bool:
-    """Subscription match: by event kind, or by the emitting Producer's kind/instance."""
-    if event.kind in sub.kinds:
-        return True
-    if event.producer is not None and sub.producers:
-        if event.producer.kind in sub.producers or event.producer.instance in sub.producers:
-            return True
-    return False
 
 
 class AppendCycle:
@@ -120,7 +111,7 @@ class AppendCycle:
             event = self._emit(kind, schema, env_producer, disk_payload, memory_payload)  # step 2
             self._track_lifecycle(event)
             for vname, view in self._reg.views.items():  # step 3
-                if not subscribed(view.subscription, event):
+                if not view.subscription.matches(event):
                     continue
                 try:
                     view.update(event)
@@ -296,7 +287,12 @@ class AppendCycle:
         fseq = st.next_seq
         st.next_seq += 1
         now = time.time()
-        payload = {"reason": "view_failure", "view": view_name, "seq": seq, "error": repr(exc)}
+        payload = {
+            "reason": RunFailureReason.VIEW_FAILURE,
+            "view": view_name,
+            "seq": seq,
+            "error": repr(exc),
+        }
         schema = f"{RUN_FINALISED}@1"
         envelope = {
             "seq": fseq,
@@ -323,7 +319,7 @@ class AppendCycle:
     def _stage_routes(self, event: Event) -> None:
         st = self._st
         for r in self._reg.routes:
-            if not subscribed(r.subscription, event):
+            if not r.subscription.matches(event):
                 continue
             try:
                 message = r.transform(event)
@@ -361,7 +357,7 @@ class AppendCycle:
             staged=MappingProxyType(st.staged),
         )
         for idx, t in enumerate(self._reg.triggers):
-            if idx in st.quarantined or not subscribed(t.subscription, event):
+            if idx in st.quarantined or not t.subscription.matches(event):
                 continue
             # This append matches the trigger's subscription — count it for the logical
             # cooldown (kernel §6: cooldown is measured in subscription-matching appends).

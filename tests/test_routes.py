@@ -9,7 +9,7 @@ from substrate.api import (
     Runtime,
     Subscription,
     assert_event,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
 )
 
@@ -50,7 +50,7 @@ def _route_topo(b):
         input_builder=lambda ctx: {"last_n": ctx.staged["last_n"]},
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_route_staged_message_visible_same_cycle(tmp_path):
@@ -75,7 +75,7 @@ def _unsealable_topo(b):
         input_builder=lambda ctx: object(),  # not sealable (§8.3)
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_unsealable_input_becomes_input_build_failed(tmp_path):

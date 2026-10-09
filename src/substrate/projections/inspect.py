@@ -34,6 +34,7 @@ from ..encoding import content_hash
 from ..errors import ProducerNotFound, SequenceOutOfRange
 from ..protocols import View
 from ..record.record import load_envelopes
+from ..types import Event
 
 # Producer-creating causes (F-OBS-2): a Producer traces to one of these.
 _TRIGGER_FIRED = TRIGGER_FIRED
@@ -192,8 +193,9 @@ def view_at(record: Any, seq: int, view: View) -> Any:
     for env in envelopes:
         if int(env.get("seq", -1)) > seq:
             break  # envelopes are yielded in dense seq order; nothing further qualifies
-        if _envelope_matches(env, sub):
-            view.update(_as_event(env))
+        event = Event.from_envelope(env)
+        if sub.matches(event):
+            view.update(event)
     return view.value()
 
 
@@ -208,7 +210,7 @@ def decisions_between(record: Any, a: int, b: int) -> tuple[Any, ...]:
     for env in envelopes:
         s = int(env.get("seq", -1))
         if a <= s <= b and str(env.get("kind", "")).startswith("substrate."):
-            out.append(_as_event(env))
+            out.append(Event.from_envelope(env))
     return tuple(out)
 
 
@@ -328,35 +330,6 @@ def _payload_hash(env: dict[str, Any]) -> str:
     if str(env.get("kind", "")).startswith("substrate."):
         payload = _d8_normalize_lifecycle(payload)
     return content_hash(payload)
-
-
-def _envelope_matches(env: dict[str, Any], sub: Any) -> bool:
-    """Subscription match on a raw envelope dict (mirrors runtime._subscribed without
-    needing an Event object)."""
-    if str(env.get("kind")) in sub.kinds:
-        return True
-    ref = env.get("producer")
-    if isinstance(ref, dict) and sub.producers:
-        if ref.get("kind") in sub.producers or ref.get("instance") in sub.producers:
-            return True
-    return False
-
-
-def _as_event(env: dict[str, Any]) -> Any:
-    """Reconstruct an Event from a record envelope (imported lazily to avoid a cycle:
-    inspect <- runtime would be circular via api re-exports)."""
-    from ..types import Event, ProducerRef
-
-    ref = env.get("producer")
-    producer = ProducerRef(**ref) if isinstance(ref, dict) else None
-    return Event(
-        seq=int(env["seq"]),
-        kind=str(env["kind"]),
-        schema=str(env.get("schema", "")),
-        producer=producer,
-        t=float(env.get("t", 0.0)),
-        payload=env.get("payload"),
-    )
 
 
 # spec-audit: 2026-09-01

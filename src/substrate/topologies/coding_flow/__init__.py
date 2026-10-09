@@ -164,7 +164,6 @@ def coding_flow_topology(
     max_rounds: int = 2,
     timeout: float = 60.0,
     deterministic: bool = False,
-    watchdog_seconds: float = 30.0,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the coding-flow topology: a seeder fans out N drafters; each Candidate is gate-validated
     by a validator; when a round's N verdicts are all in, the judge selects the passing candidate
@@ -249,7 +248,7 @@ def coding_flow_topology(
             api.any_of(
                 api.threshold_count("Solved", 1),
                 api.threshold_count("Exhausted", 1),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds),
+                api.quiescence(),
             )
         )
 

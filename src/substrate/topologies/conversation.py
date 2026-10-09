@@ -181,7 +181,6 @@ def conversation_topology(
     max_rounds: int = 3,
     converge_at: tuple[int, int] | None = None,
     deterministic: bool = True,
-    watchdog_seconds: float = 60.0,
     instruments: Sequence[Instrument] = (),
     outcome: tuple[type[Struct], _OutcomeFn] | None = None,
 ) -> Callable[[api.TopologyBuilder], None]:
@@ -249,7 +248,7 @@ def conversation_topology(
         b.termination(
             api.any_of(
                 api.threshold_count("Converged", 1),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds),
+                api.quiescence(),
             )
         )
 

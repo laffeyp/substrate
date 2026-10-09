@@ -197,9 +197,9 @@ def test_wall_seconds_budget_no_longer_warns_after_sprint_199() -> None:
     )
 
 
-def test_event_counts_budget_still_warns_until_emit_cap_enforcement_ships() -> None:
-    """Sprint 199 landed wall_seconds only; `event_counts` (per-kind emit cap) is a
-    later sprint. Declaring event_counts still emits the standing warning."""
+def test_event_counts_budget_registers_without_a_warning() -> None:
+    """`event_counts` is enforced since kernel sprint 251 (tests/test_runtime_liveness_251.py),
+    so declaring one no longer warns that it is not."""
     import warnings
 
     b = TopologyBuilder()
@@ -217,7 +217,7 @@ def test_event_counts_budget_still_warns_until_emit_cap_enforcement_ships() -> N
         for w in caught
         if "event_counts" in str(w.message) and issubclass(w.category, UserWarning)
     ]
-    assert matching, "expected a UserWarning naming event_counts as the unshipped axis"
+    assert not matching, [str(w.message) for w in matching]
 
 
 def test_no_warning_when_no_budget_declared() -> None:

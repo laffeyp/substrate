@@ -62,7 +62,7 @@ What you declared:
 A Trigger creates new Producers when a Predicate over the bus holds. Fire a `doubler` on each `CountReached`:
 
 ```python
-from substrate.api import PerEvent, Subscription, quiescence_with_watchdog
+from substrate.api import PerEvent, Subscription, quiescence
 
 
 class Doubled(Struct, frozen=True):
@@ -86,7 +86,7 @@ def topology(b: TopologyBuilder) -> None:
         input_builder=lambda ctx: {"n": ctx.event.payload["n"]},        # the input
         policy=PerEvent(),                                              # once per matching event
     )
-    b.termination(quiescence_with_watchdog(seconds=2))                  # end when work settles
+    b.termination(quiescence())                  # end when work settles
 ```
 
 A Trigger takes five pieces: a `subscription` (which event kinds or producers it watches), a `predicate` (a cheap boolean over the context), an `input_builder` (builds the new Producer's input), the `starts` kind, and a firing `policy` — `PerEvent`, `Once`, `PerKey`, or `WhileTrue`. This run emits three `CountReached`, three `Doubled`, goes quiescent, and finalises.
@@ -120,7 +120,7 @@ def topology(b: TopologyBuilder) -> None:
         input_builder=lambda ctx: {"n": ctx.views["seen"].value()},
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=2))
+    b.termination(quiescence())
 ```
 
 A View is a deterministic incremental projection over the bus. The shipped ones are `KindCount`, `KindBuffer`, and `PerKindLatest`. The predicate reads `ctx.views[name].value()`. Forget the `.value()` and you read the View object itself — the predicate quarantines and the `WARNING` above surfaces.

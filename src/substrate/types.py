@@ -61,6 +61,29 @@ class Event(Struct, frozen=True):
     t: float
     payload: Any
 
+    @classmethod
+    def from_envelope(cls, env: dict[str, Any]) -> Event:
+        """The Event a stored record envelope describes (the resume fold and inspect replay
+        events read back from a record; lens audit F037: two copies of this)."""
+        ref = env.get("producer")
+        producer = (
+            ProducerRef(
+                kind=str(ref.get("kind", "")),
+                instance=str(ref.get("instance", "")),
+                parent=ref.get("parent"),
+            )
+            if isinstance(ref, dict)
+            else None
+        )
+        return cls(
+            seq=int(env["seq"]),
+            kind=str(env["kind"]),
+            schema=str(env.get("schema", "")),
+            producer=producer,
+            t=float(env.get("t", 0.0)),
+            payload=env.get("payload"),
+        )
+
 
 class Subscription(Struct, frozen=True):
     """What a Predicate / View / Route is consulted on (technical §16, §6.5).
@@ -77,3 +100,12 @@ class Subscription(Struct, frozen=True):
     def is_empty(self) -> bool:
         """True if neither kinds nor producers is set (a registration error)."""
         return not self.kinds and not self.producers
+
+    def matches(self, event: Event) -> bool:
+        """The one subscription rule: the event's kind is subscribed, or its Producer's kind
+        or instance is (lens audit F037: the sequencer, the resume fold and inspect each kept
+        a copy)."""
+        if event.kind in self.kinds:
+            return True
+        p = event.producer
+        return p is not None and (p.kind in self.producers or p.instance in self.producers)

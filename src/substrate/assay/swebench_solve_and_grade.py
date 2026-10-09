@@ -34,7 +34,6 @@ def swebench_solve_and_grade_topology(
     n: int = 3,
     max_rounds: int = 2,
     top_k: int = 5,
-    watchdog_seconds: float = 60.0,
     firewall_instance: Any = None,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Sprint 196 (roadmap v2 S6, part 2 of 2): the solve-and-grade topology. Wraps
@@ -68,7 +67,6 @@ def swebench_solve_and_grade_topology(
         n=n,
         max_rounds=max_rounds,
         top_k=top_k,
-        watchdog_seconds=watchdog_seconds,
         firewall_instance=firewall_instance,
     )
 
@@ -104,12 +102,12 @@ def swebench_solve_and_grade_topology(
         # triggers the grader — so RepairSummary races the grade). A pure
         # `threshold_count("RepairSummary", 1)` terminal would race-cancel the grader.
         # Solve_and_grade uses `GradeResult` as the post-solve terminal AND falls back to
-        # `quiescence_with_watchdog` when no SelectedPatch was ever emitted (Exhausted path —
+        # `quiescence` when no SelectedPatch was ever emitted (Exhausted path —
         # RepairSummary emits but no grade runs; quiescence wins because the topology is idle).
         b.termination(
             api.any_of(
                 api.threshold_count("GradeResult", 1),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds + grade_timeout_seconds),
+                api.quiescence(),
             )
         )
 

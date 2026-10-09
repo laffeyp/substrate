@@ -60,7 +60,6 @@ def test_responders_none_defaults_to_deterministic(tmp_path):
         known_files=set(files),
         n=2,
         max_rounds=1,
-        watchdog_seconds=5.0,
     )
     root = tmp_path / "run"
     asyncio.run(_run(topo, root))
@@ -93,7 +92,6 @@ def test_responders_explicit_list_still_works(tmp_path):
         known_files=set(files),
         n=2,
         max_rounds=1,
-        watchdog_seconds=5.0,
     )
     root = tmp_path / "run"
     asyncio.run(_run(topo, root))

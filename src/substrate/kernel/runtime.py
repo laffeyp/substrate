@@ -40,6 +40,7 @@ from ..constants import (
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
     VOCAB_VERSION,
+    RunFailureReason,
     RunStatus,
     is_reserved,
 )
@@ -51,18 +52,18 @@ from ..record.record import (
     Interval,
     RecordWriter,
     hot_segment,
-    read_record,
+    recover_and_read,
     recover_open_segment,
 )
 from ..record.sealing import seal
 from ..record.sidecar import DiagnosticSidecar, WriterStatsSidecar
-from ..types import Event, ProducerRef
-from .policies import Decision, TermContext, quiescence_with_watchdog
+from ..types import Event
+from .policies import Decision, TermContext, quiescence
 from .runstate import RunPhase, RunState
 from .sequencer import AppendCycle, _Emission, _Lifecycle
 from .topology import Registration, RegistrationError, TopologyBuilder
 
-_QUIESCENCE_POLL_S = 0.01  # writer idle-poll for the quiescence/watchdog check
+_QUIESCENCE_POLL_S = 0.01  # writer idle-poll for the quiescence check
 # Sprint 199a (SDD vocabulary-as-contract, fold): a `Budget.wall_seconds` breach adds a
 # structured `budget_exceeded` block to the `ProducerFailed` payload. Downstream readers
 # check `payload.get("budget_exceeded")`; the block carries the axis, limit, and reason as
@@ -70,7 +71,20 @@ _QUIESCENCE_POLL_S = 0.01  # writer idle-poll for the quiescence/watchdog check
 # ("budget_exceeded"), not the discrimination signal. This closes KIT_DIARY 44 without
 # minting a new reserved kind.
 BUDGET_EXCEEDED_AXIS_WALL_SECONDS = "wall_seconds"
+BUDGET_EXCEEDED_AXIS_EVENT_COUNTS = "event_counts"
 BUDGET_EXCEEDED_ERROR_TAG = "budget_exceeded"
+
+
+class _EventCapExceeded(Exception):
+    """A Producer's next emission would pass its `Budget.event_counts` cap for that kind."""
+
+    def __init__(self, event_kind: str, limit: int | float, reason: str) -> None:
+        super().__init__(f"{event_kind} over its cap of {limit}")
+        self.event_kind = event_kind
+        self.limit = limit
+        self.reason = reason
+
+
 # Consecutive fully-quiescent idle polls where the policy still returns CONTINUE before the
 # run is declared STUCK (the silent-hang guard, e.g. a resumable run on all_completed). Two
 # polls is unambiguous: with logical cooldowns true quiescence is terminal — no event can
@@ -107,6 +121,12 @@ class RunResult(Struct, frozen=True):
 _ACTIVE_RUNTIMES_BY_RECORD_ROOT: dict[str, "Runtime"] = {}
 
 
+def _root_key(record_root: str | Path) -> str:
+    """The map's key for a record root: the resolved absolute path, so a relative and an absolute
+    spelling of one root find the same runtime (lens audit F018)."""
+    return str(Path(record_root).resolve())
+
+
 # ContextVar set at _drive entry; readable from any coroutine or worker
 # thread the runtime spawns. Phase 8 item 8 uses this so a tool body
 # running in `asyncio.to_thread` can emit `ToolProgress` mid-execution
@@ -127,7 +147,7 @@ def find_active_runtime(record_root: str | Path) -> "Runtime | None":
     covers the dict access); callers cross-thread should NOT cache the
     reference — a run that has just finalised will be unregistered from
     the map even if the caller still holds the object."""
-    return _ACTIVE_RUNTIMES_BY_RECORD_ROOT.get(str(Path(record_root)))
+    return _ACTIVE_RUNTIMES_BY_RECORD_ROOT.get(_root_key(record_root))
 
 
 class Runtime:
@@ -199,7 +219,7 @@ class Runtime:
         `substrate.*` kind is rejected so it cannot forge a lifecycle frame).
 
         TERMINATION CONSTRAINT (footgun): a resumable run MUST finalise on a PROCESS-LOCAL
-        condition — quiescence (`quiescence_with_watchdog`) or a threshold over event counts —
+        condition — quiescence (`quiescence`) or a threshold over event counts —
         NOT `all_completed`. `all_completed` compares restored started/ended COUNTS, but a pause
         trips while the emitting Producer is still inflight, so its ProducerStarted has no
         durable end across the pause: on resume `started > ended` and `completed >= started` can
@@ -234,7 +254,7 @@ class Runtime:
         topology(builder)
         reg = builder.build()
         self._reg = reg
-        self._termination = reg.termination or quiescence_with_watchdog()
+        self._termination = reg.termination or quiescence()
 
         lock_fd: int | None = None
         record: RecordWriter | None = None
@@ -256,7 +276,12 @@ class Runtime:
         # aimed at a root that already holds a crash-torn open segment (operator error / a reused
         # persistent root), recover too — otherwise new frames append AFTER the torn bytes, embedding
         # a permanently-corrupt line. recover_open_segment is non-destructive of good frames.
-        if resuming or (self._record_root.exists() and hot_segment(self._record_root) is not None):
+        # A resume reads the record back in the same pass (`recover_and_read`), and folds that
+        # list in `_resume_bootstrap` instead of reading it a second time.
+        self._resume_envelopes: list[dict[str, Any]] = []
+        if resuming:
+            self._resume_envelopes = recover_and_read(self._record_root, resolve_blobs=True)
+        elif self._record_root.exists() and hot_segment(self._record_root) is not None:
             recover_open_segment(self._record_root)
         try:
             record = RecordWriter(self._record_root, fsync=self._fsync, resume=resuming)
@@ -276,7 +301,7 @@ class Runtime:
             # daemon call can find it — Phase 8 item 9 descent-scope
             # interrupt. Registered AFTER `self._st = st` so the map only
             # ever exposes runtimes with live state.
-            _ACTIVE_RUNTIMES_BY_RECORD_ROOT[str(self._record_root)] = self
+            _ACTIVE_RUNTIMES_BY_RECORD_ROOT[_root_key(self._record_root)] = self
             self._loop = asyncio.get_running_loop()
             _ctx_token = _CURRENT_RUNTIME.set(self)
             self._cyc = AppendCycle(
@@ -344,7 +369,7 @@ class Runtime:
             # points at this runtime — a re-entrant call at the same
             # record_root would have overwritten it, and clobbering that
             # entry here would strand the live re-entrant handle.
-            _key = str(self._record_root)
+            _key = _root_key(self._record_root)
             if _ACTIVE_RUNTIMES_BY_RECORD_ROOT.get(_key) is self:
                 del _ACTIVE_RUNTIMES_BY_RECORD_ROOT[_key]
             self._loop = None
@@ -376,13 +401,9 @@ class Runtime:
         return RunStatus.FINALISED
 
     def _new_run_state(self, reg: Registration) -> RunState:
-        """Construct the per-run mutable state. quiescence_with_watchdog(seconds=) drives
-        the writer idle-poll window: the writer wakes at least every `seconds` to test
-        quiescence when the inbox is idle, bounded by the fine-grained default so a large
-        watchdog window never delays prompt quiescence detection (detection is immediate
-        once the queues are empty); a smaller `seconds` polls faster. None → default poll."""
-        ws = self._termination.watchdog_seconds
-        poll_s = min(_QUIESCENCE_POLL_S, ws) if ws is not None else _QUIESCENCE_POLL_S
+        """Construct the per-run mutable state. The writer wakes every _QUIESCENCE_POLL_S
+        when its inbox is idle to test quiescence."""
+        poll_s = _QUIESCENCE_POLL_S
         st = RunState(
             run_id=str(ULID()),
             replay_ceiling="3b" if reg.has_wall_clock_cooldown else "3a",
@@ -411,7 +432,7 @@ class Runtime:
                     "schema": f"{RUN_FINALISED}@1",
                     "producer": None,
                     "t": time.time(),
-                    "payload": {"reason": "kernel_error", "error": repr(exc)},
+                    "payload": {"reason": RunFailureReason.KERNEL_ERROR, "error": repr(exc)},
                 }
             )
         except Exception:  # noqa: BLE001, S110 — the writer boundary: a failure in user code or the record is recorded, never a crash
@@ -446,7 +467,11 @@ class Runtime:
                         "schema": f"{RUN_FINALISED}@1",
                         "producer": None,
                         "t": time.time(),
-                        "payload": {"reason": "stuck_quiescent", "policy": policy, "error": msg},
+                        "payload": {
+                            "reason": RunFailureReason.STUCK_QUIESCENT,
+                            "policy": policy,
+                            "error": msg,
+                        },
                     }
                 )
             except Exception:  # noqa: BLE001, S110 — the writer boundary: a failure in user code or the record is recorded, never a crash
@@ -507,9 +532,8 @@ class Runtime:
         #    see correct as-of state), and the kind counts + started/ended totals the
         #    TerminationPolicy reads. Views are deterministic Level-1 projections (kernel §4).
         max_seq = -1
-        for env in read_record(
-            self._record_root, resolve_blobs=True
-        ):  # Sprint 095: Views fold the payload, not its Claim Check
+        # Sprint 095: Views fold the payload, not its Claim Check (resolved by recover_and_read).
+        for env in self._resume_envelopes:
             seq = int(env.get("seq", -1))
             max_seq = max(max_seq, seq)
             kind = str(env.get("kind", ""))
@@ -529,8 +553,9 @@ class Runtime:
             ):
                 st.ended_total += 1
             for vname, view in reg.views.items():
-                if _resume_view_matches(view.subscription, env):
-                    view.update(_as_event(env))
+                event = Event.from_envelope(env)
+                if view.subscription.matches(event):
+                    view.update(event)
         st.next_seq = max_seq + 1  # resumed appends continue the SAME seq sequence
         # 2) Inject the external resume event onto the bus (producer=null — it is externally
         #    supplied, not Producer-emitted). It is canonicalized + validated here; the resume
@@ -636,11 +661,13 @@ class Runtime:
             st.tasks.add(task)
             st.task_by_instance[instance] = task
             st.kind_by_instance[instance] = kind
+            st.parent_by_instance[instance] = parent
 
             def _done(t: asyncio.Task[None], inst: str = instance) -> None:
                 st.tasks.discard(t)
                 st.task_by_instance.pop(inst, None)
                 st.kind_by_instance.pop(inst, None)
+                st.parent_by_instance.pop(inst, None)
                 st.cancel_reasons.pop(inst, None)
 
             task.add_done_callback(_done)
@@ -654,11 +681,14 @@ class Runtime:
         # `asyncio.wait_for`. On timeout we synthesise the exception path — ProducerFailed
         # with a typed `error="budget_exceeded: wall_seconds=<limit>s: <reason>"` — so a
         # downstream reader inspecting the error prefix can distinguish a budget breach from
-        # a producer bug. Emission-count caps (`Budget.event_counts`) are a later sprint
-        # (their site is emit-time inside `_submit_emission`, and this fold is wall-only).
+        # a producer bug. `Budget.event_counts` caps each event kind this instance emits: the
+        # emission that would pass a cap is not submitted, and the Producer fails the same way
+        # (axis "event_counts"; lens audit F024 — the cap was stored and only warned about).
         producer_kind = self._reg.producer_kinds[kind]
         budget = producer_kind.budget
         wall_cap = budget.wall_seconds if budget is not None else None
+        count_caps = budget.event_counts if budget is not None and budget.event_counts else {}
+        emitted: dict[str, int] = {}
         # The wall budget's own timer. `expired()` tells its firing apart from a TimeoutError the
         # Producer's code raised (a socket or urllib timeout): asyncio.TimeoutError IS TimeoutError
         # on 3.11+, and the old `assert wall_cap is not None` turned the second case into an
@@ -669,6 +699,12 @@ class Runtime:
 
             async def _consume() -> None:
                 async for obj in start(inp):
+                    cap = count_caps.get(type(obj).__name__)
+                    if cap is not None:
+                        n = emitted.get(type(obj).__name__, 0) + 1
+                        if n > cap.limit:
+                            raise _EventCapExceeded(type(obj).__name__, cap.limit, cap.reason)
+                        emitted[type(obj).__name__] = n
                     await self._submit_emission(ref, obj)
 
             if wall_timer is not None:
@@ -705,6 +741,18 @@ class Runtime:
                     "axis": BUDGET_EXCEEDED_AXIS_WALL_SECONDS,
                     "limit": float(wall_cap.limit),
                     "reason": wall_cap.reason,
+                },
+            }
+            inbox.put_nowait(_Lifecycle(PRODUCER_FAILED, payload))
+        except _EventCapExceeded as cap_exc:
+            payload = {
+                "producer": ref,
+                "error": BUDGET_EXCEEDED_ERROR_TAG,
+                "budget_exceeded": {
+                    "axis": BUDGET_EXCEEDED_AXIS_EVENT_COUNTS,
+                    "kind": cap_exc.event_kind,
+                    "limit": cap_exc.limit,
+                    "reason": cap_exc.reason,
                 },
             }
             inbox.put_nowait(_Lifecycle(PRODUCER_FAILED, payload))
@@ -942,8 +990,9 @@ class Runtime:
         if caller is not None:
             reason["caller"] = caller
         st.cancel_reasons[instance] = reason
+        parent = st.parent_by_instance.get(instance)
         task.cancel()
-        return {"kind": kind, "instance": instance, "parent": None}
+        return {"kind": kind, "instance": instance, "parent": parent}
 
     def inject_event(self, event: Any) -> None:
         """Inject an APPLICATION event onto a live run's inbox from OUTSIDE any Producer.
@@ -990,38 +1039,3 @@ class Runtime:
         if st is None:
             raise RuntimeError("inject_event called before Runtime.run/.resume; no live state")
         st.inbox.put_nowait(_Lifecycle(kind, payload))
-
-
-# ── resume helpers (fold the existing record into the registered Views, §4 Level-1) ──────
-def _resume_view_matches(sub: Any, env: dict[str, Any]) -> bool:
-    """Subscription match on a raw record envelope dict (the resume fold needs to feed only
-    the events a View subscribes to, mirroring runtime/inspect subscription semantics)."""
-    if str(env.get("kind")) in sub.kinds:
-        return True
-    ref = env.get("producer")
-    if isinstance(ref, dict) and sub.producers:
-        if ref.get("kind") in sub.producers or ref.get("instance") in sub.producers:
-            return True
-    return False
-
-
-def _as_event(env: dict[str, Any]) -> Event:
-    """Reconstruct an Event from a record envelope for the resume View fold."""
-    ref = env.get("producer")
-    producer = (
-        ProducerRef(
-            kind=str(ref.get("kind", "")),
-            instance=str(ref.get("instance", "")),
-            parent=ref.get("parent"),
-        )
-        if isinstance(ref, dict)
-        else None
-    )
-    return Event(
-        seq=int(env["seq"]),
-        kind=str(env["kind"]),
-        schema=str(env.get("schema", "")),
-        producer=producer,
-        t=float(env.get("t", 0.0)),
-        payload=env.get("payload"),
-    )

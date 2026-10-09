@@ -55,7 +55,6 @@ def test_solve_and_grade_topology_builds(tmp_path):
         grade_timeout_seconds=60,
         n=1,
         max_rounds=1,
-        watchdog_seconds=5.0,
     )
     b = TopologyBuilder()
     build(b)

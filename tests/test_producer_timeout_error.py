@@ -38,7 +38,7 @@ def _topology(budget: api.Budget | None) -> object:
             budget=budget,
         )
         b.initial("fetcher", input={})
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     return topo
 

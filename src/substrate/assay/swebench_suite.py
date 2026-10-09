@@ -309,7 +309,6 @@ def solver_topology_from_payload(
         known_files=set(payload["known_files"]),
         n=n,
         max_rounds=max_rounds,
-        watchdog_seconds=2400.0,
     )
 
 

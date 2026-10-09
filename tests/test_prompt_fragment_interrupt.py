@@ -68,7 +68,7 @@ def _minimal_interrupt_topology() -> Any:
             },
             policy=api.PerEvent(),
         )
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     return topo
 

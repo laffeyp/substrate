@@ -40,6 +40,7 @@ from ..constants import (
     RUN_STARTED,
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
+    RunFailureReason,
     RunStatus,
 )
 from ..errors import RecordIncompleteError
@@ -68,7 +69,7 @@ _END_KINDS = {
 }
 # RunFinalised reasons that mean the RUN ITSELF failed (RunStatus.FAILED), as opposed to a clean
 # finalise that nonetheless had Producer-level failures inside it (finished != worked).
-_RUN_FAILURE_REASONS = frozenset({"view_failure", "kernel_error", "stuck_quiescent"})
+_RUN_FAILURE_REASONS = frozenset(RunFailureReason)
 
 
 # ── static structure (topology_graph) ───────────────────────────────────────────────────────

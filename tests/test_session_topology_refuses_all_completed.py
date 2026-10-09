@@ -68,7 +68,7 @@ def test_all_completed_inside_any_of_is_refused() -> None:
 
 def test_all_completed_inside_nested_any_of_is_refused() -> None:
     policy = api.any_of(
-        api.any_of(api.all_completed(), api.quiescence_with_watchdog(1.0)),
+        api.any_of(api.all_completed(), api.quiescence()),
         api.threshold_count("SessionEnded", 1),
     )
     with pytest.raises(api.RegistrationError):

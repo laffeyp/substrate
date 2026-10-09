@@ -115,7 +115,6 @@ async def test_code_review_finalises_under_reviewer_failures(tmp_path):
         responders=responders,  # type: ignore[arg-type]
         judge=DeterministicResponder(seed=99),
         quorum=3,
-        watchdog_seconds=0.5,
     )
     result = await Runtime(tmp_path / "run").run(topo)
     assert result.status == "finalised"  # the watchdog/quiescence finalises; did NOT hang
@@ -137,7 +136,6 @@ async def test_code_review_survives_a_failing_reviewer(tmp_path):
         responders=responders,  # type: ignore[arg-type]
         judge=DeterministicResponder(seed=99),
         quorum=3,
-        watchdog_seconds=5.0,
     )
     result = await Runtime(tmp_path / "run").run(topo)
     assert result.status == "finalised"

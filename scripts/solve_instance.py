@@ -111,7 +111,6 @@ def main() -> None:
         passed_at_base=base_pass,
         n=N,
         max_rounds=MAX_ROUNDS,
-        watchdog_seconds=2400.0,
     )
     rundir = Path(tempfile.mkdtemp(prefix="solve-run-")) / "run"
     print(

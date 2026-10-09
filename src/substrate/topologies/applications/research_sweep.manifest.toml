@@ -15,7 +15,6 @@ question = {type = "string"}
 # The daemon converts the JSON list-of-objects into the tuple shape the
 # topology expects at POST /api/topology/research_sweep/run time.
 documents = {type = "array"}
-watchdog_seconds = {type = "number", default = 30.0}
 reader_model = {type = "string", default = "kimi-k2.6:cloud"}
 critic_model = {type = "string", default = "claude"}
 synthesizer_model = {type = "string", default = "claude"}

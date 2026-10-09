@@ -130,12 +130,12 @@ def test_backend_topology_with_grade_terminates_on_grade_result():
     )
     b = _RecordingBuilder()
     topo(b)
-    # Termination is `any_of(threshold_count("GradeResult", 1), quiescence_with_watchdog(...))`.
+    # Termination is `any_of(threshold_count("GradeResult", 1), quiescence(...))`.
     assert "GradeResult" in b.termination_str, (
         f"termination policy must wait for GradeResult, not just SelectedPatch; "
         f"got: {b.termination_str}"
     )
-    assert "quiescence_with_watchdog" in b.termination_str, (
+    assert "quiescence" in b.termination_str, (
         f"termination must include quiescence fallback for the no-patch path; "
         f"got: {b.termination_str}"
     )

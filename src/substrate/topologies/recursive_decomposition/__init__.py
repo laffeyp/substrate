@@ -172,6 +172,6 @@ def recursive_decomposition_topology(
         )
         # quiescence: the run finalises when no Producer is running and no subtask is in flight
         # (all_completed cannot be used — the started count grows as the tree spawns).
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     return topo

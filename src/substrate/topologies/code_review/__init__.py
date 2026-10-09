@@ -131,7 +131,6 @@ def code_review_topology(
     deterministic: bool = True,
     slow_roles: frozenset[str] = frozenset(),
     linger_seconds: float = 0.0,
-    watchdog_seconds: float = 60.0,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the code-review topology. `responders` maps role -> its reviewer Responder;
     `judge` is the adjudicating Responder. `quorum` is the Bus-view threshold (≥K critiques)
@@ -181,16 +180,16 @@ def code_review_topology(
         # IDENTICALLY as "ended". So all_completed (quiescent ∧ running==0 ∧ completed>=started)
         # ALREADY finalises the failure path: if reviewers FAIL before emitting (a model is
         # unavailable) the quorum may be unreachable and the judge never fires, but every reviewer
-        # still ENDS, so running==0 and all_completed finalises — no hang. quiescence_with_watchdog
+        # still ENDS, so running==0 and all_completed finalises — no hang. quiescence
         # is therefore a DEFENSIVE backstop, REDUNDANT with all_completed for the failure path; its
         # one non-redundant role is the zero-started-Producer case (where all_completed's started>0
         # guard fails). The ONE genuine liveness gap NEITHER policy closes is a Producer stuck
         # RUNNING forever (inflight never decrements → running never 0); v1.0 does not
         # force-finalise that (the stuck_quiescent backstop only fires at inflight==0) — liveness
         # there rests on the model adapter timeout (OllamaResponder 120s → raises → ProducerFailed →
-        # ends → finalises). In CI (finite DeterministicResponder) it cannot arise. The watchdog is
-        # a TerminationPolicy timer, not a Trigger WallClock cooldown, so it does NOT demote the
-        # record's replay ceiling below 3a. Kept for the defensive zero-Producer guard.
+        # ends → finalises). In CI (finite DeterministicResponder) it cannot arise. Quiescence has no
+        # timer and no Trigger WallClock cooldown, so it does NOT demote the record's replay
+        # ceiling below 3a. Kept for the defensive zero-Producer guard.
         b.termination(
             api.any_of(
                 api.cancel_all_others(
@@ -202,7 +201,7 @@ def code_review_topology(
                     )
                 ),
                 api.all_completed(),
-                api.quiescence_with_watchdog(seconds=watchdog_seconds),
+                api.quiescence(),
             )
         )
 

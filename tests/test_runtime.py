@@ -14,7 +14,7 @@ from substrate.api import (
     assert_event,
     assert_no_event,
     assert_sequence,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
     threshold_count,
 )
@@ -82,7 +82,7 @@ def _doubler_topo(b):
         input_builder=lambda ctx: {"n": ctx.event.payload["n"]},
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_trigger_fires_a_producer_per_event(tmp_path):
@@ -112,7 +112,7 @@ async def emits_undeclared(_input):
 def _invalid_topo(b):
     b.producer_kind("p", schemas=[CountReached], schema_version=1, factory=lambda: emits_undeclared)
     b.initial("p", input=None)
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_invalid_emission_becomes_logged_event(tmp_path):

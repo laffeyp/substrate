@@ -11,7 +11,6 @@ runs = "one-shot"
 task = {type = "string"}
 n = {type = "integer", default = 3}
 max_rounds = {type = "integer", default = 2}
-watchdog_seconds = {type = "number", default = 30.0}
 # Two roles-to-models bindings per §7.6 line 1038. `verify_model` may
 # alternatively point at a deterministic Check function name (the
 # topology's `verify: Check | Responder` union); the wire input is

@@ -12,7 +12,7 @@ from substrate.api import (
     Runtime,
     Subscription,
     embedded_substrate,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
     threshold_count,
 )
@@ -52,7 +52,7 @@ def _outer_topo(tmp_root):
             factory=lambda: embedded_substrate(_inner_topo, exports={"Tick": OuterTick}),
         )
         b.initial("embedded", input={"inner_root": str(inner_root)})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     return topo, inner_root
 
@@ -121,7 +121,7 @@ async def failing_inner(_input):
 def _failing_inner_topo(b):
     b.producer_kind("boomer", schemas=[Tick], schema_version=1, factory=lambda: failing_inner)
     b.initial("boomer", input=None)
-    b.termination(quiescence_with_watchdog(seconds=2))
+    b.termination(quiescence())
 
 
 async def test_inner_failure_surfaces_as_outer_producer_failed_with_run_id(tmp_path):
@@ -135,7 +135,7 @@ async def test_inner_failure_surfaces_as_outer_producer_failed_with_run_id(tmp_p
             factory=lambda: embedded_substrate(_failing_inner_topo, exports={"Tick": OuterTick}),
         )
         b.initial("embedded", input={"inner_root": str(inner_root)})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(tmp_path / "outer").run(outer)
     outer_envs = list(read_record(tmp_path / "outer"))
@@ -166,7 +166,7 @@ def _inner_run_failure_topo(b):
     b.producer_kind("ticker", schemas=[Tick], schema_version=1, factory=lambda: ticker)
     b.view("boom", BoomView())
     b.initial("ticker", input=None)
-    b.termination(quiescence_with_watchdog(seconds=2))
+    b.termination(quiescence())
 
 
 async def test_inner_run_failure_surfaces_as_outer_producer_failed(tmp_path):
@@ -182,7 +182,7 @@ async def test_inner_run_failure_surfaces_as_outer_producer_failed(tmp_path):
             ),
         )
         b.initial("embedded", input={"inner_root": str(inner_root)})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(tmp_path / "outer").run(outer)
     outer_envs = list(read_record(tmp_path / "outer"))
@@ -214,7 +214,7 @@ async def test_nested_embedding_two_levels(tmp_path):
             factory=lambda: embedded_substrate(_inner_topo, exports={"Tick": MidTick}),
         )
         b.initial("embedded_inner", input={"inner_root": str(deep_root)})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     def _outer(b):
         b.producer_kind(
@@ -224,7 +224,7 @@ async def test_nested_embedding_two_levels(tmp_path):
             factory=lambda: embedded_substrate(_mid_topo, exports={"MidTick": OuterTick}),
         )
         b.initial("embedded_mid", input={"inner_root": str(mid_root)})
-        b.termination(quiescence_with_watchdog(seconds=3))
+        b.termination(quiescence())
 
     result = await Runtime(tmp_path / "outer").run(_outer)
     assert result.status == "finalised"
@@ -257,7 +257,7 @@ async def test_default_export_surfaces_inner_run_finalised(tmp_path):
             ),
         )
         b.initial("embedded", input={"inner_root": str(inner_root)})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     result = await Runtime(tmp_path / "outer").run(outer)
     assert result.status == "finalised"
@@ -280,7 +280,7 @@ async def test_export_map_in_manifest_derives_from_single_source(tmp_path):
             factory=lambda: embedded_substrate(_inner_topo, exports={"Tick": OuterTick}),
         )
         b.initial("embedded", input={"inner_root": str(tmp_path / "inner")})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(tmp_path / "outer").run(outer)
     rs = next(e for e in read_record(tmp_path / "outer") if e["kind"] == "substrate.RunStarted")
@@ -301,7 +301,7 @@ def _inner_view_failure_topo(b):
     b.producer_kind("ticker", schemas=[Tick], schema_version=1, factory=lambda: ticker)
     b.view("boom", BoomView())  # raises in update() -> inner RunFinalised{reason:view_failure}
     b.initial("ticker", input=None)
-    b.termination(quiescence_with_watchdog(seconds=2))
+    b.termination(quiescence())
 
 
 async def test_default_export_plus_inner_failure_no_double_signal(tmp_path):
@@ -318,7 +318,7 @@ async def test_default_export_plus_inner_failure_no_double_signal(tmp_path):
             ),
         )
         b.initial("embedded", input={"inner_root": str(inner_root)})
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(tmp_path / "outer").run(outer)
     envs = list(read_record(tmp_path / "outer"))
@@ -350,7 +350,7 @@ async def test_missing_inner_root_is_recorded_not_uncitable(tmp_path):
             factory=lambda: embedded_substrate(_inner_topo_named, exports={"Tick": OuterTick}),
         )
         b.initial("embedded", input={})  # NO inner_root
-        b.termination(quiescence_with_watchdog(seconds=2))
+        b.termination(quiescence())
 
     await Runtime(tmp_path / "outer").run(outer)
     envs = list(read_record(tmp_path / "outer"))

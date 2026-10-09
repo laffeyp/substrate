@@ -146,7 +146,6 @@ def main() -> None:
         regression_command="true",
         n=1,
         max_rounds=1,
-        watchdog_seconds=30.0,
     )
     rundir = Path(tempfile.mkdtemp(prefix="solve-")) / "run"
     print("\nrunning the full solver pipeline...", flush=True)

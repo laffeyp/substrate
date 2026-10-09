@@ -76,7 +76,6 @@ async def test_swebench_solver_end_to_end_on_a_fixture(tmp_path) -> None:  # typ
         regression_command="REG",
         n=2,
         max_rounds=1,
-        watchdog_seconds=20.0,
     )
     await Runtime(tmp_path / "run").run(topo)
     events = list(read_record(tmp_path / "run"))
@@ -119,7 +118,6 @@ async def test_passed_at_base_routes_select_through_regression_held(tmp_path) ->
         passed_at_base=frozenset({"t/test_ok.py::test_a"}),  # only test_ok passed at base
         n=2,
         max_rounds=1,
-        watchdog_seconds=20.0,
     )
     await Runtime(tmp_path / "run").run(topo)
     events = list(read_record(tmp_path / "run"))
@@ -140,7 +138,6 @@ def _repair(responders, base, n=2):
         known_files={"m.py", "README.md"},
         n=n,
         max_rounds=1,
-        watchdog_seconds=20.0,
     )
 
 
@@ -236,7 +233,6 @@ async def test_runner_failure_records_producer_failed(tmp_path) -> None:  # type
         regression_command="REG",
         n=2,
         max_rounds=1,
-        watchdog_seconds=5.0,
     )
     await Runtime(tmp_path / "run").run(topo)
     events = list(read_record(tmp_path / "run"))
@@ -273,7 +269,6 @@ async def test_drafter_model_error_records_producer_failed(tmp_path) -> None:  #
         regression_command="REG",
         n=2,
         max_rounds=1,
-        watchdog_seconds=5.0,
     )
     await Runtime(tmp_path / "run").run(topo)
     events = list(read_record(tmp_path / "run"))
@@ -307,7 +302,6 @@ async def test_localizer_model_error_records_producer_failed(tmp_path) -> None: 
         regression_command="REG",
         n=2,
         max_rounds=1,
-        watchdog_seconds=5.0,
     )
     await Runtime(tmp_path / "run").run(topo)
     events = list(read_record(tmp_path / "run"))

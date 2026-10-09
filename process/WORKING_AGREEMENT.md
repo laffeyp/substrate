@@ -57,7 +57,7 @@ Superseded drafts under `docs/specs/product_spec/`, `docs/specs/technical_spec/`
 | The append cycle (`AppendCycle`), admission/control queues | `substrate/kernel/sequencer.py` + `substrate/kernel/runstate.py` | Six-step cycle; bounded inbox; control bypasses admission. |
 | Firing policies (`Once`, `PerEvent`, `PerKey`, `WhileTrue`), cooldowns (`Logical`, `WallClock`) | `substrate/kernel/triggers.py` | Tech §10. |
 | Standard Views (`BufferView`, `KindBuffer`, `KindCount`, `PerKindLatest`, started/completed counts) | `substrate/kernel/views.py` | F-VIEW-2. |
-| Standard policies (`cancel_all_others`, `quiescence_with_watchdog`, `threshold_count`, `all_completed`, `pause_await_input`, `any_of`, `all_of`) | `substrate/kernel/policies.py` | F-LIFE-2. *(`let_finish` REMOVED pre-1.0 — dead no-op path, audit #8; `subtree_cancellation` DEFERRED post-1.0 — vocab-blocked; both in the CONTRIBUTING deferral list.)* |
+| Standard policies (`cancel_all_others`, `quiescence`, `threshold_count`, `all_completed`, `pause_await_input`, `any_of`, `all_of`) | `substrate/kernel/policies.py` | F-LIFE-2. *(`let_finish` REMOVED pre-1.0 — dead no-op path, audit #8; `subtree_cancellation` DEFERRED post-1.0 — vocab-blocked; both in the CONTRIBUTING deferral list.)* |
 | Composition (`embedded_substrate`, `EmbeddedRunFailed`) | `substrate/kernel/composition.py` | Tech §20; F-COMP. |
 | Canonical encoding (RFC 8785 pipeline, type whitelist, `B_hash`/`B_disk`) | `substrate/encoding.py` | Tech §4. |
 | Run record on disk (segments, sealing, frame/CRC, manifest, blob store, recovery, locking, sidecars) | `substrate/record/` (`record.py`, `framing.py`, `blobstore.py`, `sealing.py`, `locking.py`, `sidecar.py`) | Tech §3, §5. |

@@ -34,7 +34,7 @@ from substrate.api import (
     Runtime,
     assert_event,
     assert_no_event,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
 )
 from substrate.kernel.runtime import (
@@ -71,7 +71,7 @@ def _topology_with_wall_cap(cap_s: float, reason: str):
         # Quiescence terminates once the producer ends (completed / failed / cancelled) and
         # no further events flow — covers both the wall-cap trip (ProducerFailed) and the
         # normal-completion path (ProducerCompleted).
-        b.termination(quiescence_with_watchdog())
+        b.termination(quiescence())
 
     return topo
 
@@ -85,7 +85,7 @@ def _topology_no_budget():
             factory=lambda: _fast_tick,
         )
         b.initial("fast", input=None)
-        b.termination(quiescence_with_watchdog())
+        b.termination(quiescence())
 
     return topo
 
@@ -123,7 +123,7 @@ async def test_producer_failed_without_budget_breach_has_no_budget_exceeded_bloc
     def topo(b):
         b.producer_kind("bugger", schemas=[_Tick], schema_version=1, factory=lambda: _bugger)
         b.initial("bugger", input=None)
-        b.termination(quiescence_with_watchdog())
+        b.termination(quiescence())
 
     await Runtime(tmp_path / "run").run(topo)
     failed = assert_event(tmp_path / "run", "substrate.ProducerFailed")
@@ -179,9 +179,9 @@ def test_declaring_only_wall_seconds_no_longer_warns():
     )
 
 
-def test_declaring_event_counts_still_warns():
-    """Sprint 199 landed wall_seconds only. event_counts enforcement (per-kind emit caps)
-    is a later sprint — declaring an event_counts cap still emits the standing warning."""
+def test_declaring_event_counts_does_not_warn():
+    """event_counts is enforced since kernel sprint 251, so declaring a cap no longer warns
+    that it is not."""
     from substrate.kernel.topology import TopologyBuilder
 
     b = TopologyBuilder()
@@ -199,7 +199,7 @@ def test_declaring_event_counts_still_warns():
         for w in caught
         if "event_counts" in str(w.message) and issubclass(w.category, UserWarning)
     ]
-    assert matching, "expected a UserWarning naming event_counts as unshipped"
+    assert not matching, [str(w.message) for w in matching]
 
 
 async def test_read_record_carries_typed_error(tmp_path):

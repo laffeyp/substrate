@@ -56,7 +56,7 @@ Named, not shipped, in v1.0. Each is deferred with cause.
 
 **Replay Level 3(b)** — byte-identical substitution re-execution. Needs a replay-mode writer that replays recorded `t` (amendment A1.1). Levels 1, 2, and 3(a), and D-8 log-equivalence, all ship.
 
-**`let_finish` (F-LIFE-2 recipe) plus the `let-finish` Decision** — the "drain in-flight, then finalise" terminal has no runtime dispatch branch. Shipping the enum value or the recipe would be a silent no-op. Removed for v1.0; deferred until the dispatch and admission-stop mechanism lands. `cancel_all_others`, `quiescence_with_watchdog`, `threshold_count`, `all_completed`, `pause_await_input`, `any_of`, and `all_of` all ship.
+**`let_finish` (F-LIFE-2 recipe) plus the `let-finish` Decision** — the "drain in-flight, then finalise" terminal has no runtime dispatch branch. Shipping the enum value or the recipe would be a silent no-op. Removed for v1.0; deferred until the dispatch and admission-stop mechanism lands. `cancel_all_others`, `quiescence`, `threshold_count`, `all_completed`, `pause_await_input`, `any_of`, and `all_of` all ship.
 
 **`subtree_cancellation`** — needs a sixth decision value plus a scope field. Vocab-blocked.
 

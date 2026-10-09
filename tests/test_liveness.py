@@ -21,7 +21,7 @@ from substrate.api import (
     PerKey,
     Runtime,
     Subscription,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
 )
 from substrate.kernel.triggers import Logical
@@ -50,7 +50,7 @@ def _self_feed_once_topo(b):
         input_builder=lambda ctx: None,
         policy=Once(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 @pytest.mark.timeout(10)
@@ -88,7 +88,7 @@ def _self_feed_cooldown_topo(b):
         policy=PerEvent(),
         cooldown=Logical(10_000),  # suppresses every refire within the window
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 @pytest.mark.timeout(10)
@@ -119,7 +119,7 @@ def _self_feed_perkey_topo(b):
         input_builder=lambda ctx: None,
         policy=PerKey(lambda event: event.payload["n"]),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 @pytest.mark.timeout(10)

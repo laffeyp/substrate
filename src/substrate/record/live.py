@@ -29,7 +29,7 @@ from typing import Any
 
 from ..constants import POLL_INTERVAL_MS, RUN_FINALISED
 from . import framing
-from .record import hot_segment, sealed_segments, segment_index, resolve_blob_payload
+from .record import hot_segment, resolve_blob_payload, sealed_segments, segment_index
 
 
 class LiveRecord:

@@ -102,6 +102,16 @@ class RunStatus(StrEnum):
     FAILED = "failed"
 
 
+class RunFailureReason(StrEnum):
+    """The RunFinalised reasons that mean the run itself failed (RunStatus.FAILED), as opposed to
+    a clean finalise with Producer failures inside it (lens audit F033: three literals written in
+    the sequencer and runtime and re-listed in graph.py)."""
+
+    VIEW_FAILURE = "view_failure"
+    KERNEL_ERROR = "kernel_error"
+    STUCK_QUIESCENT = "stuck_quiescent"
+
+
 # The lifecycle kinds that report an authoring or runtime failure inside a run. A finalised run
 # that recorded any of these finished but did not work; summaries count them (lens audit F039:
 # narrate.py and cli.py each kept a copy).

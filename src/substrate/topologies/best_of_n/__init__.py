@@ -99,7 +99,6 @@ def best_of_n_correction(
     judge_schemas: list[type] | None = None,
     termination: Any | None = None,
     deterministic: bool = False,
-    watchdog_seconds: float = 30.0,
     seed_on: str | None = None,
     draft_input_extra: Any | None = None,
 ) -> None:
@@ -109,7 +108,7 @@ def best_of_n_correction(
     work) and `validate_factory` (a Candidate -> a Verdict [+ any extra records, e.g. swebench's
     AppliedPatch — declare them in `validator_schemas`]). Optionally override `judge_factory` (the
     terminal policy; default selects the first passing candidate), `judge_schemas`, and `termination`
-    (default: Solved | Exhausted | watchdog — a consumer that runs phases AFTER the loop, like swebench
+    (default: Solved | Exhausted | quiescence — a consumer that runs phases AFTER the loop, like swebench
     SELECT, passes its own termination so the loop's Solved is an internal hand-off, not the run terminal).
 
     Sprint 191 (roadmap v2 S3): two additive kwargs for consumers with pre-loop phases (swebench's
@@ -209,6 +208,6 @@ def best_of_n_correction(
         or api.any_of(
             api.threshold_count("Solved", 1),
             api.threshold_count("Exhausted", 1),
-            api.quiescence_with_watchdog(seconds=watchdog_seconds),
+            api.quiescence(),
         )
     )

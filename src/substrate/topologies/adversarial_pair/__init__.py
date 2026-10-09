@@ -155,6 +155,6 @@ def adversarial_pair_topology(
             },
             policy=api.PerEvent(),
         )
-        b.termination(api.quiescence_with_watchdog(seconds=60))
+        b.termination(api.quiescence())
 
     return topo

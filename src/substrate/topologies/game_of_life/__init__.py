@@ -208,7 +208,7 @@ def game_of_life_topology(
         b.termination(
             api.any_of(
                 api.threshold_count("Generation", generations + 1),
-                api.quiescence_with_watchdog(seconds=2),
+                api.quiescence(),
             )
         )
 

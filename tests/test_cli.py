@@ -28,7 +28,7 @@ from substrate.cli import (
 _PAUSE_RESUME_MODULE = """
 from msgspec import Struct
 from substrate.api import (
-    PerEvent, Subscription, any_of, pause_await_input, quiescence_with_watchdog,
+    PerEvent, Subscription, any_of, pause_await_input, quiescence,
 )
 
 
@@ -71,7 +71,7 @@ def topo(b):
     b.termination(
         any_of(
             pause_await_input(_pause_when, resume_condition="Approve"),
-            quiescence_with_watchdog(seconds=1),
+            quiescence(),
         )
     )
 

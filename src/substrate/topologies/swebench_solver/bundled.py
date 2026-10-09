@@ -78,5 +78,4 @@ def swebench_repair_ci() -> Callable[[api.TopologyBuilder], None]:
         known_files={"m.py"},
         n=2,
         max_rounds=1,
-        watchdog_seconds=5.0,
     )

@@ -426,7 +426,9 @@ def read_record(root: Path | str, *, resolve_blobs: bool = False) -> Iterator[di
         yield _resolved(env, root)
 
 
-def _read_record_raw(root: Path | str) -> Iterator[dict[str, Any]]:
+def _read_record_raw(
+    root: Path | str, *, hot_frames: list[dict[str, Any]] | None = None
+) -> Iterator[dict[str, Any]]:
     """Yield every recoverable envelope in seq order: sealed segments (by filename),
     then the recoverable prefix of the hot segment. Does not depend on the manifest
     (segments are authoritative, §3.5). Read-only, symlink-not-followed (§17); does not
@@ -436,7 +438,10 @@ def _read_record_raw(root: Path | str) -> Iterator[dict[str, Any]]:
     deleted sealed segment, a mid-frame-truncated one, or a sealed segment that lost its tail —
     raises RecordGapError instead of silently folding the loss away. The hot segment's torn tail is
     the one legitimate truncation (framing.recover trims it to the last good frame); a SEALED
-    segment must be complete, so a non-newline-terminated sealed segment is data loss, not a tail."""
+    segment must be complete, so a non-newline-terminated sealed segment is data loss, not a tail.
+
+    `hot_frames`, when given, are the hot segment's frames already recovered by the caller
+    (`recover_and_read`), so the hot segment is not read and verified a second time."""
     root = Path(root)
     expected = 0
 
@@ -469,21 +474,19 @@ def _read_record_raw(root: Path | str) -> Iterator[dict[str, Any]]:
                         f"corruption in sealed segment {seg.name} at line {offset}: {exc}"
                     ) from exc
                 yield _checked(env)
-    hot = hot_segment(root)
-    if hot is not None:
-        frames, _cut = framing.recover(_read_bytes_nofollow(hot))
-        for env in frames:
-            yield _checked(env)
+    if hot_frames is None:
+        hot = hot_segment(root)
+        hot_frames = framing.recover(_read_bytes_nofollow(hot))[0] if hot is not None else []
+    for env in hot_frames:
+        yield _checked(env)
 
 
-def recover_open_segment(root: Path | str) -> int:
-    """Writer-side recovery (run at restart/attach, §3.3): truncate the hot segment to
-    the last complete, crc-valid frame. Returns the number of frames kept. Sealed
-    segments are never touched."""
-    root = Path(root)
+def _recover_hot(root: Path) -> list[dict[str, Any]] | None:
+    """Recover the hot segment: its frames up to the last complete, crc-valid one, truncating
+    whatever follows on disk. None when there is no hot segment."""
     hot = hot_segment(root)
     if hot is None:
-        return 0
+        return None
     data = _read_bytes_nofollow(hot)
     frames, cut = framing.recover(data)
     if cut < len(data):
@@ -494,4 +497,21 @@ def recover_open_segment(root: Path | str) -> int:
         finally:
             os.close(fd)
         fsync_dir(root)
-    return len(frames)
+    return frames
+
+
+def recover_open_segment(root: Path | str) -> int:
+    """Writer-side recovery (run at restart/attach, §3.3): truncate the hot segment to
+    the last complete, crc-valid frame. Returns the number of frames kept. Sealed
+    segments are never touched."""
+    frames = _recover_hot(Path(root))
+    return len(frames) if frames is not None else 0
+
+
+def recover_and_read(root: Path | str, *, resolve_blobs: bool = False) -> list[dict[str, Any]]:
+    """`recover_open_segment` then `read_record`, in one pass over the hot segment: a resume
+    needs both, and each verified every frame (lens audit F017: a session turn read its whole
+    record three times). Raises what `read_record` raises on a gap or a corrupt sealed segment."""
+    root = Path(root)
+    envs = list(_read_record_raw(root, hot_frames=_recover_hot(root) or []))
+    return [_resolved(e, root) for e in envs] if resolve_blobs else envs

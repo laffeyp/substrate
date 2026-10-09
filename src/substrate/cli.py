@@ -618,9 +618,7 @@ def validate(topology_module: str) -> None:
     if reg.has_wall_clock_cooldown:
         click.echo('1+ WallClock cooldown registered -> replay ceiling = "3b".')
     if reg.termination is None:
-        click.echo(
-            "note: no TerminationPolicy registered -> the run defaults to quiescence-with-watchdog."
-        )
+        click.echo("note: no TerminationPolicy registered -> the run defaults to quiescence.")
 
     if failures:
         _err.print(f"[FAIL] {len(failures)} issue(s):")

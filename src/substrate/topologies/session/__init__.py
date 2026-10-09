@@ -99,7 +99,7 @@ def _refuse_all_completed(policy: TerminationPolicy) -> None:
             f"(name={policy.name!r}). A pausable topology on all_completed hangs on "
             "resume — the paused Producer's ProducerStarted has no durable end, so "
             "started > ended forever. See kernel/policies.py::all_completed. Compose "
-            "with quiescence_with_watchdog or threshold_count instead."
+            "with quiescence or threshold_count instead."
         )
 
 

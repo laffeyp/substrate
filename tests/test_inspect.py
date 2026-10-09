@@ -14,7 +14,7 @@ from substrate.api import (
     Subscription,
     explain_producer,
     first_divergence,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
     threshold_count,
     trace_ancestry,
@@ -54,7 +54,7 @@ def _doubler_topo(b):
         input_builder=lambda ctx: {"n": ctx.event.payload["n"]},
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 # ── conformance check 11: provenance closure ──────────────────────────────────
@@ -288,7 +288,7 @@ def _quarantine_topo(b):
         input_builder=lambda ctx: None,
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 async def test_first_divergence_excludes_measured_us_on_quarantine(tmp_path):

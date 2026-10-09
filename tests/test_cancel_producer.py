@@ -53,7 +53,7 @@ def _slow_topo() -> Any:
     def topo(b: api.TopologyBuilder) -> None:
         b.producer_kind("slow", schemas=[Tick], schema_version=1, factory=lambda: _slow)
         b.initial("slow", input=None)
-        b.termination(api.quiescence_with_watchdog(seconds=5))
+        b.termination(api.quiescence())
 
     return topo
 
@@ -83,7 +83,7 @@ def _park_on_cancel_topo() -> Any:
                     when=lambda tctx: tctx.event is not None and tctx.event.kind == "Park",
                     resume_condition="UserMessage",
                 ),
-                api.quiescence_with_watchdog(seconds=5),
+                api.quiescence(),
             )
         )
 
@@ -255,7 +255,7 @@ async def test_cancel_producer_composes_with_wait_for_budget(tmp_path):
             budget=api.Budget(wall_seconds=api.Cap(limit=10.0, reason="cap")),
         )
         b.initial("slow", input=None)
-        b.termination(api.quiescence_with_watchdog(seconds=5))
+        b.termination(api.quiescence())
 
     async def _fire():
         await asyncio.sleep(0.2)
@@ -303,7 +303,7 @@ async def test_cancel_others_policy_writes_cause_policy(tmp_path):
                 api.cancel_all_others(
                     when=lambda tctx: tctx.event is not None and tctx.event.kind == "Winner"
                 ),
-                api.quiescence_with_watchdog(seconds=5),
+                api.quiescence(),
             )
         )
 

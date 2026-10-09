@@ -56,6 +56,7 @@ from msgspec import Struct
 
 from substrate import api
 from substrate.adapters import DriverParamKey
+from substrate.errors import CRCMismatchError
 
 if TYPE_CHECKING:
     from substrate.api import TopologyBuilder
@@ -834,6 +835,10 @@ class SessionRegistry:
                         timeout_seconds=timeout_seconds,
                         handle_out=turn_handle,
                     )
+            except (api.RecordGapError, CRCMismatchError) as exc:
+                # The resume's own read found the record damaged past its first frame.
+                self.update_status(session_id, SessionStatus.INTERRUPTED)
+                raise TornRecordOnResume(session_id, record_root, exc) from exc
             except BaseException:
                 # UI sprint 101: a turn that raises (a timeout the caller set, a cancel, a kernel
                 # error) used to leave the manifest at the previous turn's status and the cached
@@ -1189,14 +1194,19 @@ def _record_state(record_root: Path) -> tuple[str, BaseException | None]:
     The previous single-signal `_record_has_envelopes` swallowed every read
     exception into `False`, which routed a torn record into the `.run`
     branch — the crash-mid-turn dispatch hole finding 1 named.
+
+    A readable first frame settles it from one line (`read_first_envelope`). Breaking out of
+    `read_record` after its first envelope did not: the reader recovers a whole hot segment
+    before it yields, so every turn verified every frame here (lens audit F017). Corruption
+    past the first frame surfaces from the resume's own read, which `turn_sync` maps to
+    `TornRecordOnResume` the same way.
     """
     if not record_root.exists():
         return ("empty", None)
+    if api.read_first_envelope(record_root) is not None:
+        return ("has_envelopes", None)
     try:
-        has_any = False
-        for _ in api.read_record(record_root):
-            has_any = True
-            break
+        has_any = any(True for _ in api.read_record(record_root))
     except Exception as exc:  # noqa: BLE001 — reclassify below as torn
         return ("torn", exc)
     return ("has_envelopes" if has_any else "empty", None)

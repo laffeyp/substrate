@@ -11,7 +11,7 @@ from substrate.api import (
     Runtime,
     Subscription,
     assert_replayable,
-    quiescence_with_watchdog,
+    quiescence,
     read_record,
     replay,
     threshold_count,
@@ -62,7 +62,7 @@ def _det_topo(b):
         input_builder=lambda ctx: {"n": ctx.event.payload["n"]},
         policy=PerEvent(),
     )
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 
 
 def _nondet_topo(b):
@@ -152,7 +152,7 @@ async def test_level2_handles_blob_offloaded_input(tmp_path):
             input_builder=lambda ctx: {"n": 1, "pad": "z" * (20 * 1024)},
             policy=PerEvent(),
         )
-        b.termination(quiescence_with_watchdog(seconds=1))
+        b.termination(quiescence())
 
     await Runtime(tmp_path / "run").run(_big_topo)
     # confirm at least one TriggerFired used the blob form

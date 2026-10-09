@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from substrate.cli import EXIT_FAILED, EXIT_OK, main
 
 _BROKEN = """
-from substrate.api import quiescence_with_watchdog
+from substrate.api import quiescence
 from msgspec import Struct
 
 
@@ -28,7 +28,7 @@ async def pinger(inp):
 def build(b):
     b.producer_kind("pinger", schemas=[Ping], schema_version=1, factory=lambda: pinger)
     b.initial("pinger", input=None)
-    b.termination(quiescence_with_watchdog(seconds=1))
+    b.termination(quiescence())
 """
 
 

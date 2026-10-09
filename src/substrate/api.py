@@ -38,6 +38,7 @@ from .constants import (
     RUN_STARTED,
     TERMINATION_MATCHED,
     TRIGGER_FIRED,
+    RunFailureReason,
     RunStatus,
 )
 from .encoding import canonical_bytes, content_hash
@@ -63,7 +64,7 @@ from .kernel.policies import (
     cancel_all_others,
     finalise_on,
     pause_await_input,
-    quiescence_with_watchdog,
+    quiescence,
     threshold_count,
 )
 from .kernel.runtime import RunResult, Runtime, find_active_runtime
@@ -160,7 +161,7 @@ __all__ = [
     "threshold_count",
     "finalise_on",
     "all_completed",
-    "quiescence_with_watchdog",
+    "quiescence",
     "pause_await_input",
     "cancel_all_others",
     "any_of",
@@ -237,6 +238,7 @@ __all__ = [
     "RunGraph",
     "ProducerStatus",
     "RunStatus",
+    "RunFailureReason",
     "ProducerInstance",
     # test helpers
     "assert_event",

@@ -37,7 +37,7 @@ def _pulse_topo():
     def topo(b: api.TopologyBuilder) -> None:
         b.producer_kind("pulse", schemas=[Beat], schema_version=1, factory=lambda: _pulse)
         b.initial("pulse", input=None)
-        b.termination(api.quiescence_with_watchdog(seconds=1))
+        b.termination(api.quiescence())
 
     return topo
 
