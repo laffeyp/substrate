@@ -20,12 +20,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from substrate import api
 from substrate.bundles import Bundle
-from substrate.topologies.session.bundle_producer import (
-    bundle_methodology_producer_factory,
-    bundle_personality_producer_factory,
-)
+from substrate.topologies.session import session_prompt_producer as sp
 from substrate.topologies.session.ci import ci_session_topology
 
 
@@ -84,16 +83,9 @@ def test_bundle_personality_empty_for_shipped_session_bundle(tmp_path: Path) -> 
     assert len(frags) == 0
 
 
-def test_personality_factory_yields_from_synthetic_chain(tmp_path: Path) -> None:
-    """Directly exercise the personality producer's chain-walk with a
-    two-bundle synthetic chain, caller-wins semantics. Bypasses the
-    ~/.substrate/bundles/ lookup path (the producer's default) to keep
-    the test isolated."""
-    from substrate.bundles import Bundle
-    from substrate.topologies.session.bundle_producer import (
-        _PERSONALITY_PRECEDENCE,
-    )
-
+def test_personality_source_takes_the_callers_voice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The personality source on a two-bundle synthetic chain: the caller wins over its
+    ancestor. The chain lookup is replaced, so no ~/.substrate/bundles/ directory is read."""
     ancestor = Bundle(
         name="anc",
         description="",
@@ -118,15 +110,11 @@ def test_personality_factory_yields_from_synthetic_chain(tmp_path: Path) -> None
         retrieval_kind="none",
         tools_enabled=(),
     )
-    # Walk the personality producer's inner logic against a synthetic chain.
-    chain = [ancestor, caller]
-    for entry in reversed(chain):
-        if entry.personality:
-            assert entry.personality == "CALLER_VOICE"  # caller wins
-            assert _PERSONALITY_PRECEDENCE == 3
-            break
-    else:  # pragma: no cover — sanity guard on the loop
-        raise AssertionError("no personality found; test setup wrong")
+    monkeypatch.setattr(sp, "resolve_chain", lambda _name: [ancestor, caller])
+    frags = sp.bundle_personality_fragments("caller")
+    assert [(f.text, f.precedence, f.provenance) for f in frags] == [
+        ("CALLER_VOICE", 3, {"bundle_name": "caller", "chain_position": 1})
+    ]
 
 
 def test_no_bundle_kwarg_yields_zero_bundle_fragments(tmp_path: Path) -> None:
@@ -152,39 +140,24 @@ def test_no_bundle_kwarg_yields_zero_bundle_fragments(tmp_path: Path) -> None:
 
 
 def test_resolve_chain_falls_back_to_shipped_for_top_level_bundle() -> None:
-    """`_resolve_chain("session")` returns [Bundle(name='session')] even
+    """`resolve_chain("session")` returns [Bundle(name='session')] even
     though the user has no ~/.substrate/bundles/session/ directory. The
     fallback uses `load_bundle`'s shipped-default lookup. Without this,
-    the bundle producer trips BundleNotFoundError for every session
+    the bundle sources trip BundleNotFoundError for every session
     that names a shipped bundle."""
-    from substrate.topologies.session.bundle_producer import _resolve_chain
-
-    chain = _resolve_chain("session")
+    chain = sp.resolve_chain("session")
     assert len(chain) >= 1
     assert chain[-1].name == "session"
     # Shipped session bundle has methodology.md; personality.md ships empty.
     assert chain[-1].methodology
 
 
-def test_methodology_factory_yields_nothing_for_none_bundle() -> None:
-    """Constructing the producer with bundle=None yields zero fragments
-    (empty-body generator)."""
-    factory = bundle_methodology_producer_factory(None)
-
-    async def _drain() -> list[object]:
-        return [item async for item in factory()(None)]
-
-    assert asyncio.run(_drain()) == []
-
-
-def test_personality_factory_yields_nothing_for_none_bundle() -> None:
-    """Same shape for personality — None bundle yields zero fragments."""
-    factory = bundle_personality_producer_factory(None)
-
-    async def _drain() -> list[object]:
-        return [item async for item in factory()(None)]
-
-    assert asyncio.run(_drain()) == []
+def test_no_bundle_names_no_bundle_source() -> None:
+    """Without a bundle the session prompt runs neither bundle source."""
+    sources = sp.session_prompt_sources(
+        role=None, role_repo_root=None, bundle=None, parent_context=None, tools={}
+    )
+    assert sources == {}
 
 
 def test_bundle_types_import_cleanly() -> None:

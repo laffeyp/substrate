@@ -27,7 +27,6 @@ a schema bump) and needs re-verifying against docs/swebench/swebench-bridge-mapp
 
 from __future__ import annotations
 
-import os
 import shutil
 
 import pytest
@@ -41,11 +40,7 @@ _DATASET = "princeton-nlp/SWE-bench_Lite"
 
 
 def _skip_if_not_enabled() -> None:
-    if os.environ.get("SWEBENCH_HARNESS_ENABLE") != "1":
-        pytest.skip(
-            "SWEBENCH_HARNESS_ENABLE=1 not set — the gold-differential harness run is opt-in "
-            "(a swebench Docker run can take 10+ minutes under emulation)"
-        )
+    # The opt-in gate (SWEBENCH_HARNESS_ENABLE) is in conftest.py, for the whole Docker tier.
     if shutil.which("docker") is None:
         pytest.skip("docker not on PATH — the harness runs each instance in Docker")
     try:

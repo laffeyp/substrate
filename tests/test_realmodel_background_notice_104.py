@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from substrate.topologies.session.vocabulary import turn_replies
 from substrate import api
 from substrate.adapters import OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
@@ -59,7 +60,6 @@ async def test_model_hears_its_background_task_end(tmp_path: Path) -> None:
         turn_max_steps=8,
         session_id=sid,
         workspace_path=str(workspace),
-        record_root=tmp_path / "record",
         script=None,
         first_turn_user_message=UserMessage(
             text=task, turn_index=0, assembled_prompt=task, slash_source="test"
@@ -71,8 +71,9 @@ async def test_model_hears_its_background_task_end(tmp_path: Path) -> None:
         kinds = [e["kind"] for e in envs]
         assert "BackgroundTaskEnded" in kinds, f"no notice on the record: {kinds}"
         assert "bash_output" not in [e["payload"]["tool"] for e in envs if e["kind"] == "ToolCall"]
-        final = [e["payload"]["text"] for e in envs if e["kind"] == "FinalAnswer"][-1]
-        assert kinds.index("BackgroundTaskEnded") < kinds.index("FinalAnswer")
+        reply_seq, final = turn_replies(envs)[-1]
+        notice_seq = next(e["seq"] for e in envs if e["kind"] == "BackgroundTaskEnded")
+        assert notice_seq < reply_seq
         assert "READY-104" in final, final
     finally:
         TABLE.stop_owner(sid, "test teardown")

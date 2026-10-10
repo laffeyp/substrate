@@ -5,18 +5,14 @@
 `tests/test_inject_event.py` verifies the kernel primitive.
 `tests/test_prompt_fragment_interrupt.py` verifies the fragment producer
 in a minimal isolated topology. This test wires the full session
-topology (chain triggers + CONTINUE / WRAP_UP gating +
-compose-on-interrupt-tool-result) and injects an `InterruptRequested`
-envelope while a tool is running.
+topology and injects an `InterruptRequested` envelope while a tool is running.
 
 The test verifies:
  - InterruptRequested lands on the record with producer=null.
  - The interrupt_fragment_producer fires and emits one
    PromptFragment(source="interrupt", precedence=95).
- - CONTINUE and WRAP_UP refuse the ToolResult (no model firing between
-   the interrupt fragment and the composer refire).
- - compose-on-interrupt-tool-result fires the composer; a fresh
-   PromptComposed lands whose fragments list carries the interrupt.
+ - The model step after the ToolResult builds and records its own prompt (K261), and that
+   PromptComposed carries the interrupt fragment.
  - The FragmentCohort clears the turn slice on that PromptComposed —
    subsequent turns do not carry a stale interrupt directive.
 """
@@ -27,16 +23,11 @@ import asyncio
 import time
 from typing import Any
 
-import pytest
 
 from substrate import api
 from substrate.adapters import DeterministicResponder
 from substrate.topologies.session import InterruptRequested, UserMessage, session_topology
 from substrate.topologies.tool_loop.tools import Tool
-
-# A short scripted run inside one K-window: the documented exception to session_topology's
-# record_root warning (UI sprint 107 states it here instead of letting it print on every run).
-pytestmark = pytest.mark.filterwarnings(r"ignore:session_topology\(record_root=None\)")
 
 
 def _slow_add_tool() -> dict[str, Tool]:
@@ -179,44 +170,25 @@ def test_composer_refires_on_tool_result_with_interrupt_pending(tmp_path):
     )
 
 
-def test_continue_and_wrap_up_step_aside_when_interrupt_pending(tmp_path):
+def test_the_model_step_after_the_interrupt_records_its_own_prompt(tmp_path):
+    """K261: the model producer builds each step's prompt from the fragment cohort and records
+    it. The first PromptComposed after the ToolResult that follows the interrupt is the model's
+    own, and nothing else starts between that ToolResult and it."""
     root = asyncio.run(_run_and_inject(tmp_path))
     envs = _envs(root)
-
-    # The three ToolResult-subscribing triggers: CONTINUE, WRAP_UP,
-    # COMPOSE_ON_INTERRUPT_TOOL_RESULT. Exactly one fires on the FIRST
-    # ToolResult after the interrupt lands. With interrupt pending, the
-    # composer trigger fires (starts prompt_composer); the model triggers
-    # refuse. Subsequent turns (if the DeterministicResponder returns
-    # another tool-call) are not the focus here.
     tool_results = [e for e in envs if e.get("kind") == "ToolResult"]
     assert tool_results, "test scaffolding: expected at least one ToolResult"
     tr_seq = tool_results[0]["seq"]
     composed_after_tr = [e for e in envs if e.get("kind") == "PromptComposed" and e["seq"] > tr_seq]
     assert composed_after_tr, "no fresh PromptComposed after the first ToolResult"
-    next_composed_seq = composed_after_tr[0]["seq"]
-
-    # Between the ToolResult and the fresh PromptComposed, the composer's
-    # ProducerStarted must appear and no model ProducerStarted should.
-    # CONTINUE / WRAP_UP would have started the model; they refused.
-    between = [
-        e
+    composed = composed_after_tr[0]
+    assert (composed.get("producer") or {}).get("kind") == "model", composed.get("producer")
+    started = [
+        (e["payload"].get("producer") or {}).get("kind")
         for e in envs
-        if tr_seq < e["seq"] < next_composed_seq and e.get("kind") == "substrate.ProducerStarted"
+        if tr_seq < e["seq"] < composed["seq"] and e.get("kind") == "substrate.ProducerStarted"
     ]
-    kinds_between = [
-        e["payload"].get("producer", {}).get("kind")
-        for e in between
-        if isinstance(e["payload"].get("producer"), dict)
-    ]
-    assert "prompt_composer" in kinds_between, (
-        f"prompt_composer did not fire on the interrupt-pending ToolResult; "
-        f"kinds between ToolResult and next PromptComposed: {kinds_between}"
-    )
-    assert "model" not in kinds_between, (
-        f"model producer fired between ToolResult and the composer refire — "
-        f"CONTINUE / WRAP_UP did not step aside; kinds: {kinds_between}"
-    )
+    assert started == ["model"], f"producers started between ToolResult and the prompt: {started}"
 
 
 def test_fragment_cohort_clears_the_interrupt_on_the_composed_prompt(tmp_path):

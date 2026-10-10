@@ -44,7 +44,7 @@ from ..constants import (
     RunStatus,
     is_reserved,
 )
-from ..encoding import content_hash, to_canonical_builtins, try_canonical
+from ..encoding import to_canonical_builtins, try_canonical
 from ..errors import FsyncError, ReentrantAppendError
 from ..record import locking
 from ..record.record import (
@@ -55,7 +55,6 @@ from ..record.record import (
     recover_and_read,
     recover_open_segment,
 )
-from ..record.sealing import seal
 from ..record.sidecar import DiagnosticSidecar, WriterStatsSidecar
 from ..types import Event
 from .policies import Decision, TermContext, quiescence
@@ -148,6 +147,18 @@ def find_active_runtime(record_root: str | Path) -> "Runtime | None":
     reference — a run that has just finalised will be unregistered from
     the map even if the caller still holds the object."""
     return _ACTIVE_RUNTIMES_BY_RECORD_ROOT.get(_root_key(record_root))
+
+
+def current_record_root() -> Path | None:
+    """The record of the run the calling code executes in, or None outside a run (K268).
+
+    A Producer reads seqs of its own record by a ticket that names only the range
+    (`api.read_range`): the ticket is recorded, and a recorded path would make the record's bytes
+    depend on where the record sits. Set for every coroutine and worker thread of the run, like
+    `_CURRENT_RUNTIME`.
+    """
+    runtime = _CURRENT_RUNTIME.get()
+    return runtime._record_root if runtime is not None else None
 
 
 class Runtime:
@@ -483,18 +494,12 @@ class Runtime:
         self._cyc.cycle(_Lifecycle(RUN_STARTED, self._manifest(reg)))  # seq 0
         for init in reg.initials:
             instance = str(ULID())
-            # Guard initial-input canonicalization/sealing: a non-canonical or non-sealable
-            # initial input becomes a recorded InputBuildFailed (no Producer starts) rather
-            # than crashing the writer at startup.
+            # Guard initial-input canonicalization: a non-canonical initial input becomes a
+            # recorded InputBuildFailed (no Producer starts) rather than crashing the writer at
+            # startup. K267: the recorded input, its hash and the Producer's copy come from one
+            # canonical byte string.
             try:
-                sealed = seal(init.input)
-                # Hash + canonicalize the pre-seal object: seal() normalizes
-                # dict→MappingProxyType / list→tuple (which msgspec.to_builtins cannot
-                # encode), but canonical encoding of the pre-seal value folds to exactly the
-                # same bytes the sealed value represents, so input_sha256 is stable and over
-                # the logical value the Producer runs with (D-5).
-                input_fields = self._cyc._resolved_input_fields(init.input)
-                input_hash = content_hash(init.input)
+                input_fields, input_hash, producer_input = self._cyc._producer_input(init.input)
             except Exception as exc:  # noqa: BLE001 — the writer boundary: a failure in user code or the record is recorded, never a crash
                 self._cyc.cycle(
                     _Lifecycle(
@@ -520,7 +525,7 @@ class Runtime:
                     },
                 )
             )
-            self._st.scheduled.append((init.kind, sealed, instance, None))
+            self._st.scheduled.append((init.kind, producer_input, instance, None))
 
     def _resume_bootstrap(self, reg: Registration, resume_event: Any) -> None:
         """Resume entry (F-TERM-3): restore state from the existing record, then inject the

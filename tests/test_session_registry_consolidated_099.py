@@ -50,7 +50,6 @@ def _registry(tmp_path: Path, responder: DeterministicResponder) -> SessionRegis
             turn_max_steps=4,
             session_id=manifest.session_id,
             workspace_path=manifest.workspace,
-            record_root=Path(manifest.record_root),
             script=None,
             first_turn_user_message=first_turn_user_message,
         )

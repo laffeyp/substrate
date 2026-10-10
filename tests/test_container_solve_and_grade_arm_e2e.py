@@ -11,8 +11,9 @@ the termination waits for `GradeResult`. This test proves BEHAVIOR: a stub solve
 image is cached on this box) with an EMPTY patch that the harness will grade as fail
 without any real work — the point is the wire, not a solve.
 
-Env-gated: needs Docker daemon live + the flask-4045 eval image locally. Skipped when
-either is missing (import guard + docker ping).
+In the opt-in Docker tier (`swebench_harness`; conftest.py skips it unless
+SWEBENCH_HARNESS_ENABLE=1). When enabled, it skips if the Docker daemon does not answer or the
+flask-4045 eval image is missing; the probes run inside the test, not at import.
 """
 
 from __future__ import annotations
@@ -56,21 +57,19 @@ def _flask_image_cached() -> bool:
         return False
 
 
-# UI sprint 107: a real Docker grading run belongs to the opt-in Docker tier. In the fast tier its
-# skip depended on Docker Desktop's state (the probe failed while the VM was paused or loaded), so
-# the tier's count changed between runs on one machine.
+# UI sprint 107 marked this test for the opt-in Docker tier, but the marker gated nothing and its
+# probes ran at import, so it ran in the default suite when Docker answered in time (K266).
 @pytest.mark.swebench_harness
-@pytest.mark.skipif(not _docker_up(), reason="Docker daemon not running")
-@pytest.mark.skipif(
-    not _flask_image_cached(),
-    reason="swebench flask-4045 eval image not cached (run: docker pull ...)",
-)
 @pytest.mark.timeout(300)
 async def test_backend_topology_with_grade_fires_end_to_end(tmp_path):
     """A stub-solve topology with a real grader lands `SelectedPatch` and `GradeResult`
     on the record. The grade verdict is `fail` because the stub patch does nothing; the
     OBSERVATION is that the grader wired correctly and the harness returned a typed
     verdict — not the patch quality."""
+    if not _docker_up():
+        pytest.skip("Docker daemon did not answer `docker version` within 15 s")
+    if not _flask_image_cached():
+        pytest.skip("swebench flask-4045 eval image not cached, or `docker images` timed out")
     stub_patch = "diff --git a/x b/x\n"  # empty diff — harness returns fail cleanly
 
     topo = _backend_topology_with_grade(

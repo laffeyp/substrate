@@ -127,9 +127,9 @@ def test_role_fragment_precedence_is_zero() -> None:
     """The role fragment precedence value is 0 — role prompts land first
     in the composed prompt per session-vocabulary.md § I. Locks the
     number against later drift."""
-    from substrate.topologies.session.role_producer import _PRECEDENCE
+    from substrate.topologies.session.session_prompt_producer import ROLE_PRECEDENCE
 
-    assert _PRECEDENCE == 0
+    assert ROLE_PRECEDENCE == 0
 
 
 def test_resolve_role_prompt_with_source_returns_text_and_path() -> None:

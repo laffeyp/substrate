@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Iterator
 
@@ -103,3 +106,102 @@ def no_escape_guard(tmp_path: Path) -> Iterator[None]:
         f"sandbox-exec (bash). Investigate — this is a genuine sandbox "
         f"escape, not a test-setup artefact."
     )
+
+
+# ── Live event log (2026-10-09) ────────────────────────────────────────────────────────────────
+# A real-model test is one sample of a stochastic run; when it stalls, the record shows where.
+# This prints every event of every record a test writes under its tmp_path, as it is written,
+# one line each, to the terminal (sys.__stderr__, past pytest's capture). On for real-model
+# tests; SUBSTRATE_TEST_EVENTS=1 turns it on for every test.
+
+_EVENT_POLL_S = 0.2
+
+
+def _event_gist(env: dict[str, object]) -> str:
+    payload = env.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    kind = str(env.get("kind", ""))
+    if kind == "substrate.TriggerFired":
+        return f"{payload.get('trigger_id')} -> {payload.get('factory')}"
+    if kind in ("substrate.ProducerStarted", "substrate.ProducerCompleted"):
+        producer = payload.get("producer")
+        return str(producer.get("kind")) if isinstance(producer, dict) else ""
+    if kind == "substrate.ProducerFailed":
+        return str(payload.get("error", ""))[:200]
+    for key in ("text", "error", "reason", "tool"):
+        if payload.get(key):
+            return str(payload[key]).replace("\n", " ")[:140]
+    if "output" in payload:
+        return str(payload["output"]).replace("\n", " ")[:140]
+    return ""
+
+
+def _follow_records(tmp_path: Path, name: str, stop: "threading.Event", started: float) -> None:
+    from substrate import api
+
+    followers: dict[Path, object] = {}
+
+    def drain() -> None:
+        for events_file in tmp_path.rglob("events-*.jsonl"):
+            root = events_file.parent
+            if root not in followers:
+                followers[root] = api.attach(root)
+        for root, follower in followers.items():
+            try:
+                batch = follower.read_new()  # type: ignore[attr-defined]
+            except Exception as exc:  # noqa: BLE001 — shown, then the next poll reads on
+                sys.__stderr__.write(f"[{name}] {root.name}: read failed: {exc!r}\n")
+                batch = []
+            for env in batch:
+                line = (
+                    f"[{name}] {time.monotonic() - started:6.1f}s {root.relative_to(tmp_path)} "
+                    f"#{env.get('seq')} {env.get('kind')} {_event_gist(env)}"
+                )
+                sys.__stderr__.write(line + "\n")
+                sys.__stderr__.flush()
+
+    while not stop.wait(_EVENT_POLL_S):
+        drain()
+    drain()
+
+
+@pytest.fixture(autouse=True)
+def _live_event_log(request: pytest.FixtureRequest) -> Iterator[None]:
+    if not (
+        request.node.get_closest_marker("realmodel") or os.environ.get("SUBSTRATE_TEST_EVENTS")
+    ):
+        yield
+        return
+    tmp_path: Path = request.getfixturevalue("tmp_path")
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=_follow_records,
+        args=(tmp_path, request.node.name, stop, time.monotonic()),
+        daemon=True,
+    )
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """The Docker tier (`swebench_harness`) is opt-in, decided here for every test in it.
+
+    Until K266 each test gated itself: the binding test read SWEBENCH_HARNESS_ENABLE, and the
+    container test probed Docker at import with 15 s timeouts. That one ran a real Docker grade in
+    the default run whenever Docker answered in time, and skipped as "image not cached" when it did
+    not, so the skip count changed between runs on one machine.
+    """
+    if os.environ.get("SWEBENCH_HARNESS_ENABLE") == "1":
+        return
+    skip = pytest.mark.skip(
+        reason="SWEBENCH_HARNESS_ENABLE=1 not set — the Docker tier is opt-in "
+        "(a swebench Docker run can take 10+ minutes under emulation)"
+    )
+    for item in items:
+        if item.get_closest_marker("swebench_harness"):
+            item.add_marker(skip)

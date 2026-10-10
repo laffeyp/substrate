@@ -39,7 +39,6 @@ limit: models can work for a long time, and a step cap or an interrupt ends a ch
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 import uuid
 from collections.abc import Callable, Mapping
@@ -48,7 +47,15 @@ from pathlib import Path
 from typing import Any
 
 from ... import api
-from ...adapters import DeterministicResponder, DriverFamily, OllamaResponder, Responder
+from ...adapters import (
+    CliResponder,
+    DeterministicResponder,
+    DriverFamily,
+    OllamaResponder,
+    Responder,
+)
+from ..session.context_slice import extract_context_slice
+from ..session.vocabulary import turn_replies
 from ..session_registry import SessionEndedMidTurn, SessionRegistry
 from .kinds import FINAL_ANSWER
 from .tools import _TOOL_CANCEL_HOOKS, Tool, full_suite, on_tool_cancel
@@ -178,15 +185,18 @@ def _default_child_factory(
     tree_budget: dict[str, int],
     child_max_steps: int,
     timeout_seconds: float | None,
+    model_resolver: Callable[[str], Responder] | None = None,
 ) -> ChildFactory:
     """The child is a real tool_loop agent (walkthrough mode — it runs `responder` on the delegated task)
     over `suite_factory(workspace_root)`, plus a DEEPER delegate (depth+1) when the chain has room — so a
-    delegated agent can itself delegate, bounded by max_depth, inheriting the same suite factory. A nested
-    delegate roots at the DELEGATION dir (`workspace_root.parent`), not the workspace, so a grandchild's
-    record is a sibling of this child's workspace — never underneath it (review C-1)."""
+    delegated agent can itself delegate, bounded by max_depth, inheriting the same suite factory and
+    `model_resolver`. A nested delegate roots at the DELEGATION dir (`workspace_root.parent`), not the
+    workspace, so a grandchild's record is a sibling of this child's workspace — never underneath it
+    (review C-1). A CLI responder runs in the child's workspace (UI sprint 115)."""
     from . import tool_loop_topology
 
     def factory(task: str, workspace_root: Path) -> Callable[[api.TopologyBuilder], None]:
+        workspace_root.mkdir(parents=True, exist_ok=True)
         suite = suite_factory(workspace_root)
         if depth + 1 < max_depth:
             suite = {
@@ -202,10 +212,11 @@ def _default_child_factory(
                     tree_budget=tree_budget,
                     child_max_steps=child_max_steps,
                     timeout_seconds=timeout_seconds,
+                    model_resolver=model_resolver,
                 ),
             }
         return tool_loop_topology(
-            model=responder,
+            model=_in_workspace(responder, workspace_root),
             task=task,
             tools=suite,
             walkthrough=True,  # run the REAL model on the REAL task (F-2), never the scripted demo
@@ -214,6 +225,16 @@ def _default_child_factory(
         )
 
     return factory
+
+
+def _in_workspace(responder: Responder, workspace_root: Path) -> Responder:
+    """`responder` as the child runs it. A CLI agent reads and writes relative to the directory it
+    starts in, so a CLI responder is rebound to the child's workspace; the parent's responder, or a
+    resolver's cached one, ran in the parent's workspace or the daemon's own directory (UI sprint
+    115). Any other responder has no directory and is used as is."""
+    if isinstance(responder, CliResponder):
+        return responder.at(workspace_root)
+    return responder
 
 
 def _default_model_resolver(name: str) -> Responder:
@@ -230,83 +251,6 @@ def _default_model_resolver(name: str) -> Responder:
     return OllamaResponder(name)
 
 
-def _extract_context_slice(
-    record_root: Path,
-    parent_seq_range: tuple[int, int],
-    kinds: tuple[str, ...],
-    cap_bytes: int = _CONTEXT_SLICE_CAP_BYTES,
-) -> tuple[str, int, int, bool]:
-    """Read `record_root` and produce a text slice of events matching seq range + kinds,
-    capped at `cap_bytes`. Drops at the event boundary — an event's payload survives
-    whole or is elided whole (post-review 2026-08-25 large-event rule).
-
-    Returns `(text, elided_count, elided_bytes, single_oversize)`.
-
-    Iterates events in seq order; accumulates until the next event would push the
-    running total past `cap_bytes`; stops. A single event larger than `cap_bytes`
-    by itself is included alone (its content is what the caller asked for) with a
-    trailing note.
-    """
-    lo, hi = parent_seq_range
-    kinds_set = set(kinds) if kinds else None
-    matching: list[dict[str, Any]] = []
-    for env in api.read_record(record_root, resolve_blobs=True):  # Sprint 095
-        seq = int(env.get("seq", -1))
-        if seq < lo or seq > hi:
-            continue
-        if kinds_set is not None and env.get("kind") not in kinds_set:
-            continue
-        matching.append(env)
-    if not matching:
-        return "", 0, 0, False
-    kept: list[str] = []
-    kept_bytes = 0
-    elided: list[int] = []
-    for i, env in enumerate(matching):
-        block = _format_context_event(env)
-        block_bytes = len(block.encode("utf-8"))
-        if not kept and block_bytes > cap_bytes:
-            # The first matching event alone exceeds the cap. Include it whole
-            # (its content is what the caller asked for; truncation would defeat
-            # the request), then account for every other matching event as
-            # elided rather than dropping them silently (review finding 4).
-            rest_bytes = [
-                len(_format_context_event(other).encode("utf-8")) for other in matching[i + 1 :]
-            ]
-            rest_count = len(rest_bytes)
-            rest_bytes_total = sum(rest_bytes)
-            note = (
-                f"\n... this single event is {block_bytes} bytes, larger than the "
-                f"{cap_bytes}-byte slice cap"
-            )
-            if rest_count:
-                note += f"; {rest_count} more matching events elided ({rest_bytes_total} bytes)"
-            else:
-                note += "; no other events fit"
-            return block + note, rest_count, rest_bytes_total, True
-        if kept_bytes + block_bytes > cap_bytes:
-            elided.append(block_bytes)
-            continue
-        kept.append(block)
-        kept_bytes += block_bytes
-    text = "\n".join(kept)
-    if elided:
-        elided_bytes = sum(elided)
-        text += f"\n... {len(elided)} events elided; narrow the range ({elided_bytes} bytes)"
-    return text, len(elided), sum(elided), False
-
-
-def _format_context_event(env: dict[str, Any]) -> str:
-    seq = env.get("seq", "?")
-    kind = env.get("kind", "?")
-    payload = env.get("payload") or {}
-    if isinstance(payload, dict):
-        payload_repr = json.dumps(payload, sort_keys=True)
-    else:
-        payload_repr = repr(payload)
-    return f"[seq={seq} kind={kind}] {payload_repr}"
-
-
 def prefix_context_slice(
     parent_record_root: Path,
     task: str,
@@ -315,13 +259,10 @@ def prefix_context_slice(
     """Build a child task string prefixed with the extracted parent-record slice.
 
     Today's delegate drives tool_loop children; tool_loop has no PromptFragment
-    surface, so path-3 context rides on the task string. The substrate-native
-    alternative is `parent_context_producer` on a session-shaped child — the
-    producer factory exists at `topologies/session/parent_context_producer.py`
-    and `session_topology(parent_context=...)` binds it. When a caller passes
-    a session-shaped ChildFactory, they can bind parent_context themselves and
-    skip this string-prefix path. The two paths coexist; this one is not drift
-    against tool_loop children."""
+    surface, so path-3 context rides on the task string. A session-shaped child
+    can take the same slice as a `parent_context` PromptFragment instead
+    (`session_topology(parent_context=...)`); both paths call
+    `session/context_slice.py::extract_context_slice`."""
     seq_range_raw = context.get("parent_seq_range")
     if isinstance(seq_range_raw, (list, tuple)) and len(seq_range_raw) == 2:
         seq_range: tuple[int, int] = (int(seq_range_raw[0]), int(seq_range_raw[1]))
@@ -329,8 +270,8 @@ def prefix_context_slice(
         seq_range = (0, 2**31)
     kinds_raw = context.get("kinds") or ()
     kinds: tuple[str, ...] = tuple(str(k) for k in kinds_raw) if kinds_raw else ()
-    text, _elided_count, _elided_bytes, _single_oversize = _extract_context_slice(
-        parent_record_root, seq_range, kinds
+    text, _elided_count, _elided_bytes, _single_oversize = extract_context_slice(
+        parent_record_root, seq_range, kinds, cap_bytes=_CONTEXT_SLICE_CAP_BYTES
     )
     if not text:
         return task
@@ -463,7 +404,7 @@ def _run_fanout(
         resume_event = UserMessage(
             text=task,
             turn_index=0,
-            assembled_prompt=task,
+            assembled_prompt="",
             slash_source="delegate",
         )
         if parent_cancel_hooks is not None:
@@ -481,7 +422,7 @@ def _run_fanout(
                 "ok": False,
             }
         # Read the tail FinalAnswer off this child's record.
-        finals = [e for e in _iter_record(Path(record_root)) if e.get("kind") == FINAL_ANSWER]
+        finals = turn_replies(_iter_record(Path(record_root)))
         if not finals:
             return name, {
                 "error": "no_final_answer",
@@ -489,7 +430,7 @@ def _run_fanout(
                 "steps": -1,
                 "ok": False,
             }
-        answer = str((finals[-1].get("payload") or {}).get("text", ""))
+        answer = finals[-1][1]
         return name, {"answer": answer, "child_root": str(record_root), "steps": -1, "ok": True}
 
     results: dict[str, dict[str, Any]] = {}
@@ -642,6 +583,7 @@ def make_delegate(
             tree_budget,
             child_max_steps,
             timeout_seconds,
+            model_resolver,
         )
     spawned = {"n": 0}  # per-instance fan-out counter (the factory is built once per run)
 
@@ -653,11 +595,9 @@ def make_delegate(
     def run(a: list[Any]) -> dict[str, Any]:
         # Parse per-call args from either a dict (the x-args-passthrough path from
         # tools.py::_named_to_positional) or a plain string (backwards-compat).
-        # Sprint 053: the runtime seals dicts as MappingProxyType before this
-        # closure sees them, so `isinstance(a[0], dict)` was False and the
-        # ELSE branch coerced the whole mapping to str, silently dropping
-        # every kwarg past `task` (including `child_session_name`). Widen to
-        # Mapping — same class as the sprint 049 substrate_tools fix.
+        # Sprint 053 widened this to Mapping when the runtime sealed inputs (MappingProxyType
+        # failed `isinstance(a[0], dict)` and every kwarg past `task` was dropped). Since K267 a
+        # Producer's input is a plain decode of the record; the check stays general.
         if a and isinstance(a[0], Mapping):
             args_dict = dict(a[0])
         elif a:
@@ -755,7 +695,7 @@ def make_delegate(
                 return UserMessage(
                     text=task,
                     turn_index=next_turn_index,
-                    assembled_prompt=task,
+                    assembled_prompt="",
                     slash_source="delegate",
                 )
 
@@ -780,10 +720,11 @@ def make_delegate(
             # later, so it is never the first. A turn with no FinalAnswer raises.
             reviewer_tail_seq_before_turn = snapshot["tail_seq"]
             this_turn_finals = [
-                e
-                for e in api.read_record(Path(reviewer_root), resolve_blobs=True)  # Sprint 095
-                if e["kind"] == FINAL_ANSWER
-                and int(e.get("seq", -1)) > reviewer_tail_seq_before_turn
+                (seq, text)
+                for seq, text in turn_replies(
+                    api.read_record(Path(reviewer_root), resolve_blobs=True)  # Sprint 095
+                )
+                if seq > reviewer_tail_seq_before_turn
             ]
             if not this_turn_finals:
                 raise ValueError(
@@ -791,7 +732,7 @@ def make_delegate(
                     f"FinalAnswer for this turn (reviewer tail seq at turn start: "
                     f"{reviewer_tail_seq_before_turn})"
                 )
-            answer_text = str(this_turn_finals[0]["payload"].get("text", ""))
+            answer_text = this_turn_finals[0][1]
             return {
                 "answer": answer_text,
                 "child_root": str(reviewer_root),
@@ -818,6 +759,7 @@ def make_delegate(
                 tree_budget,
                 child_max_steps,
                 per_call_timeout,
+                model_resolver,
             )
             via = f"different_driver:{per_call_model}"
         elif per_call_context is not None:

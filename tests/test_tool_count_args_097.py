@@ -89,6 +89,16 @@ def test_ollama_requests_are_always_capped_and_truncation_fails_loud() -> None:
     # Ollama's own default is -1 (unlimited); ours is the request's context window (UI sprint 101)
     assert payload["options"]["num_predict"] == payload["options"]["num_ctx"]
     assert OllamaResponder("m", max_tokens=64)._request("hi")[1]["options"]["num_predict"] == 64
+    # a cloud tag leaves the output cap to the provider (glm-5.2:cloud refused num_predict=num_ctx)
+    for cloud in ("glm-5.2:cloud", "qwen3-coder:480b-cloud"):
+        assert (
+            "num_predict" not in OllamaResponder(cloud, num_ctx=262144)._request("hi")[1]["options"]
+        )
+    assert (
+        OllamaResponder("glm-5.2:cloud", max_tokens=64)._request("hi")[1]["options"]["num_predict"]
+        == 64
+    )
+    assert "num_predict" in OllamaResponder("cloud")._request("hi")[1]["options"]
     with pytest.raises(RuntimeError, match="token cap"):
         r._content({"done_reason": "length", "message": {"content": "partial"}})
     assert r._content({"done_reason": "stop", "message": {"content": " ok "}}) == "ok"

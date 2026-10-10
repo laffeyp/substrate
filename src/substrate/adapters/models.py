@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+from pathlib import Path
 
 from msgspec import Struct
 
@@ -128,6 +129,19 @@ class DeterministicResponder:
 # default context; Ollama counts a thinking model's reasoning against num_predict (ollama issues
 # #16583, #17561), so a reasoning model that thought hard hit the cap and failed the turn with
 # done_reason "length" and no answer. A looping small model still stops when the window fills.
+#
+# A cloud tag (`glm-5.2:cloud`, `qwen3-coder:480b-cloud`) gets no default cap: the provider runs the
+# model and enforces its own output limit, which /api/show does not report and which sits below the
+# context window. 2026-10-08: glm-5.2:cloud advertises a 1,048,576-token context, the console set
+# num_ctx to 262,144, and the cloud refused num_predict=262144 with 400 "exceeds model's maximum
+# output tokens (131072)" on every turn. With num_predict omitted the same model ran 9,409 tokens
+# and stopped on its own; the cloud refuses num_predict=-1 ("max_tokens must be positive").
+
+
+def is_ollama_cloud_model(model: str) -> bool:
+    """True for an Ollama cloud tag: the tag after `:` is `cloud` or ends in `-cloud`."""
+    name, _, tag = model.rpartition(":")
+    return bool(name) and (tag == "cloud" or tag.endswith("-cloud"))
 
 
 def ollama_base_url(base_url: str | None = None) -> str:
@@ -170,7 +184,7 @@ class OllamaResponder:
         base_url: str | None = None,
         api_key: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 0,  # 0 = num_ctx, the context window; never uncapped (see below)
+        max_tokens: int = 0,  # 0 = num_ctx locally; a cloud tag leaves the cap to the provider
         num_ctx: int = 32768,
         think: bool = False,
         timeout: float | None = None,
@@ -184,8 +198,14 @@ class OllamaResponder:
         # Ollama's own default is NumPredict=-1, unlimited (ollama api/types.go DefaultOptions).
         # Uncapped, a looping small model generates until the read timeout: 2026-10-01,
         # llama3.2:1b on a 117-byte prompt took 3 x 300 s ReadTimeout. Every request is capped;
-        # a reply that hits the cap fails loud in _content.
-        self._max_tokens = max_tokens if max_tokens > 0 else num_ctx
+        # a reply that hits the cap fails loud in _content. A cloud model's cap is the provider's.
+        self._max_tokens: int | None
+        if max_tokens > 0:
+            self._max_tokens = max_tokens
+        elif is_ollama_cloud_model(model):
+            self._max_tokens = None
+        else:
+            self._max_tokens = num_ctx
         self._num_ctx = num_ctx
         self._think = think
         # UI sprint 101: no default limit on how long the model works. num_predict above ends every
@@ -202,11 +222,9 @@ class OllamaResponder:
         if self._system:
             messages.append({"role": "system", "content": self._system})
         messages.append({"role": "user", "content": prompt})
-        options: dict[str, object] = {
-            "num_ctx": self._num_ctx,
-            "temperature": self._temperature,
-            "num_predict": self._max_tokens,
-        }
+        options: dict[str, object] = {"num_ctx": self._num_ctx, "temperature": self._temperature}
+        if self._max_tokens is not None:
+            options["num_predict"] = self._max_tokens
         payload: dict[str, object] = {
             "model": self._model,
             "messages": messages,
@@ -223,9 +241,14 @@ class OllamaResponder:
 
     def _content(self, data: dict[str, object]) -> str:
         if data.get("done_reason") == "length":
+            cap = (
+                f"the {self._max_tokens}-token cap (num_predict)"
+                if self._max_tokens is not None
+                else "the provider's output limit"
+            )
             raise RuntimeError(
-                f"OllamaResponder({self._model}) reply hit the {self._max_tokens}-token cap "
-                "(num_predict); the output is truncated. Raise max_tokens or ask for less."
+                f"OllamaResponder({self._model}) reply hit {cap}; "
+                "the output is truncated. Raise max_tokens or ask for less."
             )
         message = data.get("message")
         text = message.get("content", "") if isinstance(message, dict) else ""
@@ -360,6 +383,16 @@ class OllamaResponder:
         msg = data.get("message")
         return msg if isinstance(msg, dict) else {"content": "", "tool_calls": []}
 
+    async def achat_tools_metered(
+        self, prompt: str, tools: list[dict[str, object]]
+    ) -> tuple[dict[str, object], ModelUsage]:
+        """`achat_tools`, plus Ollama's own token and latency accounting for the call (K262: every
+        model call records its usage, a call that picks a tool included)."""
+        data = await self._achat(prompt, tools)
+        msg = data.get("message")
+        message = msg if isinstance(msg, dict) else {"content": "", "tool_calls": []}
+        return message, self._usage(data, self._model)
+
     def context_tokens(self) -> int:
         """Return the driver's advertised context window in tokens.
 
@@ -416,19 +449,37 @@ class CliResponder:
     cancellable and Producers overlap, matching OllamaResponder's concurrency contract."""
 
     def __init__(
-        self, command: list[str], *, timeout: float | None = None, name: str | None = None
+        self,
+        command: list[str],
+        *,
+        timeout: float | None = None,
+        name: str | None = None,
+        cwd: Path | str | None = None,
     ) -> None:
         if not command:
             raise ValueError("CliResponder needs a non-empty command, e.g. ['claude', '-p']")
         self._command = list(command)
         self._timeout = timeout
         self.name = name or command[0]
+        # The directory the CLI runs in: a session's workspace (UI sprint 114). A CLI agent reads
+        # and writes relative to it; with none set it runs wherever the caller runs, which for the
+        # daemon is the app bundle or the kernel repo.
+        self._cwd = cwd
+
+    def at(self, cwd: Path | str) -> CliResponder:
+        """The same CLI, run in `cwd`. A new instance: a cached responder keeps its own directory
+        (UI sprint 115, a delegated child runs in its own workspace)."""
+        return CliResponder(self._command, timeout=self._timeout, name=self.name, cwd=cwd)
 
     def respond(self, prompt: str) -> str:
         import subprocess
 
         proc = subprocess.run(  # noqa: S603 — an explicit, operator-chosen agent CLI driver
-            [*self._command, prompt], capture_output=True, text=True, timeout=self._timeout
+            [*self._command, prompt],
+            capture_output=True,
+            text=True,
+            timeout=self._timeout,
+            cwd=self._cwd,
         )
         if proc.returncode != 0:
             raise RuntimeError(
@@ -452,6 +503,7 @@ class CliResponder:
             prompt,
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
+            cwd=self._cwd,
             start_new_session=True,  # own process group: a kill reaches the agent's children
         )
 

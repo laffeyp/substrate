@@ -25,7 +25,7 @@ class Producer(Protocol):
     """A callable `(input) -> AsyncIterable[Event]` (kernel §1; design §4.2/§9.6).
 
     The factory returns this callable per instantiation; the runtime calls it with the
-    sealed, resolved input and consumes the event stream until the Producer completes,
+    resolved input (its own copy, decoded from the recorded bytes) and consumes the event stream until the Producer completes,
     fails, or is cancelled — emitting the corresponding lifecycle event. A Producer has
     no runtime-level identity, planning, or goal state (kernel non-goals); state lives
     on the log.

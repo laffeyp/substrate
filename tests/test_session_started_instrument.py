@@ -47,7 +47,6 @@ def _drive_session(tmp_path: Path) -> Path:
             workspace_shape="flat",
             bundle="session",
             first_turn_user_message=first_turn,
-            record_root=record_root,
         )
         rt = Runtime(record_root=record_root, persistent=True)
         await rt.run(topo)

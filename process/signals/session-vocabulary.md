@@ -1,3 +1,7 @@
+**Status: RATIFIED — v0.3.1 (2026-10-09).** Sprint K261 adds section L: the model producer builds, records and sends each prompt; the composer and the per-turn chain retire. §§ A–K byte-preserved; where L differs from K, L governs.
+
+**Status: RATIFIED — v0.3 (2026-10-09).** Sprint K259 adds section K: `ModelReply` becomes one event per model call with `stop_reason` and `usage`; `Returned` replaces `Park`; a session record no longer carries `FinalAnswer`; the producers and triggers take the names in K.4 and K.5. Decisions by the Architect, 2026-10-09; research in `process/planning/RESEARCH-2026-10-09-session-topology-structure-round4.md`. §§ A–J byte-preserved from v0.2.1; where K differs from them, K governs records written from v0.3 on.
+
 # session — locked topology vocabulary
 
 **Status: RATIFIED — v0.2.1 (2026-09-02).** Sprint 068 adds `SessionWarning.kind` value `"fragment_source_failed"` and optional payload field `source_name: str?`. Additive per the § H convention; §§ A-I byte-preserved from v0.2. Surfaces fragment-source Producer failures as operator-visible warnings on the record.
@@ -246,3 +250,217 @@ New optional payload field:
 ### Ratification signature
 
 - **v0.2.1** — Sprint 068 close, 2026-09-02. Additive extension for fragment-source failure surfacing. § A-J byte-preserved from prior locks.
+
+## K. v0.3 — one reply per model call, Returned, plain names (2026-10-09, sprint K259)
+
+Why: a turn wrote the same text twice (`ModelReply`, then `FinalAnswer`), `model_usage` was always `{}`, `Park` named the kernel's pause rather than what happened, and the trigger names followed five patterns. Each fact about a turn is now on the record once, under a name that says what it is.
+
+### K.1 ModelReply (v2)
+
+One per model call, including a call that ends in a tool call.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `text` | `str` | What the model said. Empty when the call only requests a tool. |
+| `stop_reason` | `str` | `"end_turn"` (the model answered), `"tool_use"` (a `ToolCall` follows), `"wrap_up"` (the step budget or repeated tool failures forced a plain answer). |
+| `usage` | `dict[str, Any]` | `input_tokens: int`, `output_tokens: int`, `wall_ms: int`, `model: str`, `estimated: bool` (true when the responder reports no counts and the numbers are a chars/4 estimate). |
+| `turn_index` | `int` | Matches the enclosing `UserMessage`. |
+| `step` | `int` | 0-based model call within the turn. |
+
+Stratum: **event**. `model_usage` (v0.1) is replaced by `usage`.
+
+### K.2 Returned
+
+Replaces `Park`. The turn is over and control is back with the user.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `turn_index` | `int` | The turn that ended. |
+| `reason` | `str` | `"replied"` (a `ModelReply` with `stop_reason` other than `tool_use`), `"model_error"` (`substrate.ProducerFailed` on the `model` producer), `"interrupted"` (`substrate.ProducerCancelled` on the `model` or `tool` producer). |
+| `detail` | `str` | The error text on `model_error`; empty otherwise. |
+
+Stratum: **event**. Exactly one per turn.
+
+### K.3 Retired on session records
+
+- `Park` — replaced by `Returned`.
+- `FinalAnswer` — a session record no longer carries it. tool_loop keeps `FinalAnswer` unchanged; benchmarks grade it.
+- `UserMessage.assembled_prompt` — the exact prompt rides `PromptComposed.text` (§ I), once per model call.
+
+Records written before v0.3 keep these kinds. Every reader of session records accepts both shapes: an old `Park` reads as `Returned` (`final_answer` → `replied`, `interrupt` → `interrupted`); an old `FinalAnswer` that repeats the `ModelReply` before it adds nothing; an old `ModelReply` followed by a `FinalAnswer` reads as `stop_reason: "end_turn"`.
+
+### K.4 Producer names
+
+| Producer | Emits | Replaces |
+|---|---|---|
+| `model` | `ModelReply`, `ToolCall`, `TranscriptCompacted`, `BackgroundTaskEnded` | — (no longer emits `FinalAnswer`) |
+| `tool` | `ToolResult` | — |
+| `return` | `Returned` | `park` |
+| `session_end` | `SessionEnded` | — |
+| `session_started` (instrument) | `SessionStarted` | — |
+| `first_message` | `UserMessage` | `session_open` |
+| `session_prompt` | `PromptFragment` (one per session-open source) | `role_fragment`, `bundle_methodology_fragment`, `bundle_personality_fragment`, `tools_suite_fragment`, `parent_context_fragment` |
+| `prompt_composer` | `PromptComposed` | — (fires on `UserMessage`; `per_turn_fragment` and `user_message_fragment` retire) |
+| `interrupt_fragment` | `PromptFragment` | — |
+| `warning` | `SessionWarning` | `session_warning`, `fragment_error_warning` |
+
+### K.5 Trigger names
+
+Form: `<what it starts>-on-<event>`.
+
+| Trigger | Subscription | Starts | Replaces |
+|---|---|---|---|
+| `tool-on-tool-call` | `ToolCall` | `tool` | `run-tool` |
+| `model-on-tool-result` | `ToolResult` (step budget left) | `model` | `continue` |
+| `model-wrap-up-on-tool-result` | `ToolResult` (budget spent) | `model` | `wrap-up` |
+| `model-on-prompt-composed` | `PromptComposed` | `model` | `resume-on-composed` |
+| `prompt_composer-on-user-message` | `UserMessage` | `prompt_composer` | `emit-per-turn-fragment`, `emit-user-message-fragment`, `compose-on-cohort-complete` |
+| `prompt_composer-on-interrupt` | `ToolResult` with an interrupt fragment pending | `prompt_composer` | `compose-on-interrupt-tool-result` |
+| `interrupt_fragment-on-interrupt-request` | `InterruptRequested` | `interrupt_fragment` | `emit-interrupt-fragment` |
+| `return-on-reply` | `ModelReply` with `stop_reason` ≠ `tool_use` | `return` | `park-on-final` |
+| `return-on-model-error` | `substrate.ProducerFailed` (model) | `return` | `park-on-model-error` |
+| `return-on-interrupt` | `substrate.ProducerCancelled` (model or tool) | `return` | `park-on-interrupt` |
+| `warning-on-fragment-error` | `substrate.ProducerFailed` (a prompt source) | `warning` | `warn-on-fragment-error` |
+| `end-on-exit` | `UserMessage` text `/exit` | `session_end` | — |
+| `end-on-turn-cap` | `UserMessage` past `max_turns` | `session_end` | `end-on-cap` |
+| `end-on-end-request` | `SessionEndRequested` | `session_end` | `end-on-user-end` |
+
+`SessionEnded.reason` value `"timeout"` becomes `"turn_cap"`; old records' `"timeout"` reads as `"turn_cap"`.
+
+### K.6 Termination
+
+`any_of(pause_await_input(on Returned, resume on UserMessage), finalise_on(SessionEnded))`. The `all_completed` refusal checks the policy's members, not its name string.
+
+### K.7 Invariants (replace § F 4–5 for v0.3 records)
+
+1. Every `UserMessage{turn_index=N}` is followed, before the next `UserMessage`, by exactly one `Returned{turn_index=N}`.
+2. `Returned{reason:"replied"}` is preceded within its turn by a `ModelReply` whose `stop_reason` is `end_turn` or `wrap_up`; `model_error` by a `substrate.ProducerFailed` on `model`; `interrupted` by a `substrate.ProducerCancelled` on `model` or `tool`.
+3. Every `ModelReply{stop_reason:"tool_use"}` is followed by a `ToolCall` in the same step.
+4. Every model call writes exactly one `PromptComposed` before its `ModelReply`, and that `PromptComposed.text` is the driver's whole input (§ I, now enforced).
+5. A session record written under v0.3 holds no `FinalAnswer`, no `Park`.
+
+### Ratification signature
+
+- **v0.3** — Sprint K259 close, 2026-10-09. Decisions by the Architect, 2026-10-09. §§ A–J byte-preserved.
+
+## L. v0.3.1 — the model builds and records its own prompt (2026-10-09, sprint K261)
+
+Why: the record must hold exactly what the model read, once per model call. A composer that ran before the model could not see each step's tool results, and the model added text after it; the record and the call disagreed. The prompt is now recorded where the call happens.
+
+### L.1 PromptComposed
+
+- Written by the `model` producer, once per model step, immediately before the call (and in a scripted CI run, where the script stands in for the model's choice).
+- `text` is the driver's whole input. Order: the seed; the session fragments and `per_turn` by precedence (the tool list under "Tools you MAY use:" for a text-only driver); the kept turns, the current one last; any interrupt fragment; background-task notices; the step's directive.
+- `fragment_seqs` names the fragments the text used. `strategy` is `"model_input"`.
+
+### L.2 UserMessage.assembled_prompt
+
+Set only when a `/context` slice is attached to the message; empty otherwise. `per_turn` is no longer prefixed into it. K.3's retirement of the field is withdrawn: the field carries the attached slice.
+
+### L.3 Producers and triggers (replaces the matching rows of K.4 and K.5)
+
+- Retired: producers `prompt_composer`, `per_turn_fragment`, `user_message_fragment`; triggers `emit-per-turn-fragment`, `emit-user-message-fragment`, `compose-on-cohort-complete`, `compose-on-interrupt-tool-result`, `resume-on-composed`.
+- New: trigger `model-on-user-message` (`UserMessage` → `model`, step 0).
+- `model-on-tool-result` and `model-wrap-up-on-tool-result` start the model on every `ToolResult`; a pending interrupt fragment reaches the model through the fragment cohort on that step.
+- K.5's rows `prompt_composer-on-user-message`, `prompt_composer-on-interrupt` and `model-on-prompt-composed` do not exist.
+
+### L.4 Invariant (replaces K.7 #4)
+
+Every model step writes exactly one `PromptComposed` before its `ModelReply` or `ToolCall`, and that text is the driver's whole input for the step.
+
+### Ratification signature
+
+- **v0.3.1** — Sprint K261 close, 2026-10-09. §§ A–K byte-preserved.
+
+## M. v0.3.2 — reply and return as built (2026-10-09, sprint K262)
+
+Why: K262 implemented K.1, K.2, K.6 and the three `return-on-*` rows of K.5. Building them settled four points that K left open or stated wrongly.
+
+### M.1 ModelReply.usage (corrects K.1)
+
+The fields are the ones `ModelUsage` already carries on every other Substrate record: `model: str`, `prompt_tokens: int`, `completion_tokens: int`, `wall_ms: int`, `estimated: bool`. K.1's `input_tokens` and `output_tokens` were never written. With no provider counts, `estimated` is true and the counts are word counts of the prompt and the reply (`call_responder_metered`), not chars/4. A scripted CI step calls no model: `model` is `"script"`, every count is 0, `estimated` is true.
+
+### M.2 ModelReply.text on a tool call
+
+A native tool call's reply carries whatever prose the model wrote beside the call; a text-mode call's reply is empty, since the reply is the JSON call itself. Neither is rendered into the model's history: the `ToolCall` line stands for the call, as before v0.3, so the model's prompt wording is unchanged.
+
+### M.3 One Returned per turn
+
+Each `return-on-*` trigger fires only while the turn has no `Returned` yet (`returned_turns < user_turns`). A hard interrupt can cancel the model and a tool together, and a failure can race a reply; without the check either writes two `Returned` for one turn, breaking K.7 #1.
+
+### M.4 What remains of Park
+
+The `Park` struct stays so readers and fixtures can decode records written before v0.3. The `park` producer and the `park-on-final`, `park-on-model-error` and `park-on-interrupt` trigger ids no longer exist in code; an old record names them in its RunStarted topology, and readers match the event kind, not the trigger id.
+
+### M.5 Slices filtered by kind
+
+A `/context` or delegate slice whose `kinds` names `FinalAnswer` also takes a session record's replies: each `ModelReply` whose `stop_reason` is not `tool_use`.
+
+### Ratification signature
+
+- **v0.3.2** — Sprint K262 close, 2026-10-09. §§ A–L byte-preserved.
+
+## N. v0.3.3 — one producer for the session prompt (2026-10-09, sprint K263)
+
+Why: K.4 named a `session_prompt` producer for the five session-open sources and a `warning` producer for both warning kinds. Merging the sources into one producer merges their failure domains; the merged producer records a failed source itself, which leaves `warning` with no job.
+
+### N.1 Producers (replaces the matching rows of K.4)
+
+| Producer | Emits | Replaces |
+|---|---|---|
+| `session_prompt` | `SessionWarning` (`seed_alone_exceeds`, first, when the seed and `per_turn` pass the driver's headroom); one or more `PromptFragment` per source; `SessionWarning` (`fragment_source_failed`) for each source that raised | `role_fragment`, `bundle_methodology_fragment`, `bundle_personality_fragment`, `parent_context_fragment`, `tools_suite_fragment`, `session_warning`, `fragment_error_warning` |
+| `first_message` | `UserMessage` | `session_open` |
+
+K.4's `warning` row is not built. `session_prompt` is registered only when the session names a prompt source or its seed passes the headroom.
+
+### N.2 Triggers (replaces the matching row of K.5)
+
+- `warning-on-fragment-error` (`warn-on-fragment-error` in code) is retired: a failed source never raises out of `session_prompt`.
+- `first-message-on-session-prompt` fires on `substrate.ProducerCompleted` or `substrate.ProducerFailed` of `session_prompt`, once, on a fresh record. It is the one session trigger that waits on a producer's end.
+
+### N.3 SessionWarning (adds to § J)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `source_name` | `str?` | For `fragment_source_failed`: the `PromptSource` that raised (`role`, `bundle_methodology`, `bundle_personality`, `parent_context`, `tools_suite`). Records before v0.3.3 hold a producer kind here (`role_fragment`, …). |
+| `detail` | `str?` | For `fragment_source_failed`: the error, as `repr(exc)`. Absent on every other kind and on records before v0.3.3. |
+
+A failed source contributes no fragment; the sources after it still run.
+
+### N.4 Parent-context slices
+
+A session's `parent_context` source and delegate's per-call context call one extractor (`session/context_slice.py`), so § M.5 holds for both. Caps differ: 64 KiB for `parent_context`, 8 KiB for delegate.
+
+### Ratification signature
+
+- **v0.3.3** — Sprint K263 close, 2026-10-09. §§ A–M byte-preserved.
+
+## O. v0.3.4 — trigger names as built (2026-10-09, sprint K264)
+
+Why: K.5 set the form `<what it starts>-on-<event>`. Building it settled the spelling of two names K.5 got wrong or left out.
+
+### O.1 Trigger ids (replace K.5's rows; K.5's `model-on-prompt-composed` was retired by § L, `warning-on-fragment-error` by § N)
+
+| Trigger | Starts | Was |
+|---|---|---|
+| `tool-on-tool-call` | `tool` | `run-tool` |
+| `model-on-user-message` | `model` | — (§ L) |
+| `model-on-tool-result` | `model` | `continue` |
+| `model-wrap-up-on-tool-result` | `model` | `wrap-up` |
+| `return-on-reply`, `return-on-model-error`, `return-on-interrupt` | `return` | — (§ M) |
+| `interrupt-fragment-on-interrupt-request` | `interrupt_fragment` | `emit-interrupt-fragment` |
+| `first-message-on-session-prompt` | `first_message` | — (§ N) |
+| `end-on-exit` | `session_end` | — |
+| `end-on-turn-cap` | `session_end` | `end-on-cap` |
+| `end-on-end-request` | `session_end` | `end-on-user-end` |
+| `driver-stepper-on-returned` (CI wrapper) | `driver_stepper` | `advance-on-park` |
+
+Every id is hyphen-case. K.5's `interrupt_fragment-on-interrupt-request` put the producer's underscore into a hyphenated name and is corrected. `driver-stepper-on-returned` fires on any turn end, `Returned` or an old record's `Park`. The `session_started` instrument's trigger is named by the kernel after its producer and is outside this rule. `tool_loop` keeps its own `run-tool`, `continue` and `wrap-up`.
+
+### O.2 SessionEnded.reason
+
+`turn_cap` replaces `timeout`. Readers map an old `timeout` to `turn_cap` (`LEGACY_SESSION_END_REASONS`).
+
+### Ratification signature
+
+- **v0.3.4** — Sprint K264 close, 2026-10-09. §§ A–N byte-preserved.

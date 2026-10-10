@@ -46,7 +46,6 @@ def _session_factory(
         turn_max_steps=4,
         session_id=manifest.session_id,
         workspace_path=manifest.workspace,
-        record_root=Path(manifest.record_root),
         script=None,
     )
 

@@ -4,7 +4,7 @@
 of the parent's record to the child's task.
 
 TECH-SPEC-2026-08-25-round6 §5 path 3 + §1.6.5 8 KiB cap. The extractor at
-`delegate._extract_context_slice` reads `parent_record_root` via `api.read_record`,
+`session/context_slice.py::extract_context_slice` (K263; delegate passes its 8 KiB cap) reads `parent_record_root` via `api.read_record`,
 filters events by `context["parent_seq_range"]` and `context["kinds"]`, caps the
 serialized slice at 8 KiB with event-boundary drops (post-review 2026-08-25 rule):
 an event's payload survives whole or is elided whole, and a single event larger
@@ -20,12 +20,18 @@ import pytest
 
 from substrate import api
 from substrate.adapters import DeterministicResponder
+from substrate.topologies.session.context_slice import extract_context_slice
 from substrate.topologies.tool_loop.delegate import (
     _CONTEXT_SLICE_CAP_BYTES,
-    _extract_context_slice,
     make_delegate,
     prefix_context_slice,
 )
+
+
+def _slice(root: Path, seq_range: tuple[int, int], kinds: tuple[str, ...]) -> Any:
+    """The extractor as delegate calls it, with delegate's cap."""
+    return extract_context_slice(root, seq_range, kinds, cap_bytes=_CONTEXT_SLICE_CAP_BYTES)
+
 
 # ── extractor unit tests (deterministic; no runtime) ────────────────────────
 
@@ -45,9 +51,7 @@ def test_slice_filters_by_seq_range(monkeypatch: pytest.MonkeyPatch) -> None:
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter(envs),
     )
-    text, elided_count, _elided_bytes, single_oversize = _extract_context_slice(
-        Path("/nowhere"), (1, 2), ()
-    )
+    text, elided_count, _elided_bytes, single_oversize = _slice(Path("/nowhere"), (1, 2), ())
     assert not single_oversize
     assert elided_count == 0
     assert "seq=1" in text and "seq=2" in text
@@ -64,7 +68,7 @@ def test_slice_filters_by_kinds(monkeypatch: pytest.MonkeyPatch) -> None:
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter(envs),
     )
-    text, _elided_count, _elided_bytes, _single_oversize = _extract_context_slice(
+    text, _elided_count, _elided_bytes, _single_oversize = _slice(
         Path("/nowhere"), (0, 10), ("FinalAnswer",)
     )
     assert "seq=2" in text and "kind=FinalAnswer" in text
@@ -82,9 +86,7 @@ def test_slice_drops_at_event_boundary_when_over_cap(monkeypatch: pytest.MonkeyP
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter(envs),
     )
-    text, elided_count, elided_bytes, single_oversize = _extract_context_slice(
-        Path("/nowhere"), (0, 10), ()
-    )
+    text, elided_count, elided_bytes, single_oversize = _slice(Path("/nowhere"), (0, 10), ())
     assert not single_oversize
     # Boundary drop, not mid-event truncation. Each formatted block is ~4 KiB;
     # two fit under 8 KiB (~8100 bytes), the third pushes past and elides. If a
@@ -117,9 +119,7 @@ def test_slice_includes_single_oversize_event_with_note(monkeypatch: pytest.Monk
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter(envs),
     )
-    text, elided_count, elided_bytes, single_oversize = _extract_context_slice(
-        Path("/nowhere"), (0, 10), ()
-    )
+    text, elided_count, elided_bytes, single_oversize = _slice(Path("/nowhere"), (0, 10), ())
     assert single_oversize
     assert elided_count == 2, "the two small events after the oversize one must be counted"
     assert elided_bytes > 0
@@ -140,9 +140,7 @@ def test_slice_single_oversize_alone_reports_zero_elided(monkeypatch: pytest.Mon
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter(envs),
     )
-    text, elided_count, elided_bytes, single_oversize = _extract_context_slice(
-        Path("/nowhere"), (0, 10), ()
-    )
+    text, elided_count, elided_bytes, single_oversize = _slice(Path("/nowhere"), (0, 10), ())
     assert single_oversize
     assert elided_count == 0
     assert elided_bytes == 0
@@ -155,7 +153,7 @@ def test_slice_empty_when_no_events_match(monkeypatch: pytest.MonkeyPatch) -> No
         "substrate.topologies.tool_loop.delegate.api.read_record",
         lambda root, **_kw: iter(envs),
     )
-    text, elided_count, _elided_bytes, single_oversize = _extract_context_slice(
+    text, elided_count, _elided_bytes, single_oversize = _slice(
         Path("/nowhere"), (5, 10), ("FinalAnswer",)
     )
     assert text == ""

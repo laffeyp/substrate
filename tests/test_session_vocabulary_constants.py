@@ -9,49 +9,36 @@ Pins:
    used at registration sites (grep-check).
  - SESSION_PRODUCER_KINDS and SESSION_TRIGGER_IDS frozensets cover the
    full declared set.
- - FRAGMENT_SOURCE_KINDS (sprint 068) is a subset of SESSION_PRODUCER_KINDS.
 """
 
 from __future__ import annotations
 
 from substrate.topologies.session.vocabulary import (
-    FRAGMENT_SOURCE_KINDS,
-    PRODUCER_KIND_BUNDLE_METHODOLOGY_FRAGMENT,
-    PRODUCER_KIND_BUNDLE_PERSONALITY_FRAGMENT,
     PRODUCER_KIND_DRIVER_STEPPER,
-    PRODUCER_KIND_FRAGMENT_ERROR_WARNING,
+    PRODUCER_KIND_FIRST_MESSAGE,
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
     PRODUCER_KIND_MODEL,
-    PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT,
-    PRODUCER_KIND_PARK,
-    PRODUCER_KIND_PER_TURN_FRAGMENT,
-    PRODUCER_KIND_PROMPT_COMPOSER,
-    PRODUCER_KIND_ROLE_FRAGMENT,
+    PRODUCER_KIND_RETURN,
     PRODUCER_KIND_SESSION_END,
-    PRODUCER_KIND_SESSION_OPEN,
+    PRODUCER_KIND_SESSION_PROMPT,
     PRODUCER_KIND_SESSION_STARTED,
-    PRODUCER_KIND_SESSION_WARNING,
     PRODUCER_KIND_TOOL,
-    PRODUCER_KIND_TOOLS_SUITE_FRAGMENT,
-    PRODUCER_KIND_USER_MESSAGE_FRAGMENT,
     SESSION_PRODUCER_KINDS,
     SESSION_TRIGGER_IDS,
-    TRIGGER_ID_ADVANCE_ON_PARK,
-    TRIGGER_ID_COMPOSE_ON_COHORT_COMPLETE,
-    TRIGGER_ID_CONTINUE,
-    TRIGGER_ID_EMIT_PER_TURN_FRAGMENT,
-    TRIGGER_ID_EMIT_USER_MESSAGE_FRAGMENT,
-    TRIGGER_ID_END_ON_CAP,
+    TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED,
+    TRIGGER_ID_MODEL_ON_TOOL_RESULT,
+    TRIGGER_ID_END_ON_TURN_CAP,
     TRIGGER_ID_END_ON_EXIT,
-    TRIGGER_ID_END_ON_USER_END,
-    TRIGGER_ID_PARK_ON_FINAL,
-    TRIGGER_ID_PARK_ON_INTERRUPT,
-    TRIGGER_ID_PARK_ON_MODEL_ERROR,
-    TRIGGER_ID_RESUME_ON_COMPOSED,
-    TRIGGER_ID_RUN_TOOL,
-    TRIGGER_ID_WARN_ON_FRAGMENT_ERROR,
-    TRIGGER_ID_WRAP_UP,
+    TRIGGER_ID_END_ON_END_REQUEST,
+    TRIGGER_ID_MODEL_ON_USER_MESSAGE,
+    TRIGGER_ID_RETURN_ON_INTERRUPT,
+    TRIGGER_ID_RETURN_ON_MODEL_ERROR,
+    TRIGGER_ID_RETURN_ON_REPLY,
+    TRIGGER_ID_TOOL_ON_TOOL_CALL,
+    TRIGGER_ID_MODEL_WRAP_UP_ON_TOOL_RESULT,
     ParkReason,
+    ReturnReason,
+    StopReason,
     SessionEndReason,
     SessionWarningKind,
 )
@@ -62,14 +49,20 @@ def test_session_end_reason_values() -> None:
     Locks the enum against value drift."""
     assert SessionEndReason.USER_EXIT.value == "user_exit"
     assert SessionEndReason.USER_END.value == "user_end"
-    assert SessionEndReason.TIMEOUT.value == "timeout"
+    assert SessionEndReason.TURN_CAP.value == "turn_cap"
     assert SessionEndReason.DAEMON_SHUTDOWN.value == "daemon_shutdown"
     assert set(SessionEndReason) == {
         SessionEndReason.USER_EXIT,
         SessionEndReason.USER_END,
-        SessionEndReason.TIMEOUT,
+        SessionEndReason.TURN_CAP,
         SessionEndReason.DAEMON_SHUTDOWN,
     }
+
+
+def test_v03_turn_end_values() -> None:
+    """ModelReply.stop_reason and Returned.reason wire strings (vocabulary § K)."""
+    assert {s.value for s in StopReason} == {"end_turn", "tool_use", "wrap_up"}
+    assert {r.value for r in ReturnReason} == {"replied", "model_error", "interrupted"}
 
 
 def test_park_reason_values() -> None:
@@ -101,19 +94,10 @@ def test_producer_kind_final_strs() -> None:
     assert PRODUCER_KIND_SESSION_STARTED == "session_started"
     assert PRODUCER_KIND_MODEL == "model"
     assert PRODUCER_KIND_TOOL == "tool"
-    assert PRODUCER_KIND_PARK == "park"
+    assert PRODUCER_KIND_RETURN == "return"
     assert PRODUCER_KIND_SESSION_END == "session_end"
-    assert PRODUCER_KIND_SESSION_WARNING == "session_warning"
-    assert PRODUCER_KIND_FRAGMENT_ERROR_WARNING == "fragment_error_warning"
-    assert PRODUCER_KIND_SESSION_OPEN == "session_open"
-    assert PRODUCER_KIND_PROMPT_COMPOSER == "prompt_composer"
-    assert PRODUCER_KIND_PER_TURN_FRAGMENT == "per_turn_fragment"
-    assert PRODUCER_KIND_ROLE_FRAGMENT == "role_fragment"
-    assert PRODUCER_KIND_BUNDLE_METHODOLOGY_FRAGMENT == "bundle_methodology_fragment"
-    assert PRODUCER_KIND_BUNDLE_PERSONALITY_FRAGMENT == "bundle_personality_fragment"
-    assert PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT == "parent_context_fragment"
-    assert PRODUCER_KIND_TOOLS_SUITE_FRAGMENT == "tools_suite_fragment"
-    assert PRODUCER_KIND_USER_MESSAGE_FRAGMENT == "user_message_fragment"
+    assert PRODUCER_KIND_SESSION_PROMPT == "session_prompt"
+    assert PRODUCER_KIND_FIRST_MESSAGE == "first_message"
     assert PRODUCER_KIND_DRIVER_STEPPER == "driver_stepper"
 
 
@@ -125,53 +109,34 @@ def test_session_producer_kinds_frozenset_covers_all() -> None:
         PRODUCER_KIND_SESSION_STARTED,
         PRODUCER_KIND_MODEL,
         PRODUCER_KIND_TOOL,
-        PRODUCER_KIND_PARK,
+        PRODUCER_KIND_RETURN,
         PRODUCER_KIND_SESSION_END,
-        PRODUCER_KIND_SESSION_WARNING,
-        PRODUCER_KIND_FRAGMENT_ERROR_WARNING,
-        PRODUCER_KIND_SESSION_OPEN,
-        PRODUCER_KIND_PROMPT_COMPOSER,
-        PRODUCER_KIND_PER_TURN_FRAGMENT,
-        PRODUCER_KIND_ROLE_FRAGMENT,
-        PRODUCER_KIND_BUNDLE_METHODOLOGY_FRAGMENT,
-        PRODUCER_KIND_BUNDLE_PERSONALITY_FRAGMENT,
-        PRODUCER_KIND_PARENT_CONTEXT_FRAGMENT,
-        PRODUCER_KIND_TOOLS_SUITE_FRAGMENT,
-        PRODUCER_KIND_USER_MESSAGE_FRAGMENT,
+        PRODUCER_KIND_SESSION_PROMPT,
+        PRODUCER_KIND_FIRST_MESSAGE,
         PRODUCER_KIND_INTERRUPT_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
     }
     assert SESSION_PRODUCER_KINDS == expected
 
 
-def test_fragment_source_kinds_is_subset_of_producer_kinds() -> None:
-    """Sprint 068's FRAGMENT_SOURCE_KINDS is composed from named
-    constants; must be a subset of the full producer-kind set. Phase 8
-    item 7 added interrupt_fragment as the eighth entry."""
-    assert FRAGMENT_SOURCE_KINDS <= SESSION_PRODUCER_KINDS
-    assert len(FRAGMENT_SOURCE_KINDS) == 8
-
-
 def test_trigger_id_final_strs() -> None:
     """Every TRIGGER_ID_* constant matches its wire string."""
-    assert TRIGGER_ID_RUN_TOOL == "run-tool"
-    assert TRIGGER_ID_CONTINUE == "continue"
-    assert TRIGGER_ID_WRAP_UP == "wrap-up"
-    assert TRIGGER_ID_PARK_ON_FINAL == "park-on-final"
-    assert TRIGGER_ID_PARK_ON_MODEL_ERROR == "park-on-model-error"
-    assert TRIGGER_ID_PARK_ON_INTERRUPT == "park-on-interrupt"
-    assert TRIGGER_ID_RESUME_ON_COMPOSED == "resume-on-composed"
+    assert TRIGGER_ID_TOOL_ON_TOOL_CALL == "tool-on-tool-call"
+    assert TRIGGER_ID_MODEL_ON_TOOL_RESULT == "model-on-tool-result"
+    assert TRIGGER_ID_MODEL_WRAP_UP_ON_TOOL_RESULT == "model-wrap-up-on-tool-result"
+    assert TRIGGER_ID_RETURN_ON_REPLY == "return-on-reply"
+    assert TRIGGER_ID_RETURN_ON_MODEL_ERROR == "return-on-model-error"
+    assert TRIGGER_ID_RETURN_ON_INTERRUPT == "return-on-interrupt"
     assert TRIGGER_ID_END_ON_EXIT == "end-on-exit"
-    assert TRIGGER_ID_END_ON_CAP == "end-on-cap"
-    assert TRIGGER_ID_END_ON_USER_END == "end-on-user-end"
-    assert TRIGGER_ID_EMIT_PER_TURN_FRAGMENT == "emit-per-turn-fragment"
-    assert TRIGGER_ID_EMIT_USER_MESSAGE_FRAGMENT == "emit-user-message-fragment"
-    assert TRIGGER_ID_COMPOSE_ON_COHORT_COMPLETE == "compose-on-cohort-complete"
-    assert TRIGGER_ID_WARN_ON_FRAGMENT_ERROR == "warn-on-fragment-error"
-    assert TRIGGER_ID_ADVANCE_ON_PARK == "advance-on-park"
+    assert TRIGGER_ID_END_ON_TURN_CAP == "end-on-turn-cap"
+    assert TRIGGER_ID_END_ON_END_REQUEST == "end-on-end-request"
+    assert TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED == "driver-stepper-on-returned"
+    assert TRIGGER_ID_MODEL_ON_USER_MESSAGE == "model-on-user-message"
 
 
 def test_session_trigger_ids_frozenset_covers_all() -> None:
-    """SESSION_TRIGGER_IDS holds every declared trigger id. Phase 8
-    item 7 added emit-interrupt-fragment and compose-on-interrupt-tool-result."""
-    assert len(SESSION_TRIGGER_IDS) == 17
+    """SESSION_TRIGGER_IDS holds every declared trigger id. K261 removed the per-turn chain's
+    four triggers and compose-on-interrupt-tool-result, and added model-on-user-message and
+    first-message-on-session-prompt. K263 removed warn-on-fragment-error: session_prompt records a
+    failed source itself."""
+    assert len(SESSION_TRIGGER_IDS) == 13

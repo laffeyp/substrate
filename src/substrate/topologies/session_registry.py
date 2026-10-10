@@ -176,7 +176,7 @@ class SessionEndedMidTurn(Exception):
 class FreshSessionRequiresUserMessage(Exception):
     """Sprint 217a: raised by `turn_sync` when the session's record is empty
     (no envelopes on disk yet) and the resume event is not a `UserMessage`.
-    A fresh session opens via `Runtime.run(topology)` with a `session_open`
+    A fresh session opens via `Runtime.run(topology)` with a `first_message`
     producer emitting the first `UserMessage`; other kinds cannot open a run
     in that shape. `_shutdown_all_sessions` catches this and buckets the
     session as `skipped_fresh`, transitioning the manifest to `"ended"`
@@ -731,8 +731,8 @@ class SessionRegistry:
 
         Status transition: a resume that returns `RunResult(status="finalised")`
         writes the manifest to `"ended"` and returns cleanly — the caller
-        (delegate) reads the tail FinalAnswer off the record and folds the
-        answer back. `/exit` mid-turn is a legitimate finalisation and no
+        (delegate) reads the turn's reply off the record (`vocabulary.turn_replies`) and folds
+        the answer back. `/exit` mid-turn is a legitimate finalisation and no
         exception is raised for it.
 
         Raises `KeyError` on unknown session_id; `SessionEndedMidTurn` when the
@@ -783,7 +783,7 @@ class SessionRegistry:
             # `Runtime.resume` on a fresh root and `_resume_bootstrap` saw
             # `max_seq == -1`, injected the resume event as the first envelope,
             # and skipped `substrate.RunStarted`. Now the daemon composes the
-            # two primitives: `.run()` on empty (with a `session_open` producer
+            # two primitives: `.run()` on empty (with a `first_message` producer
             # that emits the first UserMessage from an initial), `.resume()`
             # otherwise. Neither `Runtime.run` nor `Runtime.resume` changes.
             from substrate.topologies.session import UserMessage
@@ -800,7 +800,7 @@ class SessionRegistry:
             is_fresh_record = record_state == "empty"
             if is_fresh_record:
                 # Fresh session: the resume_event must be a UserMessage so the
-                # `session_open` producer can emit it as the first envelope.
+                # `first_message` producer can emit it as the first envelope.
                 # SIGTERM shutdown (or any other non-UserMessage first-turn caller)
                 # gets a typed refusal; `_shutdown_all_sessions` catches it and
                 # buckets under `skipped_fresh`.
@@ -1012,13 +1012,11 @@ class SessionRegistry:
                     # Soft with a live tool (Phase 8 item 7 wiring): inject
                     # InterruptRequested onto the record via the daemon-facing
                     # Runtime.inject_event primitive. The topology's
-                    # emit-interrupt-fragment trigger spawns the fragment
-                    # producer, which emits a PromptFragment(source=interrupt).
-                    # On the next ToolResult boundary,
-                    # compose-on-interrupt-tool-result fires the composer
-                    # (CONTINUE and WRAP_UP refuse the mirror condition), a
-                    # fresh PromptComposed lands, and the model wakes with the
-                    # tool result AND the interrupt directive in scope. The
+                    # interrupt-fragment-on-interrupt-request trigger starts the
+                    # fragment producer, which emits a PromptFragment(source=interrupt).
+                    # On the next ToolResult, model-on-tool-result starts the model,
+                    # whose prompt carries the tool result and the interrupt
+                    # directive. The
                     # synthetic ref reports "the request was received" so the
                     # client renders "the model will stop after this tool"
                     # instead of "no turn in flight."
@@ -1182,7 +1180,7 @@ def _record_state(record_root: Path) -> tuple[str, BaseException | None]:
 
       - `"empty"`   → no directory, or a directory with zero complete envelopes.
                      `turn_sync` composes `Runtime.run(session_topology)` and
-                     the `session_open` producer emits the first `UserMessage`.
+                     the `first_message` producer emits the first `UserMessage`.
       - `"has_envelopes"` → at least one complete envelope; `Runtime.resume`.
       - `"torn"`    → `api.read_record` raised. The daemon must refuse both
                      primitives: `.run` would write a fresh `RunStarted` at
@@ -1236,8 +1234,8 @@ def _stop_timed_out_turn(handle: TurnHandle | None, done: threading.Event) -> No
     """End a turn whose caller-set time limit passed (UI sprint 101).
 
     First the way the user's interrupt does it: cancel every live producer through
-    `Runtime.cancel_producer(cause="timeout")`. The session topology's park-on-interrupt trigger
-    then parks the turn, so the record ends with ProducerCancelled + Park and says who stopped it.
+    `Runtime.cancel_producer(cause="timeout")`. The session topology's return-on-interrupt trigger
+    then ends the turn, so the record ends with ProducerCancelled + Returned and says who stopped it.
     Cancelling the whole run task instead stops the run without recording why: the record ends
     mid-turn and every reader (boot scan, activity strip) sees a turn that never ended. That stays
     only as the fallback when the run has not parked within the grace period.
@@ -1275,9 +1273,9 @@ def _run_run_sync(
     handle_out: TurnHandle | None = None,
 ) -> Any:
     """Sprint 217a: run `Runtime(record_root, persistent=True).run(factory)` on
-    a fresh record in a worker thread with its own event loop. The `session_open`
+    a fresh record in a worker thread with its own event loop. The `first_message`
     producer inside the factory emits the first-turn UserMessage; the topology
-    fires through to `Park` and pauses on `pause_await_input`. The primitive
+    fires through to `Returned` and pauses on `pause_await_input`. The primitive
     itself is unchanged; the daemon composes it here for turn 1.
 
     Same shape as `_run_resume_sync` — TurnHandle populated for interrupt,

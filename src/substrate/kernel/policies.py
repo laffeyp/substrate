@@ -59,11 +59,25 @@ class TerminationPolicy:
         fn: Callable[[TermContext], Decision],
         resume_condition: str | None = None,
         finalisation: Callable[[TermContext], Any] | None = None,
+        *,
+        members: tuple["TerminationPolicy", ...] = (),
+        resumable: bool = True,
     ) -> None:
         self.name = name
         self._fn = fn
         self.resume_condition = resume_condition
         self.finalisation = finalisation
+        # A composed policy's parts (`any_of`, `all_of`), so a check can walk the structure
+        # instead of parsing `name` (lens F097).
+        self.members = members
+        # False when the policy cannot decide correctly across a pause and resume (`all_completed`).
+        self.resumable = resumable
+
+    def leaves(self) -> list["TerminationPolicy"]:
+        """Every non-composed policy inside this one, at any depth."""
+        if not self.members:
+            return [self]
+        return [leaf for member in self.members for leaf in member.leaves()]
 
     def decide(self, ctx: TermContext) -> Decision:
         return self._fn(ctx)
@@ -116,6 +130,7 @@ def all_completed() -> TerminationPolicy:
             if (c.quiescent and c.running == 0 and c.started > 0 and c.completed >= c.started)
             else Decision.CONTINUE
         ),
+        resumable=False,
     )
 
 
@@ -183,7 +198,7 @@ def any_of(*policies: TerminationPolicy) -> TerminationPolicy:
     # wrapper still records its typed resume_condition on TerminationMatched (observability:
     # the paused run names what input it awaits). The first member that declares one wins.
     resume_condition = next((p.resume_condition for p in policies if p.resume_condition), None)
-    return TerminationPolicy(name, fn, resume_condition=resume_condition)
+    return TerminationPolicy(name, fn, resume_condition=resume_condition, members=tuple(policies))
 
 
 def all_of(*policies: TerminationPolicy) -> TerminationPolicy:
@@ -196,4 +211,4 @@ def all_of(*policies: TerminationPolicy) -> TerminationPolicy:
             return Decision.FINALISE_RUN
         return Decision.CONTINUE
 
-    return TerminationPolicy(name, fn)
+    return TerminationPolicy(name, fn, members=tuple(policies))

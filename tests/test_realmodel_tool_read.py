@@ -7,7 +7,7 @@ write escaped tmp_path.
 
 Bar per test (see sprint 052 notes): model picks the right tool by
 name, the tool's ToolResult carries the expected shape, and the
-model's FinalAnswer reflects reading the result."""
+model's reply reflects reading the result."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 import pytest
 
+from substrate.topologies.session.vocabulary import turn_replies
 from substrate import api
 from substrate.adapters import OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
@@ -60,7 +61,6 @@ def _open(*, tmp_path: Path, tools: dict, first_text: str, system: str | None = 
         turn_max_steps=5,
         session_id="s_read_test",
         workspace_path=str(workspace),
-        record_root=tmp_path / "record",
         script=None,
         first_turn_user_message=UserMessage(
             text=first_text, turn_index=0, assembled_prompt=first_text, slash_source="test"
@@ -77,8 +77,8 @@ def _by_kind(envs: list[dict], kind: str) -> list[dict]:
 
 
 def _last_answer(envs: list[dict]) -> str:
-    finals = _by_kind(envs, "FinalAnswer")
-    return str(finals[-1]["payload"].get("text", "")) if finals else ""
+    finals = turn_replies(envs)
+    return finals[-1][1] if finals else ""
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+import msgspec
 from msgspec import Struct
 from ulid import ULID
 
@@ -42,8 +43,9 @@ from ..constants import (
     is_reserved,
 )
 from ..encoding import SafeCanonical, content_hash, safe_raw, try_canonical
+from ..errors import InputTypeError
+from ..record.inputs import check_input
 from ..protocols import TriggerContext
-from ..record.sealing import seal
 from ..record.sidecar import DiagnosticSidecar
 from ..types import Event, ProducerRef
 from .runstate import RunPhase, RunState
@@ -245,6 +247,35 @@ class AppendCycle:
         blob_ref = self._record.put_blob(sc.raw_bytes)
         return {"$blob": blob_ref.sha256, "bytes": blob_ref.bytes}, sc.builtins
 
+    def _producer_input(self, resolved: Any) -> tuple[dict[str, Any], str, Any]:
+        """The recorded input fields, `input_sha256` and the Producer's input, from one byte string
+        (K267). The input's canonical bytes are built once: recorded (inline or as a blob), hashed,
+        and decoded into a fresh value for the Producer. The Producer runs with exactly what the
+        record holds, as its own copy: a change it makes reaches no View, no staged event and no
+        other Producer (F-PROD-3 as amended 2026-10-09, isolation by copy). A value with no
+        canonical form raises InputTypeError, recorded by the caller as InputBuildFailed.
+
+        A frozen Struct input decodes back into its own type; any other input arrives as the
+        record's JSON shape (dicts, lists, scalars)."""
+        if resolved is None:
+            return {"resolved_input": None}, content_hash(None), None
+        check_input(resolved)
+        sc = try_canonical(resolved)
+        if not sc.ok:
+            raise InputTypeError(
+                f"producer input has no canonical form: {sc.reason} at {sc.at_path}"
+            )
+        if sc.nbytes <= BLOB_THRESHOLD_BYTES:
+            fields: dict[str, Any] = {"resolved_input": sc.builtins}
+        else:
+            blob_ref = self._record.put_blob(sc.raw_bytes)
+            fields = {"input_blob": {"$blob": blob_ref.sha256, "bytes": blob_ref.bytes}}
+        if isinstance(resolved, Struct):
+            copy = msgspec.json.decode(sc.raw_bytes, type=type(resolved))
+        else:
+            copy = msgspec.json.decode(sc.raw_bytes)
+        return fields, sc.hash, copy
+
     def _resolved_input_fields(self, resolved: Any) -> dict[str, Any]:
         """The TriggerFired input field(s): per D-5, EXACTLY ONE of `resolved_input`
         (inline, ≤ threshold) or `input_blob` (the BlobRef when oversized) is present; the
@@ -417,17 +448,13 @@ class AppendCycle:
                 continue
             if not do_fire:
                 continue
-            # Build → seal → canonicalize the resolved input, ALL inside one guard: a
+            # Build → canonicalize → copy the resolved input, ALL inside one guard: a
             # non-canonical builder output is an InputBuildFailed (no Producer starts), never
-            # an uncaught crash (technical §6.2 step 5 / §6.3 / F-TRIG-5). The hash and
-            # recorded input are taken from the pre-seal value (seal normalizes to
-            # MappingProxyType/tuple, which msgspec cannot encode; the canonical bytes of the
-            # pre-seal value are identical to what the sealed value represents — D-5).
+            # an uncaught crash (technical §6.2 step 5 / §6.3 / F-TRIG-5). K267: the recorded
+            # input, its hash and the Producer's copy come from one canonical byte string.
             try:
                 resolved = t.input_builder(ctx)
-                sealed = seal(resolved)  # immutability by construction (§8.3)
-                input_fields = self._resolved_input_fields(resolved)
-                input_hash = content_hash(resolved)
+                input_fields, input_hash, producer_input = self._producer_input(resolved)
             except Exception as exc:  # noqa: BLE001 — user code (View, Route, Predicate, policy, input builder) raising is recorded per §6.3, never a writer crash
                 st.control.append(
                     _Lifecycle(
@@ -451,7 +478,7 @@ class AppendCycle:
                     },
                 )
             )
-            st.scheduled.append((t.starts, sealed, instance, parent))
+            st.scheduled.append((t.starts, producer_input, instance, parent))
             st.trigger_last_fired_match[idx] = st.trigger_match_count[idx]
 
     def _quarantine(

@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 import pytest
 
+from substrate.topologies.session.vocabulary import turn_replies
 from substrate import api
 from substrate.adapters import DeterministicResponder, OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
@@ -74,7 +75,6 @@ def _open(*, tmp_path: Path, tools: dict, first_text: str) -> Any:
         turn_max_steps=4,
         session_id="s_spawn_test",
         workspace_path=str(workspace),
-        record_root=tmp_path / "record",
         script=None,
         first_turn_user_message=UserMessage(
             text=first_text, turn_index=0, assembled_prompt=first_text, slash_source="test"
@@ -91,8 +91,8 @@ def _by_kind(envs: list[dict], kind: str) -> list[dict]:
 
 
 def _last_answer(envs: list[dict]) -> str:
-    finals = _by_kind(envs, "FinalAnswer")
-    return str(finals[-1]["payload"].get("text", "")) if finals else ""
+    finals = turn_replies(envs)
+    return finals[-1][1] if finals else ""
 
 
 # ── delegate ─────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ async def test_delegate_child_returns_and_parent_quotes_it(tmp_path: Path) -> No
     assert child_root.startswith(str(tmp_path)), (
         f"child_root {child_root!r} escaped tmp_path {tmp_path!r}"
     )
-    # COMPREHENSION: parent's FinalAnswer references the child_root path
+    # COMPREHENSION: parent's reply references the child_root path
     # (fragment enough — full paths are noisy for a small model).
     answer = _last_answer(envs)
     fragment = Path(child_root).name  # e.g. "child_0" or a hash

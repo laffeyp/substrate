@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Peter Laffey
 """CI-mode wrapper for `session_topology` — sprint 209b.
 
-`session_topology`'s production termination is `pause_await_input(Park)` — the
+`session_topology`'s production termination is `pause_await_input(Returned)` — the
 correct shape for a driver conversation that yields between turns. That shape
 does not finalise via a single `.run()`, so `scripts/gen_topology_records.py`
 cannot generate a bundled CI record from `session_topology` alone.
@@ -10,22 +10,21 @@ cannot generate a bundled CI record from `session_topology` alone.
 `ci_session_topology(turns=[...])` composes over `session_topology` with three
 additions: (1) a `driver_stepper` producer that yields one `UserMessage` per
 firing, indexed by turn; (2) an `initial("driver_stepper", ...)` binding that
-opens the first turn on `.run()`; (3) an `advance-on-park` trigger that fires
-the next turn's `UserMessage` on every `Park` until the script exhausts. The
+opens the first turn on `.run()`; (3) a `driver-stepper-on-returned` trigger that fires
+the next turn's `UserMessage` on every turn end (`Returned`, or `Park` on an old record)
+until the script exhausts. The
 last entry in `turns` is `/exit`, which the existing `end-on-exit` trigger
 converts to `SessionEnded(reason="user_exit")`; `session_topology`'s
 termination is then overwritten with `threshold_count("SessionEnded", 1)` so
 the run finalises cleanly on that event.
 
-Everything else — the eight Structs, ten triggers, five producer kinds, three
-Views, the `_refuse_all_completed` guard — comes from `session_topology` and
-does not diverge here. The CI record is a byte-stable proof of the piece-A
-wiring end-to-end.
+Everything else — the Structs, producers, triggers, views and the `_refuse_all_completed`
+guard — comes from `session_topology` unchanged. The CI record is a byte-stable proof of the
+wiring end to end.
 """
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -35,10 +34,10 @@ from ...adapters import DeterministicResponder
 from ..tool_loop.tools import CALCULATOR
 from . import UserMessage, session_topology
 from .vocabulary import (
-    PARK,
     PRODUCER_KIND_DRIVER_STEPPER,
     SESSION_ENDED,
-    TRIGGER_ID_ADVANCE_ON_PARK,
+    TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED,
+    TURN_END_KINDS,
 )
 
 _CI_SESSION_ID = "s_CI"
@@ -60,7 +59,7 @@ def _ci_stepper_factory(turns: tuple[str, ...]) -> Callable[[], Any]:
         yield UserMessage(
             text=text,
             turn_index=turn_index,
-            assembled_prompt=text,
+            assembled_prompt="",
             slash_source="ci",
         )
 
@@ -112,13 +111,7 @@ def ci_session_topology(
         )
 
     def topo(b: api.TopologyBuilder) -> None:
-        # A three-turn scripted run is the documented exception to session_topology's
-        # record_root warning (one K-window of turns); UI sprint 107 stops it firing on every
-        # CI build, where it hid the warnings that matter.
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message=r"session_topology\(record_root=None\)")
-            base = _ci_base()
-        base(b)
+        _ci_base()(b)
         b.producer_kind(
             PRODUCER_KIND_DRIVER_STEPPER,
             schemas=[UserMessage],
@@ -128,8 +121,8 @@ def ci_session_topology(
         )
         b.initial(PRODUCER_KIND_DRIVER_STEPPER, input={"turn_index": 0})
         b.trigger(
-            TRIGGER_ID_ADVANCE_ON_PARK,
-            subscription=api.Subscription(kinds=frozenset({PARK})),
+            TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED,
+            subscription=api.Subscription(kinds=TURN_END_KINDS),
             predicate=lambda ctx: int(ctx.event.payload.get("turn_index", 0)) + 1 < len(turns),
             starts=PRODUCER_KIND_DRIVER_STEPPER,
             input_builder=lambda ctx: {

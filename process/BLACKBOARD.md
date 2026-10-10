@@ -529,6 +529,42 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Sprint K266 (2026-10-09, closed) — the session's documents match the code
+- Session docstrings no longer state counts or name retired parts; `SESSION_KINDS` now lists every session event Struct, with a test that keeps it so.
+- The Docker test tier is now gated once, in `tests/conftest.py`: before, one Docker test ran or skipped depending on how fast Docker answered, which moved the default suite's skip count between 4 and 5. The default run now always skips the same 5 tests, each named.
+
+### Sprint K265 (2026-10-09, closed) — no re-emission; every session-open fragment reaches the prompt
+- The "re-emitted after a resume" fragments of research F6 were first writes that landed after the first message: a startup race that K261 closed. With that, `FragmentCohort`'s newest-wins slot had no reason left; it was dropping every methodology but the last of a bundle's `extends` chain. It now keeps them all. A new gate restarts the installed app mid-session and finds the fragments written once.
+- pytest now runs with `-ra` in both repos: every run names each skipped or failed test and its reason. One earlier run's fifth skip went unnamed because its output was cut; that cannot recur.
+
+### Sprint K264 (2026-10-09, closed) — one trigger naming rule
+- All 13 session triggers are `<what it starts>-on-<event>` (vocabulary § O); `end-on-turn-cap` writes `reason=turn_cap`, and old `timeout` reads as it in the kernel and the UI. Raw kind strings in the session package give way to constants, and a test now scans for them.
+- `test_ensemble_real_disagreement_and_cancel` fails about one run in five on sampling alone (2 of 10 solo runs; all three `llama3.2:1b` answers "integrity.").
+
+### Sprint K263 (2026-10-09, closed) — one producer for the session prompt
+- `session_prompt` runs the five session-open sources and the seed-size check; `first_message` replaces `session_open`. A source that raises becomes `SessionWarning(fragment_source_failed, source_name, detail)` and the others still land, so the merge keeps per-source failure isolation; no `warning` producer was needed (vocabulary § N). 8 producer kinds; session open 22 → 13 envelopes; a plain turn stays 10.
+- The session's parent-context slice now uses delegate's extractor (`session/context_slice.py`, F106). The UI warning row had read a nonexistent `condition_kind` and showed "warning: warning"; fixed and gated. A parent-context test that had checked nothing since K262 now checks.
+
+### Sprint K262 (2026-10-09, closed) — one reply per model call; Returned ends the turn
+- `ModelReply(text, stop_reason, usage, turn_index, step)` per model call with real provider counts (`achat_tools_metered`); no `FinalAnswer` on session records; `Returned` from the `return` producer, including when a cancelled tool ends the turn (F093); the termination guard walks policy members (F097). Vocabulary addendum M.
+- Gating found three Electron gates that ran from source despite `SHAKEOUT_APP`; they now read it. `docs/api.md` had been stale since K267.
+
+### Sprint K268 (2026-10-09, closed) — the model step reads its history by reference
+- `api.read_range` (backward read of the hot segment) and `api.current_record_root`; the model step's recorded input is a ticket to the kept seq range of its own record. A recorded path was tried and removed: it made records depend on where they sit.
+
+### Sprint K261 (2026-10-09, closed) — the prompt is built once and recorded exactly
+- The model step builds, records (`PromptComposed`) and sends one prompt; seed first, the user's message once, the pre-K261 wording otherwise (diffed against the old code). Composer and per-turn chain removed. History window sized from real turn sizes; compaction verified live on `llama3.2:1b` at 2,048 tokens. `docs/compaction.md`.
+
+### Sprint K267 (2026-10-09, closed) — a Producer's input is its own copy of the recorded input
+- The kernel no longer seals inputs (read-only MappingProxyType, tuples). It checks the input's types (`record/inputs.py`), records and hashes its canonical bytes, and hands the Producer a decode of those same bytes. One form of every input: what a Producer runs with is the record. Ratified 2026-10-09; spec amendment `docs/specs/AMENDMENT-2026-10-09-input-isolation.md`.
+- The sealed form had caused bugs in sprints 049, 052, 053 and K261; the predicted run found a fifth (`conversation.py:135` printed tuples into the speaker prompt) through the `natural_conversation` CI record moving.
+
+### Sprint K260 (2026-10-09, closed) — kernel readers accept both session shapes
+- `vocabulary.py` `RETURNED`, `TURN_END_KINDS`, `turn_replies`; transcript, delegate and the CI wrapper read old (Park/FinalAnswer) and v0.3 records alike.
+
+### Sprint K259 (2026-10-09, closed) — session vocabulary v0.3
+- Section K of `process/signals/session-vocabulary.md`: ModelReply per model call with stop_reason and usage; `Returned` replaces Park; plain producer and trigger names.
+
 ### Sprint 079 (2026-09-15, closed) — `ToolProgress` envelope + `_bash` Popen streaming (Phase 8 item 8)
 - **Scope:** the last remaining Phase 8 substrate item. Bash was `subprocess.run(capture_output=True)` — no chunks visible until completion. Sprint 079 replaces it with `subprocess.Popen(stdout=PIPE, stderr=PIPE, bufsize=1)` reading stdout line by line; each line emits one `ToolProgress` envelope through the item-7 injection primitive. A trailing `ToolProgress(eof=True, chunk="")` closes the stream. The final `ToolResult` still carries the full stdout / stderr / exit — subscribers who ignore ToolProgress read the same shape they read before.
 - **Three additions.** `ToolProgress(call_id, tool, step, chunk, offset, eof)` Struct in `tool_loop/__init__.py`. `_CURRENT_RUNTIME` `contextvars.ContextVar` in `kernel/runtime.py`, set at `_drive` entry and reset in the finally block; `asyncio.to_thread` copies the caller's context so the value flows into the worker thread that runs the tool body. `emit_tool_progress(call_id, tool, step, chunk, offset, eof)` helper reads the contextvar, resolves the runtime's `_loop`, and enqueues via `loop.call_soon_threadsafe(runtime.inject_event, event)`. When no runtime is bound (a direct unit-test call to `entry.run`), the emit is a silent no-op — the tool's return path is unaffected.

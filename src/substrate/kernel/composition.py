@@ -111,7 +111,7 @@ def embedded_substrate(
     wording assumes an outer carrier; that the carrier must be author-named is a tech-spec §20
     flow-back — see BLACKBOARD.)
 
-    The returned callable is the Producer `start`: the outer runtime calls it with the sealed
+    The returned callable is the Producer `start`: the outer runtime calls it with the
     resolved input (which carries the inner record root under input["inner_root"]) and
     consumes the translated outer events under outer admission.
 
@@ -231,7 +231,7 @@ def _inner_root_from_input(input: Any) -> Path:
     """The inner record root, read REQUIRED from the resolved input (the outer TriggerFired
     records it, §20 — that recording IS the run-granularity provenance link). Refuse if
     absent: a fabricated fallback root would be citable from nowhere on the outer record.
-    The sealed input is typically a (read-only) mapping."""
+    The input is typically a mapping."""
     get = getattr(input, "get", None)
     if callable(get):
         root = get("inner_root")

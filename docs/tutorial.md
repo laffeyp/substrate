@@ -53,7 +53,7 @@ It prints `finalised ./runs/first`. That directory is a **run record** — the l
 What you declared:
 
 - `producer_kind` registers a Producer KIND. It takes a name, the event `schemas` it may emit, a `schema_version`, and a `factory` that returns the `start` callable.
-- Every event schema is `frozen=True`. That is how the runtime keeps Producer inputs immutable by construction (F-PROD-3).
+- Every event schema is `frozen=True`. Producer inputs are isolated differently: each Producer receives its own copy of its recorded input, decoded from the record's bytes (F-PROD-3, amended 2026-10-09).
 - `b.initial(kind, input=...)` schedules one Producer of that kind at run open.
 - A `TerminationPolicy` decides when the run ends. `threshold_count(kind, n)` finalises after `n` events of `kind`; here, after the counter's one `substrate.ProducerCompleted`.
 

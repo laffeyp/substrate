@@ -7,13 +7,13 @@ status: open
 opened_at: 2026-10-08
 pass_kind: remediation
 roadmap: substrate-ui/process/planning/ROADMAP-2026-10-08-lens-audit-remediation.md
-ledger_rows: 64
+ledger_rows: 46
 ---
 ```
 
 ## why
 
-A hard interrupt during a tool call fails the turn (probe); per_turn appears once per kept turn plus once (probe); a created session reports RUNNING; fan-out children default to the stub and escape the cascade (findings §2, §6).
+A created session reports RUNNING; fan-out children default to the stub and escape the cascade (findings §2, §6).
 
 ## sources
 
@@ -66,38 +66,17 @@ Each row closes as named; a row the sprint cannot close halts the sprint.
 | F090 | fix | substrate_tools.py:626-636 — list_records docstring says it walks `<records_root>/runs/*/` too; the code walks only the sessions directory. |
 | F091 | fix | substrate_tools.py:522-524 — every inspect_record events page re-reads and blob-resolves the whole record. |
 | F092 | fix | substrate_tools.py:13-15 cite tools.py:64 and :357 (stale line numbers); :287 "Budget cap,: both" (garbled). |
-| F093 | fix | CONFIRMED session/__init__.py:1118-1128 — park-on-interrupt fires only when the cancelled producer is the MODEL. A hard interrupt during a tool call (what ctrl+c / Esc / quit / /end / delete send when a tool is live: … |
-| F094 | fix | session/__init__.py:496,528,553,559 — every ModelReply carries model_usage={}; the session never records tokens or latency (ModelUsage and call_responder_metered exist, unused here). |
-| F095 | fix | session/__init__.py:245 and tool_loop/__init__.py:55 — two _MAX_CONSECUTIVE_FAILS = 3 constants; session/__init__.py:3-20,389-393 docstrings describe scaffolded bodies and a deferred TOOL: parse path (both replaced). |
-| F096 | fix | session/__init__.py:900,1038,1042,1055,1069,1084,1092,1137,1194 — kind literals "ToolResult"/"ToolCall"/"FinalAnswer"/"PromptComposed"/"InterruptRequested" beside vocabulary constants imported from .vocabulary for oth… |
-| F097 | fix | session/__init__.py:85-103 — `all_completed` refused by regex over the composed policy NAME string. |
-| F098 | fix | transcript.py:177-193,312-337 — the rolling window keeps K = budget / 800 turns from a fixed per-turn guess and never checks the rendered prompt's estimated size (tokens_estimated is computed, then only reported). A t… |
-| F099 | fix | transcript.py:20-22 — "Real spend telemetry flows through ModelUsage on ModelReply"; ModelReply.model_usage is always {} (session/__init__.py). |
-| F100 | fix | transcript.py:255-263 with server.py _build (per_turn prefixed into UserMessage.assembled_prompt) — the comment says per_turn "no longer injects here", but every rendered USER line uses assembled_prompt, which already… |
-| F101 | fix | transcript.py:312-314 — every model firing (every step of every turn) reads and blob-resolves the whole record; :339-359 every firing after the window fills writes a new TranscriptCompacted (and renders the full trans… |
-| F102 | fix | vocabulary.py:81,88-101 — BACKGROUND_TASK_ENDED is defined but missing from SESSION_KINDS, so is_session_kind("BackgroundTaskEnded") is False; the module says "eight" kinds (3, 293) and "seven" prompt sources (282) — … |
-| F103 | fix | vocabulary.py:13-16 — claims "zero raw literals … outside this file"; session/__init__.py subscribes with "PromptComposed" (1038,1137) and "InterruptRequested" (1194) literals although PROMPT_COMPOSED exists. |
-| F104 | fix | views.py:63 — ModelFailures compares producer kind to "model" (PRODUCER_KIND_MODEL exists). |
-| F105 | fix | composer.py:5-31,88-92 — docstring: fires on UserMessage, reads a KindBuffer, "sprint 059 landing state" with positional seqs, telemetry "lands on ModelReply.model_usage" — all superseded (FragmentCohort, chained trig… |
-| F106 | fix | parent_context_producer.py:41 — slice cap 64 KiB "matches delegate.py's default"; delegate.py:65 uses 8,192. :44-107 copies delegate's _format_context_event/_extract_context_slice (acknowledged at :61-63); :20-25 the … |
-| F107 | fix | composed-prompt order by precedence: role 0, personality 3, per_turn 10, tools_suite 20, parent_context 30, methodology 50+, interrupt 95, user_message 100. role_producer.py:9-10 states the intent "methodology before … |
-| F108 | fix | per_turn_producer.py:10-17 — "dual-path … duplication is intentional through the migration" (sprint 064 finished; the duplication persists through assembled_prompt — see transcript finding). |
-| F109 | fix | ci.py:20-21 — "eight Structs, ten triggers, five producer kinds, three Views" (now 10+ structs, 17 triggers, 18 producer kinds, 6 views). |
 | F111 | fix | bundled.py:73-101,207-214 — register_all() calls EVERY bundled factory to register one name; _fanout_review_ci runs `git init`/commits under substrate_home()/ci-fixtures, and swebench_repair_ci builds a fixture there … |
 | F291 | closes with the finding it resolves | `_daemon` 8765: server.py:1620-1623 default `SUBSTRATE_UI_PORT=8765`; the packaged app passes `--port 0`; `substrate daemon` CLI fallback (`_daemon.py:68`) reaches this server only when it was started standalone witho… |
 | F313 | fix | workspace_shape vocabularies: kernel WorkspaceShape {flat, worktree, isolate}; server `_classify_workspace_shape` {worktree, sandbox, path} + "per-session-sandboxes" (l.1608); server `_list_sessions_snapshot` bucket "… |
 | F452 | closes with the finding it resolves | VERIFY RESOLVED [E/H] substrate/src/substrate/session_registry.py:435 — `create()` writes status=RUNNING for a session that has run no turn. tests/test_server_session_list.py:47-68 pins it: a just-created session land… |
 | F453 | fix | session_registry.py:66-72 — SessionStatus docstring says the STATUS_* module aliases "stay as aliases … below"; there are none (grep: 0 definitions, 0 uses). |
-| F469 | closes with the finding it resolves | l.126 per_turn duplication — CONFIRMED BY PROBE (scratchpad/probe_per_turn.py: real SessionRegistry + server._build_session_topology_from_manifest, per_turn "PFX::", two turns, a responder that records prompts). The s… |
 | F470 | closes with the finding it resolves | l.60 workspace_shape — CONFIRMED, five vocabularies for one field: kernel WorkspaceShape {flat, worktree, isolate} (session_registry.py:80-87) while SessionManifest.workspace_shape is `str` (:116); server POST /api/se… |
 
 ## checks
 
-- Hard interrupt during a slow tool → Park, turn parked (probe becomes a test).
-- per_turn appears once in the composed prompt (probe becomes a test).
 - create() writes PARKED; GET /api/session lists it under parked.
 - Fan-out children carry composite_of, require a driver, and end with the parent.
-- ModelReply carries ModelUsage tokens and latency.
 - WorkspaceShape is the only shape vocabulary; the server rejects other values.
 - bash output truncation carries a marker; TaskTable and bash files are pruned on session delete.
 

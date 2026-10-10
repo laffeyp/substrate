@@ -27,7 +27,7 @@ from substrate.topologies.session.interrupt_fragment_producer import (
 )
 from substrate.topologies.session.vocabulary import (
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
-    TRIGGER_ID_EMIT_INTERRUPT_FRAGMENT,
+    TRIGGER_ID_INTERRUPT_FRAGMENT_ON_INTERRUPT_REQUEST,
 )
 
 
@@ -58,7 +58,7 @@ def _minimal_interrupt_topology() -> Any:
         )
         b.initial("pulse", input=None)
         b.trigger(
-            TRIGGER_ID_EMIT_INTERRUPT_FRAGMENT,
+            TRIGGER_ID_INTERRUPT_FRAGMENT_ON_INTERRUPT_REQUEST,
             subscription=api.Subscription(kinds=frozenset({"InterruptRequested"})),
             predicate=lambda ctx: True,
             starts=PRODUCER_KIND_INTERRUPT_FRAGMENT,

@@ -95,15 +95,32 @@ def test_kind_name_constants_match_struct_qualnames() -> None:
 
 
 def test_session_kinds_frozenset_includes_the_two_v02_names() -> None:
-    """SESSION_KINDS is the union of every kind the session vocabulary
-    covers. Post-v0.2 that is ten names: the eight from v0.1 plus the two
-    from v0.2. is_session_kind returns True for each."""
+    """SESSION_KINDS covers the v0.2 prompt kinds; is_session_kind returns True for each."""
     assert PROMPT_FRAGMENT in SESSION_KINDS
     assert PROMPT_COMPOSED in SESSION_KINDS
     assert is_session_kind(PROMPT_FRAGMENT)
     assert is_session_kind(PROMPT_COMPOSED)
     assert "SessionStarted" in SESSION_KINDS
     assert "UserMessage" in SESSION_KINDS
+
+
+def test_session_kinds_is_exactly_the_session_structs() -> None:
+    """K266: SESSION_KINDS names every event Struct the session package exports, and nothing
+    else, so a new Struct cannot ship unlisted (BackgroundTaskEnded and InterruptRequested were
+    missing until K266). ToolCall and ToolResult are tool_loop's, borrowed."""
+    import msgspec
+
+    import substrate.topologies.session as session
+
+    structs = {
+        name
+        for name, obj in vars(session).items()
+        if isinstance(obj, type)
+        and issubclass(obj, msgspec.Struct)
+        and obj.__module__.startswith(session.__name__)
+    }
+    assert structs == set(SESSION_KINDS)
+    assert is_session_kind("BackgroundTaskEnded")
 
 
 def test_prompt_source_enum_has_all_v02_plus_interrupt_values() -> None:

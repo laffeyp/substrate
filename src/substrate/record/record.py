@@ -481,6 +481,112 @@ def _read_record_raw(
         yield _checked(env)
 
 
+def read_range(
+    root: Path | str, from_seq: int, to_seq: int, *, resolve_blobs: bool = False
+) -> Iterator[dict[str, Any]]:
+    """The envelopes with `from_seq <= seq <= to_seq`, in seq order, without reading the whole
+    record (K268). Sealed segments the manifest places wholly before the range are skipped and
+    reading stops after `to_seq`; the manifest is advisory, so a segment it gives no bounds for is
+    read. Every frame read is crc-checked; a missing seq in the range raises RecordGapError, as
+    the full reader does. The record is append-only, so the same range always returns the same
+    events: a Producer can be handed a ticket to a range of its own record (claim check).
+    """
+    root = Path(root)
+    bounds: dict[str, tuple[int, int]] = {}
+    try:
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        for entry in manifest.get("sealed_segments", []):
+            if isinstance(entry, dict) and "first_seq" in entry and "last_seq" in entry:
+                bounds[str(entry["file"])] = (int(entry["first_seq"]), int(entry["last_seq"]))
+    except (OSError, ValueError):
+        pass
+    expected = from_seq
+
+    def _frames() -> Iterator[dict[str, Any]]:
+        for seg in sealed_segments(root):
+            span = bounds.get(seg.name)
+            if span is not None and span[1] < from_seq:
+                continue
+            if span is not None and span[0] > to_seq:
+                return
+            data = _read_bytes_nofollow(seg)
+            if data and not data.endswith(b"\n"):
+                raise RecordGapError(f"sealed segment {seg.name} has a torn tail (data loss)")
+            for offset, line in enumerate(data.splitlines(keepends=True)):
+                try:
+                    yield framing.verify_line(line[:-1])
+                except (CRCMismatchError, TornFrameError) as exc:
+                    raise CRCMismatchError(
+                        f"corruption in sealed segment {seg.name} at line {offset}: {exc}"
+                    ) from exc
+        hot = hot_segment(root)
+        if hot is not None:
+            yield from _hot_tail_frames(hot, from_seq)
+
+    for env in _frames():
+        seq = int(env.get("seq", -1))
+        if seq < from_seq:
+            continue
+        if seq != expected:
+            raise RecordGapError(
+                f"seq gap in range {from_seq}..{to_seq}: expected {expected}, got {seq}"
+            )
+        yield _resolved(env, root) if resolve_blobs else env
+        expected += 1
+        if expected > to_seq:
+            return
+    if expected <= to_seq:
+        raise RecordGapError(f"seqs {expected}..{to_seq} are not on the record")
+
+
+_TAIL_BLOCK = 256 * 1024
+
+
+def _hot_tail_frames(path: Path, from_seq: int) -> list[dict[str, Any]]:
+    """The hot segment's good frames from the one holding `from_seq` (or the file's start) on,
+    read backwards from the end in blocks: a session's window is its newest turns, so this reads
+    about as much as the window, not the whole segment. Same cut rule as `framing.recover`: the
+    first unterminated or crc-invalid line ends the good frames (a torn tail)."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        pos = os.fstat(fd).st_size
+        buf = b""
+        while pos > 0:
+            step = min(_TAIL_BLOCK, pos)
+            pos -= step
+            os.lseek(fd, pos, os.SEEK_SET)
+            buf = os.read(fd, step) + buf
+            start = 0 if pos == 0 else buf.find(b"\n") + 1
+            if start == 0 and pos > 0:
+                continue  # no line start in the buffer yet
+            nl = buf.find(b"\n", start)
+            if nl < 0:
+                continue
+            try:
+                first = framing.verify_line(buf[start:nl])
+            except (CRCMismatchError, TornFrameError):
+                if pos == 0:
+                    return []
+                continue
+            if int(first.get("seq", -1)) <= from_seq:
+                buf = buf[start:]
+                break
+            if pos == 0:
+                break
+        frames: list[dict[str, Any]] = []
+        for line in buf.splitlines(keepends=True):
+            if not line.endswith(b"\n"):
+                break
+            try:
+                frames.append(framing.verify_line(line[:-1]))
+            except (CRCMismatchError, TornFrameError):
+                break
+        return frames
+    finally:
+        os.close(fd)
+
+
 def _recover_hot(root: Path) -> list[dict[str, Any]] | None:
     """Recover the hot segment: its frames up to the last complete, crc-valid one, truncating
     whatever follows on disk. None when there is no hot segment."""

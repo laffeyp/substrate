@@ -33,7 +33,6 @@ def _factory(
 ) -> Callable[[api.TopologyBuilder], None]:
     del first_turn_user_message  # delegate path uses .resume(); no first-turn opener needed
     return session_topology(
-        record_root=Path(manifest.record_root),  # the daemon's configuration (UI sprint 107)
         driver=DeterministicResponder(seed=7),
         driver_name="deterministic",
         driver_context_tokens=4096,

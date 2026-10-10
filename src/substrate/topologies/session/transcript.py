@@ -1,31 +1,23 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""Session transcript renderer — rolling-window compaction (piece A, sprint 207).
+"""Session prompt builder and history window (piece A, sprint 207; rebuilt in K261).
 
-The `model` Producer receives a rendered prompt each turn, not the raw event list.
-`render_transcript` reads the persistent record, groups the envelope stream by turn,
-keeps the most recent K turns, and returns a `RenderedTranscript`. When turns drop,
-one `TranscriptCompacted` rides on `compaction_events`; the model Producer yields
-those before its first `ToolCall`/`ModelReply` so the compaction is anchored to the
-firing that drove it (the tech spec cadence).
+`compose_model_prompt` builds the whole prompt for one model call: the seed, the session's prompt
+fragments and per_turn by precedence, the kept turns with the current one last, any interrupt,
+background-task notices. The model step appends its pre-K261 endings, records the final text as
+`PromptComposed` and sends it unchanged.
 
-Compaction strategy in v1 is rolling window only. `_compute_k` divides the budget
-(driver context × headroom fraction, minus seed and per-turn tokens) by an
-avg_turn_tokens heuristic (800). The design target reads "20 turns for a 200 K-window
-model, 4 for an 8 K-window model" — that band is what 800 reproduces.
-
-Token estimation is a coarse character-count heuristic (chars / 4). Every driver
-family tokenises differently; the substrate cannot afford a per-driver tokenizer
-dependency, so it errs on the conservative side and lets the driver's own limits
-truncate any residual overshoot. Real spend telemetry (tokens actually charged)
-flows through `ModelUsage` on `ModelReply` — that path is the audit, this one is
-the budget prediction.
+The history window keeps the most recent turns whose rendered size fits the budget (driver
+context x headroom, minus the fixed head); the current turn always stays. When turns drop, one
+`TranscriptCompacted` names the dropped range. Token estimates are a chars/4 heuristic; the driver's
+own counts for each call are on `ModelReply.usage` (K262).
 """
 
 from __future__ import annotations
 
 import time
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -36,16 +28,19 @@ from ...adapters import (
     DriverIntrospectionUnavailable,
     Responder,
 )
-from ...record.record import read_record
 from ..tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 from .vocabulary import (
     BACKGROUND_TASK_ENDED,
+    StopReason,
 )
 from .vocabulary import (
     MODEL_REPLY as _KIND_MODEL_REPLY,
 )
 from .vocabulary import (
     PARK as _KIND_PARK,
+)
+from .vocabulary import (
+    RETURNED as _KIND_RETURNED,
 )
 from .vocabulary import (
     TRANSCRIPT_COMPACTED as _KIND_TRANSCRIPT_COMPACTED,
@@ -65,7 +60,7 @@ _DETERMINISTIC_CONTEXT_TOKENS = 4096
 _context_cache: dict[tuple[str, str], tuple[float, int]] = {}
 
 _CHARS_PER_TOKEN = 4  # coarse conservative estimator; see module docstring
-_AVG_TURN_TOKENS_DEFAULT = 800  # K-window heuristic (see module docstring)
+_PER_TURN_PRECEDENCE = 10  # the per_turn band of session-vocabulary.md § I
 
 # _KIND_USER_MESSAGE, _KIND_MODEL_REPLY, _KIND_PARK, _KIND_TRANSCRIPT_COMPACTED
 # imported above from `.vocabulary` (single source of truth per REVIEW F5).
@@ -73,16 +68,18 @@ _KIND_TOOL_CALL = TOOL_CALL
 _KIND_TOOL_RESULT = TOOL_RESULT
 _KIND_FINAL_ANSWER = FINAL_ANSWER
 # `TranscriptCompacted` rides a turn because the `model` producer yields it at the start
-# of a firing (session/__init__.py::_model_factory). `SessionWarning` fires at session-open
-# via the `session_warning` initial and never rides a turn, so it stays out of this set.
-_TURN_EVENT_KINDS = frozenset(
+# of a firing (session/__init__.py::_model_factory). `SessionWarning` is written at session
+# open by `session_prompt` and never rides a turn, so it stays out of this set.
+TURN_EVENT_KINDS = frozenset(
     {
+        BACKGROUND_TASK_ENDED,
         _KIND_USER_MESSAGE,
         _KIND_MODEL_REPLY,
         _KIND_TOOL_CALL,
         _KIND_TOOL_RESULT,
         _KIND_FINAL_ANSWER,
         _KIND_PARK,
+        _KIND_RETURNED,
         _KIND_TRANSCRIPT_COMPACTED,
     }
 )
@@ -102,14 +99,6 @@ class TranscriptCompacted(Struct, frozen=True):
     reason: str
     tokens_before: int
     tokens_after: int
-
-
-class RenderedTranscript(Struct, frozen=True):
-    prompt_text: str
-    threaded_from_turn: int
-    turns_dropped: int
-    tokens_estimated: int
-    compaction_events: list[TranscriptCompacted]
 
 
 def _cli_context_from_config(driver_name: str, config_path: Path | None = None) -> int:
@@ -182,25 +171,6 @@ def _est_tokens(text: str) -> int:
     return max(len(text) // _CHARS_PER_TOKEN, 1) if text else 0
 
 
-def _compute_k(
-    driver_context_tokens: int,
-    seed_tokens: int,
-    per_turn_tokens: int,
-    driver_headroom_frac: float = 0.6,
-    avg_turn_tokens: int = _AVG_TURN_TOKENS_DEFAULT,
-) -> int:
-    """Keep-K turns: floor(budget / avg_turn_tokens), at least 1 when budget > 0.
-
-    Returns 0 iff the seed alone (plus per-turn) already exceeds the headroom
-    budget — the caller then emits `SessionWarning{kind:"seed_alone_exceeds"}`
-    at session open (piece 208).
-    """
-    budget = int(driver_context_tokens * driver_headroom_frac) - seed_tokens - per_turn_tokens
-    if budget <= 0:
-        return 0
-    return max(1, budget // avg_turn_tokens)
-
-
 def _group_by_turn(events: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     """Group the envelope stream into turns.
 
@@ -221,56 +191,41 @@ def _group_by_turn(events: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
             continue
         if current is None:
             continue
-        if kind in _TURN_EVENT_KINDS:
+        if kind in TURN_EVENT_KINDS:
             current.append(env)
     if current is not None:
         turns.append(current)
     return turns
 
 
-def _render(
-    seed: str,
-    per_turn: str,
-    kept_turns: list[list[dict[str, Any]]],
-    current: list[dict[str, Any]],
-) -> str:
-    """Compose the prompt string handed to the driver.
-
-    Layout matches the tech spec: seed first, then a header line naming the
-    kept turn range, then each kept turn rendered as `USER:` / `MODEL:` /
-    `TOOL <name>:` / `RESULT:` / `FINAL:` blocks. The `current` turn always
-    lands at the tail; per_turn precedes the current turn's user text (product
-    spec the topology-layer contract). The last `UserMessage.assembled_prompt` is treated as authoritative
-    for the current turn — the daemon assembles it before it lands.
-    """
-    del current  # positional discipline: the current turn is always kept_turns[-1]
+def _render_turns(kept_turns: list[list[dict[str, Any]]]) -> list[str]:
+    """The history lines for `kept_turns`: a range header, then each turn's events."""
     lines: list[str] = []
-    if seed:
-        lines.append(seed.rstrip())
     if kept_turns:
         first = kept_turns[0][0].get("payload") or {}
         last = kept_turns[-1][0].get("payload") or {}
-        first_idx = int(first.get("turn_index", 0)) if isinstance(first, dict) else 0
-        last_idx = int(last.get("turn_index", 0)) if isinstance(last, dict) else 0
+        first_idx = int(first.get("turn_index", 0)) if isinstance(first, Mapping) else 0
+        last_idx = int(last.get("turn_index", 0)) if isinstance(last, Mapping) else 0
         lines.append(f"[transcript: turns {first_idx}..{last_idx}]")
     for turn_idx, turn in enumerate(kept_turns):
+        last_reply: str | None = None  # the turn's last ModelReply text
         for env in turn:
             payload = env.get("payload") or {}
             kind = env.get("kind", "")
-            if not isinstance(payload, dict):
+            if not isinstance(payload, Mapping):
                 continue
             if kind == _KIND_USER_MESSAGE:
-                # Sprint 067: per_turn no longer injects here. The fragment
-                # path (per_turn_fragment producer, sprint 060) emits it as
-                # PromptFragment(source=per_turn); the composer folds it
-                # into PromptComposed which _model_factory prepends to the
-                # transcript. `per_turn` remains a parameter for the
-                # K-window budget calc (line 298-299) but is no longer
-                # rendered into the prompt string.
                 text = str(payload.get("assembled_prompt") or payload.get("text", ""))
                 lines.append(f"USER: {text}")
             elif kind == _KIND_MODEL_REPLY:
-                lines.append(f"MODEL: {payload.get('text', '')}")
+                # v0.3 writes a ModelReply for every call. One that requests a tool is rendered by
+                # its ToolCall line; any prose the model wrote beside the call stays on the record
+                # only, as the history rendered it before v0.3.
+                if payload.get("stop_reason") == StopReason.TOOL_USE:
+                    continue
+                last_reply = str(payload.get("text", ""))
+                if last_reply:
+                    lines.append(f"MODEL: {last_reply}")
             elif kind == _KIND_TOOL_CALL:
                 lines.append(f"TOOL {payload.get('tool', '?')}: args={payload.get('args', [])}")
             elif kind == _KIND_TOOL_RESULT:
@@ -287,97 +242,85 @@ def _render(
                 except TypeError:
                     lines.append(f"[background task {payload.get('task_id', '?')} ended]")
             elif kind == _KIND_FINAL_ANSWER:
-                lines.append(f"FINAL: {payload.get('text', '')}")
-    return "\n".join(lines)
+                # Records before v0.3 (vocabulary § K.3): a plain reply wrote a ModelReply and a
+                # FinalAnswer with the same text; the driver read every answer twice (UI sprint
+                # 116). A FinalAnswer with its own text (a bail-out) still renders.
+                final = str(payload.get("text", ""))
+                if final != last_reply:
+                    lines.append(f"FINAL: {final}")
+    return lines
 
 
-def render_transcript(
+def turn_cost(turn: list[dict[str, Any]]) -> int:
+    """One turn's estimated rendered size in tokens, as the history window prices it."""
+    return _est_tokens("\n".join(_render_turns([turn])))
+
+
+def plan_window(
+    costs: list[int], head_tokens: int, driver_context_tokens: int, driver_headroom_frac: float
+) -> int:
+    """Index of the oldest turn the prompt keeps: the newest turns whose estimated sizes fit the
+    history budget (driver context x headroom, minus the head), oldest dropped first. Sized from
+    each turn's rendered estimate, not a fixed 800 tokens a turn (lens F098). The current turn
+    (the last) is always kept."""
+    budget = int(driver_context_tokens * driver_headroom_frac) - head_tokens
+    used = 0
+    keep_from = len(costs)
+    for i in range(len(costs) - 1, -1, -1):
+        if keep_from < len(costs) and used + costs[i] > budget:
+            break
+        used += costs[i]
+        keep_from = i
+    return keep_from if costs else 0
+
+
+def head_block(
+    seed: str, per_turn: str, fragments: list[tuple[int, dict[str, Any]]]
+) -> tuple[str, tuple[int, ...]]:
+    """The prompt's head and the seqs of the fragments in it: the seed, then the session's prompt
+    fragments and `per_turn` by precedence (the interrupt fragment among them, at 95)."""
+    from .vocabulary import PromptSource
+
+    parts: list[tuple[int, int, str]] = []  # (precedence, seq, text)
+    used: list[int] = []
+    for seq, frag in fragments:
+        text = str(frag.get("text", ""))
+        if not text:
+            continue
+        if frag.get("source") in (PromptSource.PER_TURN, PromptSource.USER_MESSAGE):
+            continue  # records before K261; per_turn and the message come from their own fields
+        parts.append((int(frag.get("precedence", 0)), seq, text))
+        used.append(seq)
+    if per_turn:
+        parts.append((_PER_TURN_PRECEDENCE, -1, per_turn))
+    parts.sort(key=lambda p: (p[0], p[1]))
+    head = [seed.rstrip()] if seed else []
+    head += [text for _p, _s, text in parts]
+    return "\n\n".join(head), tuple(sorted(used))
+
+
+def compose_model_prompt(
     *,
-    record_root: Path | str,
+    history: list[dict[str, Any]],
     seed: str,
     per_turn: str,
-    driver_context_tokens: int,
-    driver_headroom_frac: float = 0.6,
-    strategy: str = "rolling_window",
-    turn_index_now: int,
-) -> RenderedTranscript:
-    """Read the record, keep the most recent K turns, return a rendered prompt.
+    fragments: list[tuple[int, dict[str, Any]]],
+    notices: list[str] | None = None,
+) -> tuple[str, tuple[int, ...]]:
+    """The base prompt for one model call and the seqs of the fragments it used.
 
-    v1 supports `strategy="rolling_window"` only. Any other value raises
-    `ValueError` — the field is future-proofing for a per-turn-summariser or
-    a semantic-clustering strategy the vocabulary would extend, but neither
-    ships in v1 (TECH-SPEC §14 deferred list).
-
-    `turn_index_now` is the turn about to fire; it names the current turn on
-    `RenderedTranscript.threaded_from_turn` when the record has no prior
-    UserMessage (session open before the first turn lands).
+    `history` is the kept window's events (the trigger chose it with `plan_window`). Order: the
+    head (`head_block`); the kept turns, the current one last; background-task notices. The model
+    step appends its pre-K261 endings (tool results, the tool list, the directives) and records the
+    final text as `PromptComposed`.
     """
-    if strategy != "rolling_window":
-        raise ValueError(
-            f"render_transcript: strategy={strategy!r} unsupported in v1; "
-            "only 'rolling_window' ships ."
-        )
-    events = list(
-        read_record(record_root, resolve_blobs=True)
-    )  # Sprint 095: the model reads payloads
-    seed_tokens = _est_tokens(seed)
-    per_turn_tokens = _est_tokens(per_turn)
-    k = _compute_k(driver_context_tokens, seed_tokens, per_turn_tokens, driver_headroom_frac)
-    turns = _group_by_turn(events)
-    if not turns:
-        prompt = _render(seed, per_turn, [], [])
-        return RenderedTranscript(
-            prompt_text=prompt,
-            threaded_from_turn=turn_index_now,
-            turns_dropped=0,
-            tokens_estimated=_est_tokens(prompt),
-            compaction_events=[],
-        )
-    if k <= 0:
-        # Seed alone exceeds the budget. The renderer keeps only the most recent
-        # turn so the driver still sees the current user message; sprint 208
-        # emits SessionWarning{seed_alone_exceeds} at session open, upstream.
-        kept_turns = turns[-1:]
-    else:
-        kept_turns = turns[-k:] if k < len(turns) else list(turns)
-    dropped_turns = turns[: len(turns) - len(kept_turns)]
-    prompt = _render(seed, per_turn, kept_turns, kept_turns[-1])
-    tokens_estimated = _est_tokens(prompt)
-    compaction_events: list[TranscriptCompacted] = []
-    if dropped_turns:
-        first_dropped = dropped_turns[0][0]
-        last_dropped = dropped_turns[-1][-1]
-        first_kept = kept_turns[0][0]
-        reason = "driver_window_exceeded" if 0 < k < len(turns) else "K_bound"
-        # `tokens_before` and `tokens_after` must live on the same axis so a reader can
-        # subtract them and get a meaningful "tokens the window saved" number. Both now
-        # measure the RENDERED prompt cost: `tokens_after` is what we actually send,
-        # `tokens_before` is what we would have sent if we had rendered every turn.
-        # One extra render on the compaction path is the honest cost for this comparability.
-        full_prompt = _render(seed, per_turn, turns, turns[-1])
-        compaction_events.append(
-            TranscriptCompacted(
-                strategy="rolling_window",
-                dropped_seq_range=(int(first_dropped["seq"]), int(last_dropped["seq"])),
-                kept_seq_start=int(first_kept["seq"]),
-                reason=reason,
-                tokens_before=_est_tokens(full_prompt),
-                tokens_after=tokens_estimated,
-            )
-        )
-    first_kept_payload = kept_turns[0][0].get("payload") or {}
-    threaded_from_turn = (
-        int(first_kept_payload.get("turn_index", turn_index_now))
-        if isinstance(first_kept_payload, dict)
-        else turn_index_now
-    )
-    return RenderedTranscript(
-        prompt_text=prompt,
-        threaded_from_turn=threaded_from_turn,
-        turns_dropped=len(dropped_turns),
-        tokens_estimated=tokens_estimated,
-        compaction_events=compaction_events,
-    )
+    head_text, used_seqs = head_block(seed, per_turn, fragments)
+    turns = _group_by_turn(history)
+    blocks = [head_text] if head_text else []
+    if turns:
+        blocks.append("\n".join(_render_turns(turns)))
+    blocks += notices or []
+    return "\n\n".join(blocks), used_seqs
 
 
 # spec-audit: 2026-09-01

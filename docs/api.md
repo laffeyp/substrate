@@ -52,7 +52,7 @@ explicitly. Frozensets keep the subscription immutable and hashable.
 A callable `(input) -> AsyncIterable[Event]` (kernel §1; design §4.2/§9.6).
 
 The factory returns this callable per instantiation; the runtime calls it with the
-sealed, resolved input and consumes the event stream until the Producer completes,
+resolved input (its own copy, decoded from the recorded bytes) and consumes the event stream until the Producer completes,
 fails, or is cancelled — emitting the corresponding lifecycle event. A Producer has
 no runtime-level identity, planning, or goal state (kernel non-goals); state lives
 on the log.
@@ -176,7 +176,7 @@ Cooldown counted in append cycles (deterministic, replayable).
 
 Cooldown in seconds. Opt-in; flagged at registration; demotes replay to 3(b).
 
-### `TerminationPolicy(name: 'str', fn: 'Callable[[TermContext], Decision]', resume_condition: 'str | None' = None, finalisation: 'Callable[[TermContext], Any] | None' = None) -> 'None'`
+### `TerminationPolicy(name: 'str', fn: 'Callable[[TermContext], Decision]', resume_condition: 'str | None' = None, finalisation: 'Callable[[TermContext], Any] | None' = None, *, members: "tuple['TerminationPolicy', ...]" = (), resumable: 'bool' = True) -> 'None'`
 
 A named decision callback. `name` is recorded in substrate.TerminationMatched.
 
@@ -355,6 +355,15 @@ access that hides which slot is which and can silently swap on refactor.
 event-count caps (integer count of an event kind). msgspec preserves the input type
 on the wire.
 
+### `current_record_root() -> 'Path | None'`
+
+The record of the run the calling code executes in, or None outside a run (K268).
+
+A Producer reads seqs of its own record by a ticket that names only the range
+(`api.read_range`): the ticket is recorded, and a recorded path would make the record's bytes
+depend on where the record sits. Set for every coroutine and worker thread of the run, like
+`_CURRENT_RUNTIME`.
+
 ### `find_active_runtime(record_root: 'str | Path') -> "'Runtime | None'"`
 
 Return the live Runtime for `record_root`, or `None` when no run is
@@ -371,6 +380,15 @@ Every recoverable envelope in seq order, exactly as stored. With `resolve_blobs=
 a blob-stub payload is replaced by the payload it stands for (`resolve_blob_payload`):
 readers that consume payload CONTENTS pass True; integrity readers (replay, conformance,
 byte comparisons) keep the default and see the record as written.
+
+### `read_range(root: 'Path | str', from_seq: 'int', to_seq: 'int', *, resolve_blobs: 'bool' = False) -> 'Iterator[dict[str, Any]]'`
+
+The envelopes with `from_seq <= seq <= to_seq`, in seq order, without reading the whole
+record (K268). Sealed segments the manifest places wholly before the range are skipped and
+reading stops after `to_seq`; the manifest is advisory, so a segment it gives no bounds for is
+read. Every frame read is crc-checked; a missing seq in the range raises RecordGapError, as
+the full reader does. The record is append-only, so the same range always returns the same
+events: a Producer can be handed a ticket to a range of its own record (claim check).
 
 ### `read_first_envelope(root: 'Path | str') -> 'dict[str, Any] | None'`
 
@@ -491,7 +509,7 @@ link) and the inner record is complete at its own root. (The "default export = R
 wording assumes an outer carrier; that the carrier must be author-named is a tech-spec §20
 flow-back — see BLACKBOARD.)
 
-The returned callable is the Producer `start`: the outer runtime calls it with the sealed
+The returned callable is the Producer `start`: the outer runtime calls it with the
 resolved input (which carries the inner record root under input["inner_root"]) and
 consumes the translated outer events under outer admission.
 
@@ -1003,8 +1021,10 @@ A view_at / inspection query named a sequence number outside the record.
 
 ### `InputTypeError`
 
-A resolved Producer input contains a non-immutable / non-whitelisted type;
-immutability is enforced by construction (technical §8.3 / F-PROD-3).
+A resolved Producer input contains a type outside the accepted set (technical §8.3 /
+F-PROD-3, amended 2026-10-09): raw bytes, handles, datetimes, arbitrary objects, mutable
+Structs or non-string mapping keys. Each Producer receives its own copy of the recorded
+input, decoded from the canonical bytes the record holds.
 
 ### `ReplayError`
 

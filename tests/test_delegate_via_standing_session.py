@@ -4,11 +4,11 @@ The reviewer session is a real `session_topology` running under `Runtime.resume`
 the delegate's parent thread calls `session_registry.turn_sync(session_id, UserMessage(...))`,
 which serializes on the per-session `threading.Lock`, drives the resume in a
 fresh worker event loop, and returns the reviewer's manifest + record_root. The
-parent reads the tail `FinalAnswer` off that record and folds the answer back.
+parent reads the turn's reply off that record and folds the answer back.
 
 Two behaviors under test:
   1. A first turn opens the reviewer via `.run()` (writes RunStarted), pauses on
-     Park. A delegate call with `child_session_name="reviewer"` runs a second
+     Returned. A delegate call with `child_session_name="reviewer"` runs a second
      turn on the same record; the reviewer's record grows with the delegated
      UserMessage + reply.
   2. Two concurrent parents both delegating to the reviewer FIFO-queue on the
@@ -33,6 +33,7 @@ from substrate.topologies.session import (
     UserMessage,
     session_topology,
 )
+from substrate.topologies.session.vocabulary import turn_replies
 from substrate.topologies.session_registry import SessionManifest, SessionRegistry
 from substrate.topologies.tool_loop.delegate import make_delegate
 
@@ -56,7 +57,6 @@ def _reviewer_topology(record_root: Path) -> Callable[[api.TopologyBuilder], Non
     stays offline.
     """
     return session_topology(
-        record_root=record_root,  # the daemon's configuration (UI sprint 107)
         driver=DeterministicResponder(seed=7),
         driver_name="deterministic",
         driver_context_tokens=4096,
@@ -73,7 +73,7 @@ def _reviewer_topology(record_root: Path) -> Callable[[api.TopologyBuilder], Non
 
 async def _open_reviewer(record_root: Path) -> None:
     """First turn: opens the record via .run() so substrate.RunStarted lands
-    at seq 0, then pauses on Park after the DeterministicResponder answers.
+    at seq 0, then pauses on Returned after the DeterministicResponder answers.
     """
     await api.Runtime(record_root, persistent=True).resume(
         _reviewer_topology(record_root),
@@ -123,9 +123,9 @@ async def test_delegate_routes_into_standing_session(tmp_path: Path) -> None:
     assert len(user_msgs) == 2
     assert user_msgs[1]["payload"]["text"] == "please review this diff"
     assert user_msgs[1]["payload"]["slash_source"] == "delegate"
-    # The parent reads the reviewer's tail FinalAnswer.
-    finals = [e for e in api.read_record(reviewer_record) if e["kind"] == "FinalAnswer"]
-    assert result["answer"] == finals[-1]["payload"]["text"]
+    # The parent reads the reviewer's last reply.
+    replies = turn_replies(api.read_record(reviewer_record))
+    assert result["answer"] == replies[-1][1]
 
 
 @pytest.mark.asyncio
@@ -227,7 +227,7 @@ async def test_delegate_reads_only_this_turns_final_answer(tmp_path: Path) -> No
         seed="x",
     )
     reviewer_record = base / "s_reviewer" / "record"
-    # Two priming turns so the reviewer's record carries prior FinalAnswers.
+    # Two priming turns so the reviewer's record carries prior replies.
     await _open_reviewer(reviewer_record)
     from substrate.topologies.session import UserMessage as SessionUserMessage
 
@@ -240,9 +240,7 @@ async def test_delegate_reads_only_this_turns_final_answer(tmp_path: Path) -> No
             slash_source="chat",
         ),
     )
-    prior_finals = [e for e in api.read_record(reviewer_record) if e["kind"] == "FinalAnswer"]
-    prior_last_final_seq = prior_finals[-1]["seq"]
-    prior_last_final_text = prior_finals[-1]["payload"]["text"]
+    prior_last_final_seq, prior_last_final_text = turn_replies(api.read_record(reviewer_record))[-1]
 
     d = make_delegate(
         responder=DeterministicResponder(seed=0),
@@ -256,12 +254,12 @@ async def test_delegate_reads_only_this_turns_final_answer(tmp_path: Path) -> No
         None,
         lambda: d.run([{"task": "the delegated question", "child_session_name": "reviewer"}]),
     )
-    # The delegated turn's FinalAnswer sits at a seq > prior_last_final_seq.
-    all_finals = [e for e in api.read_record(reviewer_record) if e["kind"] == "FinalAnswer"]
-    delegated_finals = [e for e in all_finals if int(e["seq"]) > int(prior_last_final_seq)]
+    # The delegated turn's reply sits at a seq > prior_last_final_seq.
+    all_finals = turn_replies(api.read_record(reviewer_record))
+    delegated_finals = [(seq, text) for seq, text in all_finals if seq > prior_last_final_seq]
     assert len(delegated_finals) == 1
     # The parent's ToolResult reads exactly that seq's answer, not the earlier one.
-    assert result["answer"] == delegated_finals[-1]["payload"]["text"]
+    assert result["answer"] == delegated_finals[-1][1]
     # And crucially, the answer is NOT a prior turn's text.
     assert result["answer"] != prior_last_final_text
 
@@ -324,10 +322,10 @@ async def test_two_parents_delegating_to_same_reviewer_serialize(tmp_path: Path)
 
 
 def _assert_turns_serialized(envs: list[dict], n_turns: int) -> None:
-    """In record order the turns do not interleave: UserMessage, Park, UserMessage, Park, …, and
+    """In record order the turns do not interleave: UserMessage, Returned, UserMessage, …, and
     turn_index rises by one per turn (lens audit F425/F449: only the count was checked)."""
-    marks = [e for e in envs if e["kind"] in ("UserMessage", "Park")]
-    assert [e["kind"] for e in marks] == ["UserMessage", "Park"] * n_turns, [
+    marks = [e for e in envs if e["kind"] in ("UserMessage", "Returned")]
+    assert [e["kind"] for e in marks] == ["UserMessage", "Returned"] * n_turns, [
         e["kind"] for e in marks
     ]
     indexes = [e["payload"]["turn_index"] for e in marks if e["kind"] == "UserMessage"]

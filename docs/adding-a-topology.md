@@ -62,7 +62,7 @@ def review_poll(b: api.TopologyBuilder) -> None:
         subscription=api.Subscription(kinds=frozenset({"Note"})),   # only consulted on a Note
         predicate=lambda ctx: len(ctx.views["notes"].value()) >= 2,  # both reviewers in
         starts="summarizer",
-        input_builder=lambda ctx: {"notes": list(ctx.views["notes"].value())},  # sealed input
+        input_builder=lambda ctx: {"notes": list(ctx.views["notes"].value())},  # recorded; the Producer gets its own copy
         policy=api.Once(),                                  # fire once, not per Note
     )
     b.termination(api.all_completed())                      # finalise when every Producer has ended

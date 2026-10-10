@@ -86,6 +86,9 @@ asyncio_mode = "auto"
 # async fixture a fresh loop (UI sprint 107).
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# Every run ends with one line per test that did not pass (failed, error, skipped, xfail, xpass)
+# and its reason, so a run that skips a test names it however its output is cut.
+addopts = "-ra"
 # The suite is FUNCTION-tests only (def test_*, with underscore-prefixed helper classes). Disable
 # class-based collection so a DOMAIN record whose name starts with "Test" (e.g. the locked vocabulary
 # record `TestResults`) isn't mistaken for a test class when imported into a test module.

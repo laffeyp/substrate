@@ -80,9 +80,8 @@ def _run_one_turn(
             turn_max_steps=2,
             session_id="s_realmodel_composition",
             workspace_path=str(tmp_path / "wsp"),
-            record_root=record_root,
             first_turn_user_message=_UM(
-                text=user_text, turn_index=0, assembled_prompt=user_text, slash_source="user"
+                text=user_text, turn_index=0, assembled_prompt="", slash_source="user"
             ),
             role=role,
         )
@@ -95,8 +94,7 @@ def _run_one_turn(
 @pytest.mark.realmodel
 def test_per_turn_fragment_reaches_the_driver(tmp_path: Path) -> None:
     """A per_turn set to a distinctive instruction shows up in the model's
-    reply. Proves the fragment path (not render_transcript's dropped
-    injection) is what carries per_turn to the driver."""
+    reply: per_turn reaches the driver."""
     envs = _run_one_turn(
         tmp_path,
         user_text="Say hello.",
@@ -111,24 +109,14 @@ def test_per_turn_fragment_reaches_the_driver(tmp_path: Path) -> None:
 
 
 @pytest.mark.realmodel
-def test_composed_prompt_lands_on_record_with_per_turn_fragment(tmp_path: Path) -> None:
-    """The record carries at least one PromptFragment(source=per_turn)
-    and at least one PromptComposed whose text contains the per_turn
-    string. Non-live-model observation — passes without Ollama if the
-    fragment path is intact — but included here so the live test file
-    also verifies the on-record shape once."""
+def test_composed_prompt_lands_on_record_with_per_turn(tmp_path: Path) -> None:
+    """K261: the PromptComposed the model producer records holds the per_turn string once.
+    per_turn reaches the prompt from the builder, not as a PromptFragment."""
     envs = _run_one_turn(
         tmp_path,
         user_text="hi",
         per_turn="MARK_ALPHA_7",
     )
-    frags = [
-        e
-        for e in envs
-        if e.get("kind") == "PromptFragment" and e["payload"].get("source") == "per_turn"
-    ]
-    assert len(frags) >= 1
-    assert frags[0]["payload"]["text"] == "MARK_ALPHA_7"
     composed = [e for e in envs if e.get("kind") == "PromptComposed"]
     assert len(composed) >= 1
-    assert "MARK_ALPHA_7" in composed[0]["payload"]["text"]
+    assert composed[0]["payload"]["text"].count("MARK_ALPHA_7") == 1

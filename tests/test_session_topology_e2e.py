@@ -9,7 +9,7 @@ not exist yet. Rescoped: this sprint discharges the RECORD-LEVEL observation
 contract in-process today. The stderr-substring checks and the terminal
 screenshot check defer to sprint 221 (once `substrate chat` exists). The
 application-kind sequence, the per-event payload predicates, the lifecycle
-coverage, and BOTH termination shapes (production `pause_await_input(Park)`
+coverage, and BOTH termination shapes (production `pause_await_input(Returned)`
 and CI-wrapper `threshold_count(SessionEnded, 1)`) all fire here.
 
 The fixture `tests/fixtures/three_turns.json` lives on disk so sprint 221 can
@@ -19,7 +19,7 @@ events total; the filename reflects the count, not the prose gloss.
 Two discharge paths per the sprint 210 closure review 2026-08-26:
 
   1. **Production shape via `.resume()` between pauses.** The daemon-driven
-     flow uses `session_topology`'s `pause_await_input(Park)` termination.
+     flow uses `session_topology`'s `pause_await_input(Returned)` termination.
      `test_piece_a_pauses_between_turns_and_finalises_on_exit` fires three
      `.resume()` calls against one persistent record, asserts two
      `TerminationMatched(decision="pause-await-input")` events (turns 0 and 1)
@@ -89,25 +89,25 @@ async def test_piece_a_ci_wrapper_observation_contract(tmp_path: Path) -> None:
     envelopes = _read(record_root)
     kinds = _payload_kinds(envelopes)
 
-    # Race-tolerant assertion on the shape. Turn 2's Park may or may not land
-    # depending on whether park's ProducerCompleted races the CI-wrapper's
+    # Race-tolerant assertion on the shape. Turn 2's Returned may or may not land
+    # depending on whether return's ProducerCompleted races the CI-wrapper's
     # threshold_count(SessionEnded, 1) TerminationMatched. Both resolutions are
     # legitimate; both are byte-stable on this substrate build (`assert_replayable`
     # locks the actual resolution below). The bounded assertion says: three of each
-    # turn kind + SessionEnded + 2-or-3 Park events + no extras.
+    # turn kind + SessionEnded + 2-or-3 Returned events + no extras.
     assert _count_by_kind(envelopes, "UserMessage") == 3
     # Sprint 067: model producer now fires on PromptComposed (via
     # resume-on-composed). Turn 3's /exit races the chain:
     # UserMessage(/exit) → per_turn → user_message → composer → PromptComposed
     # → model versus end-on-exit → session_end → SessionEnded. The
     # termination policy finalises on SessionEnded so /exit's model firing
-    # may lose the race. 2 or 3 ModelReply / FinalAnswer are both
+    # may lose the race. 2 or 3 ModelReply are both
     # legitimate; the prior fixed-3 assertion held only because model
     # fired directly on UserMessage in the pre-067 shape.
     assert 2 <= _count_by_kind(envelopes, "ModelReply") <= 3
-    assert 2 <= _count_by_kind(envelopes, "FinalAnswer") <= 3
+    assert _count_by_kind(envelopes, "FinalAnswer") == 0  # v0.3: the reply is the ModelReply
     assert _count_by_kind(envelopes, "SessionEnded") == 1
-    assert 2 <= _count_by_kind(envelopes, "Park") <= 3
+    assert 2 <= _count_by_kind(envelopes, "Returned") <= 3
     # SessionStarted joins the set post-sprint 240 (RunStarted instrument
     # emits one SessionStarted envelope at seq 2). PromptComposed joins the
     # set post-sprint 059 (composer trigger fires per turn). PromptFragment
@@ -117,8 +117,7 @@ async def test_piece_a_ci_wrapper_observation_contract(tmp_path: Path) -> None:
         "SessionStarted",
         "UserMessage",
         "ModelReply",
-        "FinalAnswer",
-        "Park",
+        "Returned",
         "SessionEnded",
         "PromptComposed",
         "PromptFragment",
@@ -136,19 +135,17 @@ async def test_piece_a_ci_wrapper_observation_contract(tmp_path: Path) -> None:
     # PromptComposed and PromptFragment fire per turn/session-open (sprints
     # 059-064); their position relative to ModelReply is race-tolerant, so
     # filter them out of the strict-ordered head assertion. UserMessage /
-    # ModelReply / FinalAnswer / SessionEnded ordering stays byte-stable.
-    ordered_head = [k for k in kinds if k not in {"Park", "PromptComposed", "PromptFragment"}]
+    # ModelReply / SessionEnded ordering stays byte-stable.
+    ordered_head = [k for k in kinds if k not in {"Returned", "PromptComposed", "PromptFragment"}]
     # Turns 0 and 1 always complete; turn 2's model firing races /exit's
     # session_end path (sprint 067). Assert the guaranteed prefix; the
     # tail is race-tolerant.
-    assert ordered_head[:7] == [
+    assert ordered_head[:5] == [
         "SessionStarted",
         "UserMessage",
         "ModelReply",
-        "FinalAnswer",
         "UserMessage",
         "ModelReply",
-        "FinalAnswer",
     ]
     assert "SessionEnded" in ordered_head
 
@@ -163,14 +160,13 @@ async def test_piece_a_ci_wrapper_observation_contract(tmp_path: Path) -> None:
     turn_indices = [e["payload"]["turn_index"] for e in model_replies]
     assert turn_indices == [0, 1] or turn_indices == [0, 1, 2]
 
-    final_answers = [e for e in envelopes if e["kind"] == "FinalAnswer"]
-    # steps=0 for every FinalAnswer: driver-parse path, step counter fresh on each
-    # resume-on-composed firing. A regression that let step drift trips here on every turn.
-    assert all(e["payload"]["steps"] == 0 for e in final_answers)
+    # step=0 and end_turn for every reply: driver-parse path, step counter fresh on each
+    # model-on-user-message firing. A regression that let step drift trips here on every turn.
+    assert all(e["payload"]["step"] == 0 for e in model_replies)
+    assert all(e["payload"]["stop_reason"] == "end_turn" for e in model_replies)
 
-    parks = [e for e in envelopes if e["kind"] == "Park"]
-    assert all(e["payload"]["reason"] == "final_answer" for e in parks)
-    assert all(e["payload"]["awaiting"] == "UserMessage" for e in parks)
+    parks = [e for e in envelopes if e["kind"] == "Returned"]
+    assert all(e["payload"]["reason"] == "replied" for e in parks)
     park_turn_indices = [e["payload"]["turn_index"] for e in parks]
     assert park_turn_indices == [0, 1] or park_turn_indices == [0, 1, 2]
 
@@ -180,10 +176,10 @@ async def test_piece_a_ci_wrapper_observation_contract(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_piece_a_lifecycle_events_cover_each_producer(tmp_path: Path) -> None:
-    """Every session producer (driver_stepper, model, park, session_end) emits
+    """Every session producer (driver_stepper, model, return, session_end) emits
     ProducerStarted; the first three also emit ProducerCompleted; session_end's
     completion may race with TerminationMatched (see prose). Four key triggers
-    fire: resume-on-composed, park-on-final, end-on-exit, advance-on-park.
+    fire: model-on-user-message, return-on-reply, end-on-exit, advance-on-park.
     """
     record_root = tmp_path / "test-piece-a-lifecycle"
     await api.Runtime(record_root).run(
@@ -200,19 +196,24 @@ async def test_piece_a_lifecycle_events_cover_each_producer(tmp_path: Path) -> N
         for e in envelopes
         if e["kind"] == "substrate.ProducerCompleted"
     }
-    assert {"driver_stepper", "model", "park", "session_end"} <= started_kinds, (
+    assert {"driver_stepper", "model", "return", "session_end"} <= started_kinds, (
         f"missing ProducerStarted for one of the session producers: got {started_kinds}"
     )
     # session_end's ProducerCompleted may race with TerminationMatched: the wrapper's
     # threshold_count(SessionEnded, 1) matches on the SessionEnded emit and finalises
     # the run before session_end's completion tick lands. Honest reality.
-    assert {"driver_stepper", "model", "park"} <= completed_kinds, (
-        f"missing ProducerCompleted for driver_stepper/model/park: got {completed_kinds}"
+    assert {"driver_stepper", "model", "return"} <= completed_kinds, (
+        f"missing ProducerCompleted for driver_stepper/model/return: got {completed_kinds}"
     )
     trigger_ids = {
         e["payload"].get("trigger_id") for e in envelopes if e["kind"] == "substrate.TriggerFired"
     }
-    assert {"resume-on-composed", "park-on-final", "end-on-exit", "advance-on-park"} <= trigger_ids
+    assert {
+        "model-on-user-message",
+        "return-on-reply",
+        "end-on-exit",
+        "driver-stepper-on-returned",
+    } <= trigger_ids
 
 
 @pytest.mark.asyncio
@@ -263,7 +264,7 @@ def _production_session_factory(*, session_id: str) -> Callable[[api.TopologyBui
 @pytest.mark.asyncio
 async def test_piece_a_pauses_between_turns_and_finalises_on_exit(tmp_path: Path) -> None:
     """Discharge path 2: production `session_topology` shape via three `.resume()`
-    calls. Two pauses on Park (turns 0 and 1), one finalise-run on the `/exit`
+    calls. Two pauses on Returned (turns 0 and 1), one finalise-run on the `/exit`
     UserMessage's SessionEnded.
 
     Sprint 209a surfaced a substrate primitive gap: `.resume()` on a FRESH
@@ -308,8 +309,8 @@ async def test_piece_a_pauses_between_turns_and_finalises_on_exit(tmp_path: Path
     assert pause_conditions == ["UserMessage", "UserMessage"]
     # SessionEnded lands exactly once, on the /exit turn.
     assert_event(record_root, "SessionEnded", reason="user_exit")
-    # Both Park events land (no threshold_count race on the production shape).
-    parks = [e for e in envelopes if e["kind"] == "Park"]
+    # Both Returned events land (no threshold_count race on the production shape).
+    parks = [e for e in envelopes if e["kind"] == "Returned"]
     park_turns = [e["payload"]["turn_index"] for e in parks]
     assert park_turns == [0, 1]
 

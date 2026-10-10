@@ -7,7 +7,7 @@ prove with a REAL small model that
 
   (a) the model picks the correct tool from the suite when asked to,
   (b) the tool's ToolResult carries the shape the docs promise, and
-  (c) the model's FinalAnswer reflects reading the result — not just
+  (c) the model's reply reflects reading the result — not just
       that the ToolCall event landed.
 
 Driver: qwen2.5:7b-instruct (see probe in the sprint-052 notes). It is
@@ -34,6 +34,7 @@ from typing import Any
 import httpx
 import pytest
 
+from substrate.topologies.session.vocabulary import turn_replies
 from substrate import api
 from substrate.adapters import OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
@@ -78,7 +79,6 @@ def _open_session(
         turn_max_steps=6,
         session_id="s_test_comprehension",
         workspace_path=str(workspace),
-        record_root=record_root,
         script=None,
         first_turn_user_message=UserMessage(
             text=first_text,
@@ -99,10 +99,10 @@ def _by_kind(envs: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
 
 
 def _last_answer(envs: list[dict[str, Any]]) -> str:
-    finals = _by_kind(envs, "FinalAnswer")
+    finals = turn_replies(envs)
     if not finals:
         return ""
-    return str(finals[-1]["payload"].get("text", ""))
+    return finals[-1][1]
 
 
 # ── list_topologies ────────────────────────────────────────────────────────

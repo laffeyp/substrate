@@ -62,7 +62,6 @@ def _reviewer_factory(
         turn_max_steps=2,
         session_id=manifest.session_id,
         workspace_path=manifest.workspace,
-        record_root=Path(manifest.record_root),
         script=None,
     )
 

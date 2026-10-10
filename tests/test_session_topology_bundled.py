@@ -6,7 +6,7 @@ Three checks:
   1. `substrate` bundled registry lists `"session"` alongside the other CI-mode
      topologies (`substrate topology list` surface).
   2. The bundled factory runs to `finalised` in one `.run()` and produces the
-     expected event sequence: three UserMessage / ModelReply / FinalAnswer / Park
+     expected event sequence: three UserMessage / ModelReply / Returned
      turns plus one SessionEnded, with the last UserMessage carrying `/exit`.
   3. The committed CI record at `topologies/session/records/ci_mode.record/` matches
      what the bundled factory produces on a fresh `.run()`. `first_divergence`
@@ -48,8 +48,8 @@ async def test_bundled_session_runs_to_finalised(tmp_path: Path) -> None:
     assert_event(root, "UserMessage", turn_index=0)
     assert_event(root, "UserMessage", turn_index=1)
     assert_event(root, "UserMessage", turn_index=2, text="/exit")
-    assert_event(root, "Park", reason="final_answer", turn_index=0)
-    assert_event(root, "Park", reason="final_answer", turn_index=1)
+    assert_event(root, "Returned", reason="replied", turn_index=0)
+    assert_event(root, "Returned", reason="replied", turn_index=1)
     assert_event(root, "SessionEnded", reason="user_exit")
     # The whole CI run is deterministic: scripted opener + DeterministicResponder +
     # deterministic CALCULATOR tool. Level-3(a) replay is a first-class assertion.
@@ -95,8 +95,8 @@ def test_committed_record_carries_the_expected_sequence() -> None:
         )
     envs = list(api.read_record(_COMMITTED_RECORD))
     payload_kinds = [e["kind"] for e in envs if not e["kind"].startswith("substrate.")]
-    # Three turns × (UserMessage → ModelReply → FinalAnswer → Park) minus the last
-    # Park (SessionEnded lands and threshold_count matches before park-on-final can
+    # Three turns × (UserMessage → ModelReply → Returned) minus the last
+    # Returned (SessionEnded lands and threshold_count matches before return-on-reply can
     # emit) + one SessionEnded. The order of the last-turn events depends on the
     # append cycle; assert set membership + count instead of order for the tail.
     assert payload_kinds.count("UserMessage") == 3
@@ -104,12 +104,12 @@ def test_committed_record_carries_the_expected_sequence() -> None:
     # races end-on-exit → session_end → SessionEnded. Both 2 and 3 are
     # legitimate depending on which task finishes first.
     assert 2 <= payload_kinds.count("ModelReply") <= 3
-    assert 2 <= payload_kinds.count("FinalAnswer") <= 3
+    assert "FinalAnswer" not in payload_kinds
     assert payload_kinds.count("SessionEnded") == 1
-    # First two turns land a Park; the third turn's Park may or may not land
+    # First two turns land a Returned; the third turn's may or may not land
     # depending on the append cycle. Both shapes are legitimate; the assertion is
     # bounded.
-    assert 2 <= payload_kinds.count("Park") <= 3
+    assert 2 <= payload_kinds.count("Returned") <= 3
     assert_sequence
     # Envelope seq 0 is substrate.RunStarted; the very first event kind must be that.
     assert envs[0]["kind"] == "substrate.RunStarted"

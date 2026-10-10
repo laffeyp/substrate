@@ -11,9 +11,7 @@ Verifies:
  - Empty parent_context yields zero fragments.
  - Kinds filter drops non-matching events.
 
-Deferred: delegate.py rewrite that swaps prefix_context_slice for the
-producer path. Sprint 063 makes the fragment path available on
-session_topology; a follow-up card migrates delegate itself.
+The slice comes from `session/context_slice.py`, the extractor delegate also uses (K263).
 """
 
 from __future__ import annotations
@@ -23,9 +21,9 @@ from pathlib import Path
 
 from substrate import api
 from substrate.topologies.session.ci import ci_session_topology
-from substrate.topologies.session.parent_context_producer import (
-    _extract_slice,
-    _format_context_event,
+from substrate.topologies.session.context_slice import (
+    extract_context_slice,
+    format_context_event,
 )
 
 
@@ -103,8 +101,9 @@ def test_parent_context_absent_yields_zero_fragments(tmp_path: Path) -> None:
 
 
 def test_kinds_filter_drops_non_matching_events(tmp_path: Path) -> None:
-    """A child bound with kinds=["Park"] gets only Park events in the
-    fragment text; UserMessage and other kinds are filtered out."""
+    """A child bound with kinds=["Returned"] gets only the parent's Returned events in the
+    fragment text. (Until K263 this test filtered on Park, which a v0.3 parent no longer
+    writes, and its assertions sat behind `if frags:`, so it checked nothing.)"""
     parent_root = _write_parent_record(tmp_path)
 
     async def _run() -> None:
@@ -114,7 +113,7 @@ def test_kinds_filter_drops_non_matching_events(tmp_path: Path) -> None:
             parent_context={
                 "parent_record_root": str(parent_root),
                 "parent_seq_range": [0, 1000],
-                "kinds": ["Park"],
+                "kinds": ["Returned"],
             },
         )
         await api.Runtime(tmp_path / "child").run(topology)
@@ -126,25 +125,17 @@ def test_kinds_filter_drops_non_matching_events(tmp_path: Path) -> None:
         for e in envs
         if e.get("kind") == "PromptFragment" and e["payload"].get("source") == "parent_context"
     ]
-    if frags:  # parent may have zero Park events, in which case zero fragments
-        text = frags[0]["payload"]["text"]
-        # Only assert on the `kind=X` marker — payload contents may
-        # mention other kind names as strings (Park.awaiting names
-        # "UserMessage" for example). The kind filter operates on the
-        # envelope's kind field, not on payload text.
-        assert "kind=UserMessage" not in text
-        assert "kind=SessionStarted" not in text
-        # Every included event has kind=Park.
-        for line in text.splitlines():
-            if line.startswith("[seq="):
-                assert "kind=Park]" in line, f"non-Park line survived filter: {line}"
+    assert len(frags) == 1
+    lines = [ln for ln in frags[0]["payload"]["text"].splitlines() if ln.startswith("[seq=")]
+    # The parent ran one turn ("parent-hello"); "/exit" ends the session without a Returned.
+    assert len(lines) == 1 and "kind=Returned]" in lines[0], lines
 
 
 def test_extract_slice_pure_function_empty(tmp_path: Path) -> None:
-    """The pure _extract_slice returns ('', 0, 0, False) when no events
+    """The pure extract_context_slice returns ('', 0, 0, False) when no events
     match. Locks the empty-response contract."""
     parent_root = _write_parent_record(tmp_path)
-    text, elided_count, elided_bytes, single_oversize = _extract_slice(
+    text, elided_count, elided_bytes, single_oversize = extract_context_slice(
         parent_root, (9999, 9999), (), cap_bytes=64 * 1024
     )
     assert text == ""
@@ -161,7 +152,7 @@ def test_format_context_event_shape() -> None:
         "kind": "UserMessage",
         "payload": {"text": "hello", "turn_index": 0},
     }
-    formatted = _format_context_event(env)
+    formatted = format_context_event(env)
     assert formatted.startswith("[seq=5 kind=UserMessage]")
     # sorted keys → text before turn_index
     assert '"text"' in formatted

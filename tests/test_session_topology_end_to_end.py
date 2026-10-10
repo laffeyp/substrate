@@ -3,9 +3,9 @@
 """Sprint 209a — session_topology one-turn end-to-end with real Producer bodies.
 
 Proves the four Producer bodies wired at sprint 209a work together with the
-ten triggers from sprint 206 and the pause_await_input(Park) termination.
-One turn opens on UserMessage, the scripted model produces two ToolCalls +
-one FinalAnswer, park-on-final fires, the topology pauses awaiting the next
+session triggers and the pause_await_input(Returned) termination.
+One turn opens on UserMessage, the scripted model produces two ToolCalls and
+a reply, return-on-reply fires, the topology pauses awaiting the next
 UserMessage.
 
 The scripted DeterministicResponder path makes the record byte-stable — the
@@ -55,7 +55,7 @@ def _factory(
 
 
 @pytest.mark.asyncio
-async def test_one_turn_scripted_pauses_on_park(tmp_path: Path) -> None:
+async def test_one_turn_scripted_pauses_on_returned(tmp_path: Path) -> None:
     record_root = tmp_path / "sess-1"
     factory = _factory(
         session_id="sess-1",
@@ -77,8 +77,9 @@ async def test_one_turn_scripted_pauses_on_park(tmp_path: Path) -> None:
     assert_event(record_root, "ToolResult", tool="add", output=5, ok=True)
     assert_event(record_root, "ToolCall", tool="mul", step=1)
     assert_event(record_root, "ToolResult", tool="mul", output=20, ok=True)
-    assert_event(record_root, "FinalAnswer", text="20")
-    assert_event(record_root, "Park", reason="final_answer", turn_index=0)
+    assert_event(record_root, "ModelReply", text="20", stop_reason="end_turn", step=2)
+    assert_no_event(record_root, "FinalAnswer")
+    assert_event(record_root, "Returned", reason="replied", turn_index=0)
     # No SessionEnded on the first turn — the pause holds the run.
     assert_no_event(record_root, "SessionEnded")
     # `assert_replayable(root, "3a")` is not called here — a fresh `.resume()` skips
@@ -113,8 +114,8 @@ async def test_second_turn_appends_to_the_same_record(tmp_path: Path) -> None:
         ),
     )
     assert result.status == "paused"
-    # Turn 0's Park and turn 1's Park both land — one per turn.
-    parks = [e for e in api.read_record(record_root) if e["kind"] == "Park"]
+    # Turn 0's Returned and turn 1's Returned both land — one per turn.
+    parks = [e for e in api.read_record(record_root) if e["kind"] == "Returned"]
     assert len(parks) == 2
     assert parks[0]["payload"]["turn_index"] == 0
     assert parks[1]["payload"]["turn_index"] == 1

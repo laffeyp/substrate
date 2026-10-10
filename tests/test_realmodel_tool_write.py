@@ -59,7 +59,6 @@ def _open(*, tmp_path: Path, tools: dict, first_text: str) -> Any:
         turn_max_steps=5,
         session_id="s_write_test",
         workspace_path=str(workspace),
-        record_root=tmp_path / "record",
         script=None,
         first_turn_user_message=UserMessage(
             text=first_text, turn_index=0, assembled_prompt=first_text, slash_source="test"

@@ -2,12 +2,12 @@
 # Copyright (C) 2026 Peter Laffey
 """Sprint 208 — seed-alone-exceeds guard fires exactly one SessionWarning at open.
 
-The topology registers a `session_warning` producer_kind unconditionally, and
-binds an `initial("session_warning", ...)` only when
-`_est_tokens(seed) + _est_tokens(per_turn) > driver_context_tokens * 0.6`.
-The producer emits one `SessionWarning{kind:"seed_alone_exceeds"}` and completes,
-so the vocabulary-lock §F #6 cadence "at most once per (session_id, condition_kind)"
-holds by construction — no trigger re-fires it.
+Since K263 the `session_prompt` producer writes the warning. On a session with no prompt
+source, the producer and its `initial` are registered only when
+`_est_tokens(seed) + _est_tokens(per_turn) > driver_context_tokens * 0.6`. The producer
+emits one `SessionWarning{kind:"seed_alone_exceeds"}` and completes, so the vocabulary-lock
+§F #6 cadence "at most once per (session_id, condition_kind)" holds by construction — no
+trigger re-fires it.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from substrate import api
 from substrate.adapters import DeterministicResponder
 from substrate.testing import assert_event
 from substrate.topologies.session import SessionWarning, session_topology
+from substrate.topologies.session.vocabulary import PRODUCER_KIND_SESSION_PROMPT
 
 # A short scripted run inside one K-window: the documented exception to session_topology's
 # record_root warning (UI sprint 107 states it here instead of letting it print on every run).
@@ -51,14 +52,14 @@ def _open(
 def test_small_seed_does_not_arm_the_initial() -> None:
     reg = _open(seed="you are a companion", driver_context_tokens=32768)
     kinds = {i.kind for i in reg.initials}
-    assert "session_warning" not in kinds
+    assert PRODUCER_KIND_SESSION_PROMPT not in kinds
 
 
 def test_seed_exceeding_headroom_arms_the_initial() -> None:
     # driver_context_tokens=4096 → headroom 2457 tokens; seed of 20 000 chars ≈ 5000 tokens.
     reg = _open(seed="X" * 20000, driver_context_tokens=4096)
     kinds = {i.kind for i in reg.initials}
-    assert "session_warning" in kinds
+    assert PRODUCER_KIND_SESSION_PROMPT in kinds
 
 
 def test_seed_plus_per_turn_crossing_boundary_arms_the_initial() -> None:
@@ -66,12 +67,12 @@ def test_seed_plus_per_turn_crossing_boundary_arms_the_initial() -> None:
     # Add a 20 000-char per_turn (~5000 tokens) → total 8000 tokens, exceeds headroom.
     reg = _open(seed="X" * 12000, per_turn="Y" * 20000, driver_context_tokens=12288)
     kinds = {i.kind for i in reg.initials}
-    assert "session_warning" in kinds
+    assert PRODUCER_KIND_SESSION_PROMPT in kinds
 
 
 @pytest.mark.asyncio
-async def test_session_warning_producer_emits_exactly_one_and_completes(tmp_path: Path) -> None:
-    """The registered `session_warning` producer emits one `SessionWarning` and
+async def test_session_prompt_emits_exactly_one_warning_and_completes(tmp_path: Path) -> None:
+    """The registered `session_prompt` producer emits one `SessionWarning` and
     completes. Cadence "at most once per (session_id, condition_kind)" holds
     structurally — no trigger re-fires it. Test fires the producer inside a
     minimal topology built directly from `session_topology`'s registration.
@@ -81,21 +82,21 @@ async def test_session_warning_producer_emits_exactly_one_and_completes(tmp_path
         driver_context_tokens=4096,
         session_id="sess-warn",
     )
-    warning_reg = reg.producer_kinds["session_warning"]
+    warning_reg = reg.producer_kinds[PRODUCER_KIND_SESSION_PROMPT]
 
     def solo_topo(b: api.TopologyBuilder) -> None:
         # Register with `[SessionWarning]` directly rather than destructuring
         # `warning_reg.schemas.values()` — reaching into ProducerKindReg's tuple shape
-        # would rot if the substrate ever grew the tuple. The vocab lock is stable;
-        # SessionWarning is the one Struct the session_warning producer emits.
+        # would rot if the substrate ever grew the tuple. With no prompt source, SessionWarning
+        # is the one Struct the session_prompt producer emits.
         b.producer_kind(
-            "session_warning",
+            PRODUCER_KIND_SESSION_PROMPT,
             schemas=[SessionWarning],
             schema_version=1,
             factory=warning_reg.factory,
             deterministic=True,
         )
-        b.initial("session_warning", input={})
+        b.initial(PRODUCER_KIND_SESSION_PROMPT, input={})
         b.termination(api.threshold_count("SessionWarning", 1))
 
     record_root = tmp_path / "sess-warn"
@@ -117,5 +118,5 @@ async def test_session_warning_producer_emits_exactly_one_and_completes(tmp_path
     )
     assert warning["payload"]["kind"] == "seed_alone_exceeds"
     assert warning["payload"]["seed_tokens"] > warning["payload"]["driver_context_tokens"] * 0.6
-    # The session_warning producer is declared deterministic; the record must replay byte-identical.
+    # The session_prompt producer is declared deterministic; the record must replay byte-identical.
     api.assert_replayable(record_root, "3a")

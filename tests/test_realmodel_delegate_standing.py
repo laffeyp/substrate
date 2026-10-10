@@ -44,6 +44,7 @@ from typing import Any
 import httpx
 import pytest
 
+from substrate.topologies.session.vocabulary import turn_replies
 from substrate import api
 from substrate.adapters import OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
@@ -82,7 +83,6 @@ def _reviewer_factory(
     workspace + record land under tmp_path."""
     reviewer_ws = tmp_path / "reviewer_workspace"
     reviewer_ws.mkdir(parents=True, exist_ok=True)
-    reviewer_record = tmp_path / "sessions" / "s_reviewer" / "record"
 
     def factory(manifest: Any, first_turn_user_message: Any = None) -> Any:
         del manifest, first_turn_user_message  # rebuilt from the pinned closure
@@ -97,7 +97,6 @@ def _reviewer_factory(
             turn_max_steps=2,
             session_id="s_reviewer",
             workspace_path=str(reviewer_ws),
-            record_root=reviewer_record,
             script=None,
         )
 
@@ -143,11 +142,10 @@ async def test_live_standing_reviewer_answers_and_parent_quotes(tmp_path: Path) 
             slash_source="chat",
         ),
     )
-    first_finals = [e for e in api.read_record(reviewer_record) if e["kind"] == "FinalAnswer"]
-    assert first_finals, "reviewer must produce a FinalAnswer on its first turn"
-    assert "REVIEWER-42" in first_finals[-1]["payload"]["text"], (
-        f"reviewer's own first-turn answer must carry its identity; "
-        f"got {first_finals[-1]['payload']['text']!r}"
+    first_finals = turn_replies(api.read_record(reviewer_record))
+    assert first_finals, "reviewer must reply on its first turn"
+    assert "REVIEWER-42" in first_finals[-1][1], (
+        f"reviewer's own first-turn answer must carry its identity; got {first_finals[-1][1]!r}"
     )
 
     # ── set up the parent session with delegate wired to the registry ───
@@ -188,7 +186,6 @@ async def test_live_standing_reviewer_answers_and_parent_quotes(tmp_path: Path) 
         turn_max_steps=4,
         session_id="s_parent",
         workspace_path=str(parent_workspace),
-        record_root=parent_record,
         script=None,
         first_turn_user_message=UserMessage(
             text=(
@@ -214,7 +211,7 @@ async def test_live_standing_reviewer_answers_and_parent_quotes(tmp_path: Path) 
     parent_envs = list(api.read_record(parent_record))
     tool_calls = [e for e in parent_envs if e["kind"] == "ToolCall"]
     tool_results = [e for e in parent_envs if e["kind"] == "ToolResult"]
-    final_answers = [e for e in parent_envs if e["kind"] == "FinalAnswer"]
+    final_answers = turn_replies(parent_envs)
 
     assert any(c["payload"].get("tool") == "delegate" for c in tool_calls), (
         f"parent did not call delegate; tools called: "
@@ -249,12 +246,11 @@ async def test_live_standing_reviewer_answers_and_parent_quotes(tmp_path: Path) 
     assert delegated["slash_source"] == "delegate", delegated
     assert "name" in delegated["text"].lower(), delegated
 
-    # Parent's own FinalAnswer quotes the reviewer's identity — the whole
+    # Parent's own reply quotes the reviewer's identity — the whole
     # point of the round-trip.
-    assert final_answers, "parent must produce a FinalAnswer"
-    assert "REVIEWER-42" in final_answers[-1]["payload"]["text"], (
-        f"parent's FinalAnswer must quote what the reviewer said; "
-        f"got {final_answers[-1]['payload']['text']!r}"
+    assert final_answers, "parent must reply"
+    assert "REVIEWER-42" in final_answers[-1][1], (
+        f"parent's reply must quote what the reviewer said; got {final_answers[-1][1]!r}"
     )
 
     # ── turn 2: parent resumes, delegates AGAIN to the same reviewer ────
@@ -288,7 +284,7 @@ async def test_live_standing_reviewer_answers_and_parent_quotes(tmp_path: Path) 
 
     # ── turn-2 assertions ───────────────────────────────────────────────
     parent_envs_2 = list(api.read_record(parent_record))
-    parent_finals_2 = [e for e in parent_envs_2 if e["kind"] == "FinalAnswer"]
+    parent_finals_2 = turn_replies(parent_envs_2)
     parent_tool_results_2 = [e for e in parent_envs_2 if e["kind"] == "ToolResult"]
 
     turn_2_delegates = [
@@ -335,12 +331,10 @@ async def test_live_standing_reviewer_answers_and_parent_quotes(tmp_path: Path) 
         f"across the parent's two turns; got {len(delegated_msgs)}"
     )
 
-    # Parent's FinalAnswer on turn 2 quotes both the identity and the math.
-    assert "REVIEWER-42" in parent_finals_2[-1]["payload"]["text"], (
-        f"parent turn 2 must quote the reviewer's identity again; "
-        f"got {parent_finals_2[-1]['payload']['text']!r}"
+    # Parent's reply on turn 2 quotes both the identity and the math.
+    assert "REVIEWER-42" in parent_finals_2[-1][1], (
+        f"parent turn 2 must quote the reviewer's identity again; got {parent_finals_2[-1][1]!r}"
     )
-    assert "4" in parent_finals_2[-1]["payload"]["text"], (
-        f"parent turn 2 must quote the reviewer's math answer; "
-        f"got {parent_finals_2[-1]['payload']['text']!r}"
+    assert "4" in parent_finals_2[-1][1], (
+        f"parent turn 2 must quote the reviewer's math answer; got {parent_finals_2[-1][1]!r}"
     )

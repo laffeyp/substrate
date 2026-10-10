@@ -1,33 +1,27 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""Sprint 050 — live-model compaction end-to-end.
+"""Live-model compaction: a real local model, a real window, a conversation that outgrows it.
 
-The unit tests under tests/test_render_*.py feed synthetic event lists into
-`render_transcript` and check the shape. None of them prove that a REAL
-driver, handed the rendered prompt after older turns dropped, still returns
-a coherent answer — the whole point of compaction. This test does.
+Driver: `llama3.2:1b` on the local Ollama with `num_ctx=2048`, Ollama's own default context
+window, and the session told the same window. The conversation asks for a few sentences on one
+topic after another until the history no longer fits the prompt budget (60% of 2,048 tokens);
+from then on the session drops the oldest turns from the prompt (rolling window) and records a
+`TranscriptCompacted` for each drop. The full conversation stays on the record.
 
-Setup:
-- Driver: OllamaResponder("llama3.2:1b"). Small, fast, real network I/O.
-- driver_context_tokens=2048 (forced small): with default
-  `_AVG_TURN_TOKENS_DEFAULT` and headroom_frac=0.6, _compute_k lands at
-  a handful of turns. Later turns will drop earlier ones.
-- Drive 7 turns of a trivial exchange (name a color / another / etc.),
-  drive the session directly via Runtime.run + Runtime.resume — the
-  same shape the daemon uses at `substrate/session_registry.py`.
+Checks, all on the record:
+1. at least one `TranscriptCompacted`, each with a dropped range below its kept start and fewer
+   tokens after than before;
+2. every turn after the first compaction still gets a non-empty reply from the model;
+3. no `substrate.ProducerFailed` on the model;
+4. every recorded prompt (`PromptComposed`) fits the 2,048-token window by our estimate, and
+5. by Ollama's own count: every request Ollama received carried `num_ctx=2048`, and Ollama read
+   fewer prompt tokens than the window (`prompt_eval_count`), so it never cut a prompt. The
+   first call of the run has no prompt cache, so its count is compared with our chars/4 estimate.
 
-Assertions:
-1. At least one `TranscriptCompacted` event lands with a non-empty
-   `dropped_seq_range`.
-2. Every `TranscriptCompacted` has `kept_seq_start` strictly above every
-   seq in `dropped_seq_range` (tech-spec §3a invariant).
-3. `tokens_after < tokens_before` on each event (compaction saved tokens).
-4. Turns AFTER the first compaction still land ModelReply with non-empty
-   text — the driver read the compacted prompt without falling over.
-5. No `substrate.ProducerFailed` on the `model` producer across the run.
+The reply cap is 800 tokens: the session gives the history 60% of the window and leaves 40% for
+the reply.
 
-`@pytest.mark.realmodel` gates it — skipped when Ollama or the model is
-absent (same shape as tests/test_realmodel_demos.py).
+Marked `realmodel`; skips when Ollama or the model is absent.
 """
 
 from __future__ import annotations
@@ -41,152 +35,177 @@ import pytest
 from substrate import api
 from substrate.adapters import OllamaResponder
 from substrate.topologies.session import UserMessage, session_topology
-from substrate.topologies.tool_loop.tools import CALCULATOR
+from substrate.topologies.session.transcript import TURN_EVENT_KINDS, compose_model_prompt
 
 pytestmark = pytest.mark.realmodel
 
 _MODEL = "llama3.2:1b"
-_OLLAMA_V1 = "http://localhost:11434/v1"
+_WINDOW = 2048  # Ollama's default num_ctx; the session is told the same window
+_MAX_TURNS = 30
+_TOPICS = [
+    "how bread rises",
+    "why the sky is blue",
+    "how a bicycle stays upright",
+    "what a river delta is",
+    "how bees make honey",
+    "why ice floats",
+    "how a compass works",
+    "what causes tides",
+    "how a camera lens focuses light",
+    "why leaves change color in autumn",
+    "how a refrigerator keeps food cold",
+    "what makes a rainbow",
+    "how sound travels through air",
+    "why volcanoes erupt",
+    "how a lighthouse warns ships",
+]
 
 
 def _require_model() -> None:
     try:
-        ids = {m["id"] for m in httpx.get(_OLLAMA_V1 + "/models", timeout=4).json().get("data", [])}
+        names = {
+            m["name"]
+            for m in httpx.get("http://127.0.0.1:11434/api/tags", timeout=4).json()["models"]
+        }
     except Exception as exc:  # noqa: BLE001 — any unreachability is a SKIP
-        pytest.skip(f"live compaction test skipped — Ollama not reachable ({type(exc).__name__})")
-    if _MODEL not in ids:
-        pytest.skip(f"live compaction test skipped — model absent: {_MODEL}")
+        pytest.skip(f"Ollama not reachable ({type(exc).__name__})")
+    if _MODEL not in names:
+        pytest.skip(f"model absent: {_MODEL}")
 
 
-def _build(*, first_text: str, session_id: str, workspace: Path, record_root: Path) -> Any:
-    """Session topology configured with a forced-small context so compaction
-    kicks in inside a handful of turns.
+OBSERVED: list[dict[str, Any]] = []
 
-    `record_root` MUST be threaded — the model producer's compaction path
-    (session/__init__.py:259) is guarded on `record_root is not None`.
-    Sprint 050 audit finding: forgetting to pass it silently disables
-    every prompt-compaction the spec advertises. The daemon at
-    substrate-ui/server.py:460 passes it correctly.
-    """
+
+class _Observed(OllamaResponder):
+    """The real OllamaResponder, recording what Ollama received and reported on every call."""
+
+    async def _achat(self, prompt: str, tools: Any = None) -> dict[str, object]:
+        _headers, payload = self._request(prompt, tools)
+        data = await super()._achat(prompt, tools)
+        OBSERVED.append(
+            {
+                "num_ctx": payload["options"]["num_ctx"],  # type: ignore[index]
+                "num_predict": payload["options"].get("num_predict"),  # type: ignore[union-attr]
+                "prompt_chars": len(prompt),
+                "prompt_eval_count": data.get("prompt_eval_count"),
+                "eval_count": data.get("eval_count"),
+                "done_reason": data.get("done_reason"),
+            }
+        )
+        return data
+
+
+def _topology(first: UserMessage | None, workspace: Path) -> Any:
     return session_topology(
-        driver=OllamaResponder(
-            _MODEL,
-            max_tokens=32,
-            temperature=0.2,
-            # An empty suite would sidestep the tool loop entirely; a small
-            # model handed a suite may randomly call tools. CALCULATOR keeps
-            # the production shape and both branches are exercised.
-            system="Reply with EXACTLY one word — a color. No punctuation, no explanation.",
-        ),
+        driver=_Observed(_MODEL, num_ctx=_WINDOW, max_tokens=800, temperature=0),
         driver_name=_MODEL,
-        driver_context_tokens=2048,  # forced small so k=1 (single turn)
-        seed="you name colors",
-        tools=CALCULATOR,
-        per_turn="",
-        max_turns=20,
-        turn_max_steps=4,
-        session_id=session_id,
+        driver_context_tokens=_WINDOW,
+        seed="You are a helpful assistant.",
+        tools={},
+        session_id="s_live_compaction",
         workspace_path=str(workspace),
-        record_root=record_root,
-        script=None,
-        first_turn_user_message=UserMessage(
-            text=first_text,
-            turn_index=0,
-            assembled_prompt=first_text,
-            slash_source="test",
-        ),
+        first_turn_user_message=first,
     )
 
 
-@pytest.mark.timeout(300)
+def _turn_text(i: int) -> str:
+    return f"In four or five sentences, explain {_TOPICS[i % len(_TOPICS)]}."
+
+
+@pytest.mark.timeout(900)
 async def test_live_compaction_fires_and_model_still_answers(tmp_path: Path) -> None:
     _require_model()
-    root = tmp_path / "live-compaction"
+    OBSERVED.clear()
+    root = tmp_path / "record"
     workspace = tmp_path / "ws"
+    workspace.mkdir()
 
-    turns = [
-        "name a color",
-        "another",
-        "a warm one",
-        "a cool one",
-        "a rare one",
-        "a bright one",
-        "a dark one",
-    ]
+    def _compactions() -> list[dict[str, Any]]:
+        return [e for e in api.read_record(root) if e["kind"] == "TranscriptCompacted"]
 
-    result = await api.Runtime(root, persistent=True).run(
-        _build(first_text=turns[0], session_id="s_compact", workspace=workspace, record_root=root)
-    )
-    assert result.status == "paused", f"turn 1 expected paused, got {result.status}"
-
-    for i, text in enumerate(turns[1:], start=1):
-        result = await api.Runtime(root, persistent=True).resume(
-            _build(
-                first_text="unused-on-resume",
-                session_id="s_compact",
-                workspace=workspace,
-                record_root=root,
-            ),
-            resume_event=UserMessage(
-                text=text, turn_index=i, assembled_prompt=text, slash_source="test"
-            ),
+    first = UserMessage(text=_turn_text(0), turn_index=0, assembled_prompt="", slash_source="test")
+    result = await api.Runtime(root, persistent=True).run(_topology(first, workspace))
+    assert result.status == "paused", result.status
+    turns_after_compaction = 0
+    for i in range(1, _MAX_TURNS):
+        message = UserMessage(
+            text=_turn_text(i), turn_index=i, assembled_prompt="", slash_source="test"
         )
-        assert result.status == "paused", f"turn {i + 1} expected paused, got {result.status}"
+        result = await api.Runtime(root, persistent=True).resume(
+            _topology(None, workspace), resume_event=message
+        )
+        assert result.status == "paused", f"turn {i + 1}: {result.status}"
+        if _compactions():
+            turns_after_compaction += 1
+            if turns_after_compaction >= 3:
+                break
 
-    envelopes = list(api.read_record(root))
+    envelopes = list(api.read_record(root, resolve_blobs=True))
+    compactions = [e for e in envelopes if e["kind"] == "TranscriptCompacted"]
+    assert compactions, f"no TranscriptCompacted in {_MAX_TURNS} turns at a {_WINDOW}-token window"
 
-    def _by_kind(kind: str) -> list[dict[str, Any]]:
-        return [e for e in envelopes if e["kind"] == kind]
-
-    compactions = _by_kind("TranscriptCompacted")
-    model_replies = _by_kind("ModelReply")
-    model_failures = [
-        e
-        for e in _by_kind("substrate.ProducerFailed")
-        if ((e["payload"].get("producer") or {}).get("kind") == "model")
-    ]
-
-    # (1) at least one compaction fired
-    assert compactions, (
-        "expected at least one TranscriptCompacted across seven turns with "
-        "driver_context_tokens=2048; got none — either compaction is not "
-        "firing or K is somehow covering all turns"
-    )
-
-    # (2 + 3) shape invariants per tech-spec §3a
+    # (1) each compaction is well formed
     for env in compactions:
         p = env["payload"]
-        seq = env["seq"]
         lo, hi = p["dropped_seq_range"]
-        kept_start = p["kept_seq_start"]
-        assert lo <= hi, f"seq {seq}: dropped_seq_range malformed: {(lo, hi)}"
-        assert kept_start > hi, (
-            f"seq {seq}: kept_seq_start ({kept_start}) must be strictly above "
-            f"the last dropped seq ({hi}); tech-spec §3a invariant"
-        )
-        assert p["tokens_after"] < p["tokens_before"], (
-            f"seq {seq}: tokens_after ({p['tokens_after']}) must be less than "
-            f"tokens_before ({p['tokens_before']}); compaction that does not "
-            f"save tokens is a bug"
-        )
+        assert lo <= hi < p["kept_seq_start"], p
+        assert p["tokens_after"] < p["tokens_before"], p
 
-    # (4) turns after the first compaction still produce ModelReply with text.
-    # The record is append-order, so ModelReplies at seq > first-compaction-seq
-    # are post-compaction turns.
-    first_compaction_seq = compactions[0]["seq"]
-    post_replies = [
-        r
-        for r in model_replies
-        if r["seq"] > first_compaction_seq and str(r["payload"].get("text", "")).strip()
+    # (2) the model keeps answering after the history was trimmed
+    first_seq = compactions[0]["seq"]
+    later_replies = [
+        e["payload"]["text"]
+        for e in envelopes
+        if e["kind"] == "ModelReply" and e["seq"] > first_seq
     ]
-    assert post_replies, (
-        f"expected at least one ModelReply with non-empty text at seq > "
-        f"{first_compaction_seq} (first compaction). The compacted prompt "
-        f"produced nothing coherent — probable prompt shape bug."
+    assert later_replies and all(t.strip() for t in later_replies), later_replies
+
+    # (3) the model never failed
+    failures = [
+        e
+        for e in envelopes
+        if e["kind"] == "substrate.ProducerFailed"
+        and (e["payload"].get("producer") or {}).get("kind") == "model"
+    ]
+    assert not failures, failures
+
+    # (4) every prompt the model was sent fits the real window
+    sizes = [e["payload"]["total_tokens"] for e in envelopes if e["kind"] == "PromptComposed"]
+    assert sizes and max(sizes) <= _WINDOW, sizes
+
+    # (5) what Ollama actually received and read
+    assert OBSERVED, "no Ollama call was observed"
+    assert all(c["num_ctx"] == _WINDOW for c in OBSERVED), OBSERVED
+    assert all(int(c["prompt_eval_count"] or 0) < _WINDOW for c in OBSERVED), OBSERVED
+    first_call = OBSERVED[0]
+    estimate = first_call["prompt_chars"] // 4
+    print(
+        f"first call: our estimate {estimate} tokens, Ollama read {first_call['prompt_eval_count']}"
+    )
+    print(
+        "per call (Ollama prompt tokens, reply tokens):",
+        [(c["prompt_eval_count"], c["eval_count"]) for c in OBSERVED],
     )
 
-    # (5) no model producer failures across the run
-    assert not model_failures, (
-        f"expected 0 substrate.ProducerFailed on the model producer, got "
-        f"{len(model_failures)}: {[e['seq'] for e in model_failures]}"
-    )
+    # (6) K268: each model step's recorded input is a ticket, and the prompt it built from the
+    # ticket equals the one built from the full record over the same range
+    import json
+
+    fires = [
+        e
+        for e in envelopes
+        if e["kind"] == "substrate.TriggerFired" and e["payload"].get("factory") == "model"
+    ]
+    prompts = [e["payload"]["text"] for e in envelopes if e["kind"] == "PromptComposed"]
+    assert max(len(json.dumps(f["payload"].get("resolved_input"))) for f in fires) < 400
+    for fire, prompt in zip(fires, prompts, strict=True):
+        ticket = fire["payload"]["resolved_input"]["history_ref"]
+        kept = [
+            e
+            for e in envelopes
+            if ticket["from_seq"] <= e["seq"] <= ticket["to_seq"] and e["kind"] in TURN_EVENT_KINDS
+        ]
+        base, _ = compose_model_prompt(
+            history=kept, seed="You are a helpful assistant.", per_turn="", fragments=[]
+        )
+        assert prompt == base, (prompt[-200:], base[-200:])

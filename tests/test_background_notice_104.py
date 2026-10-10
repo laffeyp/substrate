@@ -43,7 +43,6 @@ def _registry(tmp_path: Path, responder: Any, script: Any = None) -> SessionRegi
             turn_max_steps=6,
             session_id=m.session_id,
             workspace_path=m.workspace,
-            record_root=Path(m.record_root),
             script=script,
             first_turn_user_message=first,
         )
@@ -99,7 +98,7 @@ def test_1_a_task_that_ends_mid_turn_is_recorded_before_the_next_step(tmp_path: 
     assert kinds.count("BackgroundTaskEnded") == 1, kinds
     i_ended = kinds.index("BackgroundTaskEnded")
     i_second_result = [i for i, k in enumerate(kinds) if k == "ToolResult"][1]
-    i_final = kinds.index("FinalAnswer")
+    i_final = kinds.index("Returned")
     assert i_second_result < i_ended < i_final, "told after the step that ran past the ending"
     payload = envs[i_ended]["payload"]
     assert (

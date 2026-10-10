@@ -79,7 +79,6 @@ async def test_model_runs_supervises_and_stops_a_background_server(tmp_path: Pat
         turn_max_steps=10,
         session_id=owner,
         workspace_path=str(workspace),
-        record_root=tmp_path / "record",
         script=None,
         first_turn_user_message=UserMessage(
             text=task, turn_index=0, assembled_prompt=task, slash_source="test"

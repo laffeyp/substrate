@@ -135,7 +135,6 @@ def test_6_session_end_and_delete_stop_the_sessions_tasks(tmp_path: Path) -> Non
             turn_max_steps=4,
             session_id=m.session_id,
             workspace_path=m.workspace,
-            record_root=Path(m.record_root),
             script=None,
             first_turn_user_message=first,
         )

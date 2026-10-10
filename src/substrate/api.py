@@ -67,7 +67,7 @@ from .kernel.policies import (
     quiescence,
     threshold_count,
 )
-from .kernel.runtime import RunResult, Runtime, find_active_runtime
+from .kernel.runtime import RunResult, Runtime, current_record_root, find_active_runtime
 from .kernel.topology import (
     Budget,
     Cap,
@@ -109,6 +109,7 @@ from .record.record import (
     has_torn_tail,
     read_first_envelope,
     read_last_envelope,
+    read_range,
     read_record,
     recover_open_segment,
     resolve_blob_payload,
@@ -175,6 +176,7 @@ __all__ = [
     "Runtime",
     "RunResult",
     # records
+    "read_range",
     "read_record",
     "has_torn_tail",
     "read_first_envelope",
@@ -182,6 +184,7 @@ __all__ = [
     "resolve_blob_payload",
     "list_bundles",
     "load_bundle",
+    "current_record_root",
     "find_active_runtime",
     "recover_open_segment",
     "Interval",

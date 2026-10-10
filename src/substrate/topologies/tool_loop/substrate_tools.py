@@ -130,10 +130,9 @@ def _run_topology_impl(daemon_client: DaemonClient, args: list[Any]) -> dict[str
     payload.pop("name", None)
     inputs = _require_key(payload, "inputs", TOOL_NAME_RUN_TOPOLOGY)
     payload.pop("inputs", None)
-    # Sprint 052: `inputs` also comes through msgspec sealing as
-    # MappingProxyType, not plain dict. Widen the check to Mapping and
-    # coerce to a plain dict for the daemon call (which expects a real
-    # dict downstream). Same class as the sprint 049 fix.
+    # `inputs` must be an object. Sprint 052 widened the check to Mapping when inputs arrived
+    # sealed (MappingProxyType); since K267 a Producer's input is a plain decode of the record,
+    # and `dict(...)` is the daemon call's own copy.
     if not isinstance(inputs, Mapping):
         raise ValueError(
             f"{TOOL_NAME_RUN_TOPOLOGY}: `inputs` must be an object; got {type(inputs).__name__}"

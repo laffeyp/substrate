@@ -60,10 +60,12 @@ GROUPS: dict[str, list[str]] = {
         "RunFailureReason",
         "Budget",
         "Cap",
+        "current_record_root",
         "find_active_runtime",
     ],
     "Records & encoding": [
         "read_record",
+        "read_range",
         "read_first_envelope",
         "read_last_envelope",
         "has_torn_tail",

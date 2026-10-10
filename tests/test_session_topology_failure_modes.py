@@ -5,12 +5,12 @@
 Three trigger paths product spec §10 / tech spec §11 name but the existing
 session-topology tests do not walk end-to-end:
 
-- `park-on-model-error` — model producer raises → PRODUCER_FAILED → park →
-  Park{reason:"model_error"} → run pauses → next UserMessage resumes.
-- `park-on-interrupt` — model producer cancelled mid-turn → PRODUCER_CANCELLED →
-  park → Park{reason:"interrupt"} → run pauses → next UserMessage resumes.
+- `return-on-model-error` — model producer raises → PRODUCER_FAILED → return →
+  Returned{reason:"model_error"} → run pauses → next UserMessage resumes.
+- `return-on-interrupt` — model producer cancelled mid-turn → PRODUCER_CANCELLED →
+  return → Returned{reason:"interrupted"} → run pauses → next UserMessage resumes.
 - `end-on-cap` — the (max_turns + 1)th UserMessage fires `end-on-cap` →
-  SessionEnded{reason:"timeout", total_turns:max_turns} → RunFinalised.
+  SessionEnded{reason:"turn_cap", total_turns:max_turns} → RunFinalised.
 
 Each test builds the session topology directly (no CI wrapper): `first_turn_user_message`
 opens turn 1 on `Runtime.run()`; `Runtime.resume(topology, resume_event=UserMessage(...))`
@@ -43,7 +43,7 @@ pytestmark = pytest.mark.filterwarnings(r"ignore:session_topology\(record_root=N
 
 
 class _RaisingResponder:
-    """Raises on every prompt. Drives park-on-model-error."""
+    """Raises on every prompt. Drives return-on-model-error."""
 
     def respond(self, prompt: str) -> str:  # sync path (unused here)
         raise RuntimeError(f"induced model failure: prompt_len={len(prompt)}")
@@ -53,7 +53,7 @@ class _RaisingResponder:
 
 
 class _SlowResponder:
-    """Blocks for `delay` seconds on `arespond`. Drives park-on-interrupt —
+    """Blocks for `delay` seconds on `arespond`. Drives return-on-interrupt —
     the interrupt-driver coroutine has a window to call cancel_producer while
     the model producer is running."""
 
@@ -116,21 +116,27 @@ def _by_kind(envelopes: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]
     return [e for e in envelopes if e["kind"] == kind]
 
 
-def _park_reasons(envelopes: list[dict[str, Any]]) -> list[str]:
-    return [str(e["payload"].get("reason", "")) for e in _by_kind(envelopes, "Park")]
+def _wrap_ups(envelopes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        e for e in _by_kind(envelopes, "ModelReply") if e["payload"]["stop_reason"] == "wrap_up"
+    ]
 
 
-# ── test 1: park-on-model-error ────────────────────────────────────────
+def _return_reasons(envelopes: list[dict[str, Any]]) -> list[str]:
+    return [str(e["payload"].get("reason", "")) for e in _by_kind(envelopes, "Returned")]
+
+
+# ── test 1: return-on-model-error ────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_park_on_model_error_then_resume(tmp_path: Path) -> None:
-    """A model producer that raises during turn 1 → PRODUCER_FAILED → park-on-model-error
-    fires → Park{reason:"model_error"}. Then Runtime.resume with the next UserMessage +
+async def test_return_on_model_error_then_resume(tmp_path: Path) -> None:
+    """A model producer that raises during turn 1 → PRODUCER_FAILED → return-on-model-error
+    fires → Returned{reason:"model_error"}. Then Runtime.resume with the next UserMessage +
     a working responder → the session resumes on the same record."""
-    root = tmp_path / "park-on-model-error"
+    root = tmp_path / "return-on-model-error"
 
-    # Turn 1: raising responder, expect Park{model_error}.
+    # Turn 1: raising responder, expect Returned{model_error}.
     fail_topology = _build(
         driver=_RaisingResponder(),
         first_user_text="please fail",
@@ -151,8 +157,8 @@ async def test_park_on_model_error_then_resume(tmp_path: Path) -> None:
         f"expected a model ProducerFailed, got kinds {[(e['payload'].get('producer') or {}).get('kind') for e in failures]}"
     )
 
-    reasons = _park_reasons(envelopes)
-    assert "model_error" in reasons, f"expected Park{{reason:model_error}}, got {reasons}"
+    reasons = _return_reasons(envelopes)
+    assert "model_error" in reasons, f"expected Returned{{reason:model_error}}, got {reasons}"
 
     # Turn 2: working responder + Runtime.resume — the same record continues.
     ok_topology = _build(
@@ -179,21 +185,21 @@ async def test_park_on_model_error_then_resume(tmp_path: Path) -> None:
     # A ModelReply from the successful turn now on the record.
     replies = _by_kind(envelopes, "ModelReply")
     assert replies, "expected a ModelReply on the resumed turn"
-    # Park{final_answer} follows the successful turn (in addition to the earlier model_error).
-    reasons_final = _park_reasons(envelopes)
+    # Returned{replied} follows the successful turn (in addition to the earlier model_error).
+    reasons_final = _return_reasons(envelopes)
     assert reasons_final.count("model_error") == 1
-    assert "final_answer" in reasons_final, (
-        f"expected Park{{final_answer}} after resume, got {reasons_final}"
+    assert "replied" in reasons_final, (
+        f"expected Returned{{replied}} after resume, got {reasons_final}"
     )
 
 
-# ── test 2: park-on-interrupt ─────────────────────────────────────────
+# ── test 2: return-on-interrupt ─────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_park_on_interrupt_then_resume(tmp_path: Path) -> None:
+async def test_return_on_interrupt_then_resume(tmp_path: Path) -> None:
     """A slow model producer cancelled mid-turn → PRODUCER_CANCELLED{cause:external} →
-    park-on-interrupt fires → Park{reason:"interrupt"}. Then resume with a working
+    return-on-interrupt fires → Returned{reason:"interrupted"}. Then resume with a working
     responder → the session continues cleanly on the same record.
 
     Sprint 244 closed the substrate-side gap: the model producer now awaits
@@ -201,7 +207,7 @@ async def test_park_on_interrupt_then_resume(tmp_path: Path) -> None:
     cancel_producer has a window to fire. This test is the observation
     contract for that fix + for TECH-SPEC §11's Ctrl+C promise.
     """
-    root = tmp_path / "park-on-interrupt"
+    root = tmp_path / "return-on-interrupt"
 
     slow_topology = _build(
         driver=_SlowResponder(delay=30.0),  # long enough for the interrupt to land
@@ -262,8 +268,8 @@ async def test_park_on_interrupt_then_resume(tmp_path: Path) -> None:
         f"expected cause=external/caller=test:interrupt on cancel payload, got {[(e['payload'].get('cause'), e['payload'].get('caller')) for e in model_cancels]}"
     )
 
-    reasons = _park_reasons(envelopes)
-    assert "interrupt" in reasons, f"expected Park{{interrupt}}, got {reasons}"
+    reasons = _return_reasons(envelopes)
+    assert "interrupted" in reasons, f"expected Returned{{interrupted}}, got {reasons}"
 
     # Resume path.
     ok_topology = _build(
@@ -285,19 +291,19 @@ async def test_park_on_interrupt_then_resume(tmp_path: Path) -> None:
 
     envelopes = _read(root)
     assert len(_by_kind(envelopes, "UserMessage")) == 2
-    reasons_final = _park_reasons(envelopes)
-    assert "interrupt" in reasons_final and "final_answer" in reasons_final
+    reasons_final = _return_reasons(envelopes)
+    assert "interrupted" in reasons_final and "replied" in reasons_final
 
 
 # ── test 3: end-on-cap ─────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_end_on_cap_finalises_with_timeout_reason(tmp_path: Path) -> None:
+async def test_end_on_turn_cap_finalises_with_turn_cap_reason(tmp_path: Path) -> None:
     """max_turns=2. Turns 1 + 2 complete normally. The 3rd UserMessage bumps
-    user_turns to 3 which exceeds max_turns=2, firing `end-on-cap` →
-    SessionEnded{reason:"timeout", total_turns:2}. The run finalises."""
-    root = tmp_path / "end-on-cap"
+    user_turns to 3 which exceeds max_turns=2, firing `end-on-turn-cap` →
+    SessionEnded{reason:"turn_cap", total_turns:2}. The run finalises."""
+    root = tmp_path / "end-on-turn-cap"
 
     # Turn 1 — first_turn_user_message opens the run.
     topo_1 = _build(
@@ -331,7 +337,7 @@ async def test_end_on_cap_finalises_with_timeout_reason(tmp_path: Path) -> None:
 
     # Turn 3 — this one trips end-on-cap. The user_turns View counts to 3;
     # `end-on-cap` predicate is `> max_turns` (max_turns=2 → fires at 3);
-    # session_end producer emits SessionEnded{timeout}; termination
+    # session_end producer emits SessionEnded{turn_cap}; termination
     # threshold_count(SessionEnded, 1) matches; RunResult.status == "finalised".
     result_3 = await api.Runtime(root, persistent=True).resume(
         topo_next,
@@ -349,8 +355,8 @@ async def test_end_on_cap_finalises_with_timeout_reason(tmp_path: Path) -> None:
     envelopes = _read(root)
     session_ended = _by_kind(envelopes, "SessionEnded")
     assert len(session_ended) == 1, f"expected 1 SessionEnded, got {len(session_ended)}"
-    assert session_ended[0]["payload"]["reason"] == "timeout", (
-        f"expected reason=timeout, got {session_ended[0]['payload']}"
+    assert session_ended[0]["payload"]["reason"] == "turn_cap", (
+        f"expected reason=turn_cap, got {session_ended[0]['payload']}"
     )
     assert session_ended[0]["payload"]["total_turns"] == 2, (
         f"expected total_turns=2, got {session_ended[0]['payload']}"
@@ -368,7 +374,7 @@ def _boom_tool() -> dict[str, Tool]:
     """A single tool that always raises. Drives the anti-spin guard.
 
     The tool loop counts consecutive failed ToolResults from the tail and
-    bails after `_MAX_CONSECUTIVE_FAILS` (default 3) with a FinalAnswer
+    bails after `_MAX_CONSECUTIVE_FAILS` (default 3) with a wrap-up reply
     citing the last error. The counter is meant to be per-turn — a fresh
     turn should get 3 attempts before the guard fires.
     """
@@ -396,8 +402,8 @@ async def test_trailing_fails_counter_resets_between_turns(tmp_path: Path) -> No
     tools, answer plainly" prompt so the model can explain to the user
     what happened. So the assertion shifts: turn 2 must (a) burn 3
     fresh failures before wrap-up (per-turn counter), and (b) end with
-    a ModelReply + FinalAnswer (proof the wrap-up went through the
-    driver, not the synthetic path).
+    a ModelReply with stop_reason wrap_up (proof the wrap-up went through
+    the driver, not the synthetic path).
     """
     root = tmp_path / "trailing-fails"
     tools = _boom_tool()
@@ -426,26 +432,24 @@ async def test_trailing_fails_counter_resets_between_turns(tmp_path: Path) -> No
             ),
         )
 
-    # Turn 1 — 3 failing calls, guard fires, driver produces a ModelReply +
-    # FinalAnswer (post-049).
+    # Turn 1 — 3 failing calls, guard fires, driver produces a wrap_up ModelReply
+    # (post-049).
     r1 = await api.Runtime(root, persistent=True).run(_build_boom(first_text="try once"))
     assert r1.status == "paused", f"turn 1 expected paused, got {r1.status}"
     envs_1 = _read(root)
     tool_results_1 = _by_kind(envs_1, "ToolResult")
-    replies_1 = _by_kind(envs_1, "ModelReply")
-    finals_1 = _by_kind(envs_1, "FinalAnswer")
+    wrap_ups_1 = _wrap_ups(envs_1)
     assert len(tool_results_1) == 3, (
         f"turn 1 expected 3 failing tool calls before wrap-up, got {len(tool_results_1)}"
     )
-    assert len(replies_1) == 1 and len(finals_1) == 1, (
-        f"turn 1 expected wrap-up via the driver (1 ModelReply + 1 FinalAnswer), got "
-        f"replies={len(replies_1)} finals={len(finals_1)}"
+    assert len(wrap_ups_1) == 1 and not _by_kind(envs_1, "FinalAnswer"), (
+        f"turn 1 expected one wrap-up reply via the driver, got {len(wrap_ups_1)}"
     )
 
     # Turn 2 — resume with a new UserMessage. The 047 bug made turn 2 bail
     # on its FIRST fail (4th session-wide). Post-fix, turn 2 gets its own
     # fresh 3-fail budget before wrap-up. Post-049, wrap-up is another
-    # driver call — one more ModelReply + one more FinalAnswer land.
+    # driver call — one more wrap_up ModelReply lands.
     r2 = await api.Runtime(root, persistent=True).resume(
         _build_boom(first_text="unused-on-resume"),
         resume_event=UserMessage(
@@ -460,14 +464,12 @@ async def test_trailing_fails_counter_resets_between_turns(tmp_path: Path) -> No
     envs_2 = _read(root)
     tool_results_2 = _by_kind(envs_2, "ToolResult")
     turn_2_tool_results = tool_results_2[len(tool_results_1) :]
-    replies_2 = _by_kind(envs_2, "ModelReply")
-    finals_2 = _by_kind(envs_2, "FinalAnswer")
+    wrap_ups_2 = _wrap_ups(envs_2)
 
     assert len(turn_2_tool_results) == 3, (
         f"turn 2 should burn 3 failing tool calls before wrap-up (counter "
         f"resets per turn); got {len(turn_2_tool_results)}"
     )
-    assert len(replies_2) == 2 and len(finals_2) == 2, (
-        f"turn 2 should add one more wrap-up ModelReply + FinalAnswer via "
-        f"the driver, got total replies={len(replies_2)} finals={len(finals_2)}"
+    assert len(wrap_ups_2) == 2, (
+        f"turn 2 should add one more wrap-up reply via the driver, got total {len(wrap_ups_2)}"
     )

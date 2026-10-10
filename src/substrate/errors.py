@@ -63,8 +63,10 @@ class ReentrantAppendError(SubstrateError):
 
 
 class InputTypeError(SubstrateError):
-    """A resolved Producer input contains a non-immutable / non-whitelisted type;
-    immutability is enforced by construction (technical §8.3 / F-PROD-3)."""
+    """A resolved Producer input contains a type outside the accepted set (technical §8.3 /
+    F-PROD-3, amended 2026-10-09): raw bytes, handles, datetimes, arbitrary objects, mutable
+    Structs or non-string mapping keys. Each Producer receives its own copy of the recorded
+    input, decoded from the canonical bytes the record holds."""
 
 
 class ProducerNotFound(SubstrateError):

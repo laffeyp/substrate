@@ -15,12 +15,8 @@ model's action. Turn-scoped: the FragmentCohort clears the entry on the
 next `PromptComposed`, so the interrupt fires exactly once and does not
 bleed across subsequent turns.
 
-The composer refires on `ToolResult` when the cohort holds a pending
-interrupt (see `TRIGGER_ID_COMPOSE_ON_INTERRUPT_TOOL_RESULT` in the
-session topology). `TRIGGER_ID_CONTINUE` refuses to fire on the same
-condition, so exactly one of the two fires per ToolResult; the model
-wakes on the fresh `PromptComposed` with both the tool result and the
-interrupt directive in scope.
+The model producer builds each step's prompt from the cohort (K261), so the next step after
+the interrupt carries the directive beside the tool result.
 """
 
 from __future__ import annotations
