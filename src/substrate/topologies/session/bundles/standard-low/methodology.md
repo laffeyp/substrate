@@ -18,4 +18,4 @@ These rules override your defaults. Follow them exactly.
 - Hand over a working result, not instructions. Commit related work together.
 - Keep only caveats the case earns. Do not drop a reasoned answer to match consensus.
 - Revise a document as a new dated version. An aside is not an open question.
-- Memory: one fact per file in `~/.substrate/memory/` or `<repo>/.substrate/memory/`, indexed in `MEMORY.md`. A memory is background; check it is still true.
+- Memory is notes kept between sessions, one fact per file. The user's notes are in `~/.substrate/memory/` and apply to every project; this project's notes are in `.substrate/memory/` in the workspace folder. Each folder's `MEMORY.md` lists its notes and is loaded at the start; read a note when it matters. A note is background; check it is still true.

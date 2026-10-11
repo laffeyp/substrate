@@ -35,8 +35,8 @@ def test_both_indexes_load_operator_first(tmp_path: Path, monkeypatch: pytest.Mo
     rp = _index(repo / ".substrate" / "memory", ["- [Gotcha](g.md) — use python -m pytest"])
     frags = memory_fragments(repo)
     assert [f.provenance["path"] for f in frags] == [str(op), str(rp)]
-    assert "Batch commits" in frags[0].text and "operator memory index" in frags[0].text
-    assert "Gotcha" in frags[1].text and "repo memory index" in frags[1].text
+    assert "Batch commits" in frags[0].text and "the index of the user's memory" in frags[0].text
+    assert "Gotcha" in frags[1].text and "the index of the project's memory" in frags[1].text
     assert all(f.precedence == 8 and not f.provenance["truncated"] for f in frags)
 
 
@@ -75,5 +75,9 @@ def test_standard_methodology_carries_the_memory_rules() -> None:
     from substrate.bundles import load_bundle
 
     method = load_bundle("standard").methodology
-    assert "# Memory" in method and "`~/.substrate/memory/`" in method
-    assert "`<repo>/.substrate/memory/`" in method and "write_file" in method
+    memory = method[method.index("# Memory") :]
+    # Says what memory is, what each folder holds and where it is, and names no tool (K287).
+    assert "Memory is a set of notes that outlast this session." in memory
+    assert "`~/.substrate/memory/` in the user's home folder" in memory
+    assert "`.substrate/memory/` inside this session's workspace folder" in memory
+    assert "`MEMORY.md`" in memory and "write_file" not in memory

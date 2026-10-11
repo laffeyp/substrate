@@ -142,8 +142,8 @@ def memory_dirs(repo_root: Path | None) -> list[tuple[str, Path]]:
 
 
 def memory_fragments(repo_root: Path | None) -> list[PromptFragment]:
-    """One fragment per memory index that exists, capped at 200 lines or 25 KB. Topic files are
-    not loaded; the model reads one with `read_file` when it bears on the task."""
+    """One fragment per memory index that exists, capped at 200 lines or 25 KB. The notes
+    themselves are not loaded; the model reads one when its line bears on the task."""
     out: list[PromptFragment] = []
     for scope, directory in memory_dirs(repo_root):
         index = directory / "MEMORY.md"
@@ -158,8 +158,10 @@ def memory_fragments(repo_root: Path | None) -> list[PromptFragment]:
                 break
             kept.append(line)
         truncated = len(kept) < len(lines)
+        # The words the guidance uses for the two folders (K287): the user's memory, the project's.
+        label = "the user's memory" if scope == "operator" else "the project's memory"
         text = (
-            f"Contents of {index} ({scope} memory index; topic files sit beside it):\n\n"
+            f"Contents of {index} (the index of {label}; its notes sit beside it):\n\n"
             + "\n".join(kept)
         )
         out.append(
