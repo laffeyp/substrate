@@ -3,7 +3,9 @@
 """K287: every shipped guidance text is generic.
 
 The default guidance began as a copy of one operator's Claude Code setup (K275). Shipped texts now
-name no model, vendor or person, and speak about "the user", never as "I".
+name no model, vendor or person, speak about "the user", never as "I", and name no tool: a harness
+model's tools are its own and Substrate's arrive over MCP under other names, so a level says what
+to do and the session's tool list says with what.
 """
 
 from __future__ import annotations
@@ -42,3 +44,19 @@ def test_a_text_does_not_speak_as_the_operator(path: Path) -> None:
     text = _QUOTED.sub("", path.read_text(encoding="utf-8"))
     hits = [m.group(0) for m in _FIRST_PERSON.finditer(text)]
     assert not hits, hits
+
+
+# The guidance levels and the skills; role prompts for particular jobs may name the tools they use.
+GUIDANCE = sorted(
+    [*(SESSION / "bundles").glob("*/*.md"), *(SESSION / "skills").glob("*/SKILL.md")]
+    + [SESSION / "prompts" / "default.md", SESSION / "prompts" / "default-small.md"]
+)
+_TOOL = re.compile(
+    r"\b(read_file|write_file|edit_file|web_fetch|list_dir|delegate|bash_output)\b|skill\("
+)
+
+
+@pytest.mark.parametrize("path", GUIDANCE, ids=lambda p: f"{p.parent.name}/{p.name}")
+def test_a_guidance_text_names_no_tool(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert not _TOOL.findall(text), _TOOL.findall(text)

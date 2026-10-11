@@ -1,41 +1,41 @@
 # Every output is writing
 
-All work here arrives as text, and the prose shows whether the thinking happened. These rules
-apply to replies, commit messages, pull requests, code comments, documents and error strings
-alike.
+All work here arrives as text. Prose quality is not decoration on the thinking — it is
+the readable surface of whether the thinking happened. Apply this to chat responses,
+commit messages, PR bodies, code comments, docs, and error strings alike.
 
 ## Write this way
 
-**Make each sentence carry a fact:** a number, a name, a file path, the actual error. A sentence
-that states no fact and advances no argument is a candidate for deletion.
+**Make each sentence carry a fact.** A number, a name, a file path, the actual error.
+If a sentence states no fact and advances no argument, it is a candidate for deletion.
 
-**Replace each abstraction with the particular it covers for.** This adds information; it is not
-a synonym swap.
-- A performance claim becomes the measured number and the machine.
-- "Handles errors well" becomes which error, and what it does.
-- "Several files" becomes the count, or the paths.
-- "Significant improvement" becomes from what, to what.
+**Replace abstractions with the particular they cover for.** This is the core move, and
+it is an instruction to *add* information, not to swap synonyms:
+- performance claim → the measured number and the machine
+- "handles errors well" → which error, what it does
+- "several files" → the count, or the paths
+- "significant improvement" → from what to what
 
-**Prefer the short word, the concrete noun and the active verb.** Say who did it.
+**Prefer the short word, the concrete noun, the active verb.** Say who did it.
 
-**Vary sentence length on purpose.** If every sentence in a paragraph lands on the same beat,
-break one: a fragment, or a short sentence after two long ones. Uniform rhythm is the strongest
-machine tell there is.
+**Vary sentence length deliberately.** Read the paragraph in your head. If every
+sentence lands on the same beat, break one — a fragment, a short one after two long
+ones. Uniform rhythm is the strongest machine tell there is.
 
-**Let prose be prose.** Use a list when the items are parallel and unordered, and a table when
-there are real columns. Otherwise write paragraphs. Use bold only where something nearby is not
-bold.
+**Let prose be prose.** Use a list when the items are genuinely parallel and unordered.
+Use a table when there are real columns. Otherwise write paragraphs. Bold carries
+emphasis only when something nearby is unemphasized.
 
-**End when the point is made.** No paragraph restating what was just said, no "in conclusion".
-The last sentence should say something the reader needs.
+**End when the point is made.** No summary paragraph restating what was just read, no
+"in conclusion," no bow. The last sentence should be load-bearing.
 
-**Say the hard thing plainly.** If the tests fail, lead with that. If an approach was wrong, say
-which part and why. Hedging makes the reader search for the claim.
+**Say the hard thing plainly.** If the tests fail, lead with that. If an approach was
+wrong, say which part and why. Hedging costs the reader a re-read to find the claim.
 
 ## Two rules that override the rest
 
-Break any rule above before writing something clumsy or unclear. If cutting a passage leaves it
-limp, the words were never the problem: find the missing fact.
+Break any of the above before writing something clumsy or unclear. And if stripping a
+passage leaves it limp, the words were never the problem — go find the missing fact.
 
 ## Worked example
 
@@ -43,11 +43,11 @@ Before: *"This robust framework seamlessly leverages cutting-edge techniques to 
 comprehensive insights, underscoring its pivotal role in the evolving landscape of data
 processing."*
 
-After: *"It parses 40GB of logs in nine minutes and tells you which of the three retry paths
-failed. Nothing else on the box does that."*
+After: *"It parses 40GB of logs in nine minutes and tells you which of the three retry
+paths failed. Nothing else on the box does that."*
 
-The second is shorter, but that is a side effect. It is better because it holds four facts and
-the first holds none.
+The second is shorter, but that is a side effect. It is better because it contains four
+facts and the first contains none.
 
-For a full editing pass over a draft, with the measured catalog of machine register and its
-sources, call `skill("dellm")`.
+For a full editing pass over an existing draft — including the measured catalog of
+machine register and its sources — use the `dellm` skill.

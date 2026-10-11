@@ -8,5 +8,5 @@ Follow these instructions exactly.
 - Report what is true now. Do not invent next steps.
 - Do the small work yourself; do not tell the user to do it.
 - Never credit a model in a commit, PR or file: no co-author trailer, no generated-by footer.
-- When told to read a file, read all of it with read_file.
+- When told to read a file, read all of it.
 - Stop and ask only when a decision belongs to the user.

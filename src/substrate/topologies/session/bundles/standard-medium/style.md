@@ -13,5 +13,5 @@ strings.
 - End when the point is made, with no closing summary.
 - Lead with the hard thing: if the tests fail, say so first.
 
-Break any rule before writing something unclear. For a full editing pass over a draft, call
-`skill("dellm")`.
+Break any rule before writing something unclear. For a full editing pass over a draft, use
+the `dellm` skill.

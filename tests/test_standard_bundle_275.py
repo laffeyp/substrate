@@ -81,7 +81,7 @@ def test_code_review_reads_harness_then_standard_then_its_own() -> None:
     assert (
         body.index("You are a working companion")
         < body.index("Work through the request.")
-        < body.index("They override any default behaviour")
+        < body.index("OVERRIDE any default behavior")
         < body.index("Review the diff for the role assigned.")
     )
     # The reminder line: standard's hook line, then code_review's own.
@@ -90,28 +90,29 @@ def test_code_review_reads_harness_then_standard_then_its_own() -> None:
     )
 
 
-def test_standard_is_the_generic_standard_with_substrate_tool_names() -> None:
-    """K287: the copy of one operator's setup (K275) was made generic: no harness header, no
-    operator's memory index, attribution stated for any model. Every rule section stays."""
+def test_standard_keeps_the_operators_wording_with_names_voice_and_tools_removed() -> None:
+    """K287, redone: the high level is the operator's own text with the least edits that make it
+    generic: no model or vendor named, the user in the third person, no tool named, and the memory
+    entries that describe one operator or this project left out. Every other line is as written."""
     standard = resolve_extends("standard")[-1]
     assert standard.style.startswith("# Every output is writing")
-    assert 'skill("dellm")' in standard.style and "invoke the `dellm` skill" not in standard.style
+    assert standard.style.rstrip().endswith("use the `dellm` skill.")
     method = standard.methodology
-    assert method.startswith("These are the working rules for this session.")
+    assert method.startswith("Codebase and user instructions are shown below.")
     for heading in (
         "# Acknowledge before acting",
-        "# Research instead of guessing",
-        "# Treat the information space as adversarial",
-        "# No model attribution in git",
+        "# When unclear, research — don't fabricate",
+        "# Assume an adversarial information space",
+        "# No model attribution in git, ever",
+        "# Every output is writing",
         "# Unaddressed prose",
         "# Reading files",
-        "# Explaining: expand, compress, reverse-explain",
-        "# Working discipline",
+        "# Reverse explainer / expand / compress",
+        "# Working rules",
         "# Memory",
     ):
         assert heading in method, heading
-    for gone in ("Codebase and user instructions", "# Working rules from memory"):
+    for gone in ("Who the user is", "No forks, no subagents", "Never pkill", "No artifacts"):
         assert gone not in method, gone
-    assert "`web_fetch` for live facts." in method and "`WebSearch`" not in method
-    assert "with `read_file`" in method and "`delegate` child" in method
+    assert "Be your own skeptic — green is not proven" in method  # a general rule, kept as written
     assert standard.per_turn.startswith("STYLE: Write like E. B. White and George Orwell.")
