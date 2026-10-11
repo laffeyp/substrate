@@ -30,7 +30,7 @@ from ...adapters import DeterministicResponder, ModelUsage, Responder, call_resp
 from ...kernel.policies import TerminationPolicy
 from ..tool_loop import _tool_factory as _tool_loop_tool_factory
 from ..tool_loop.background import TaskStatus
-from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT
+from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from .vocabulary import (
     END_ON_EXIT_SENTINEL,
@@ -74,7 +74,6 @@ from .vocabulary import (
     StopReason,
     SessionEndReason,
     ToolMode,
-    ToolRoute,
     SessionWarningKind,
 )
 
@@ -215,14 +214,13 @@ class SessionChanged(Struct, frozen=True):
     new: str
 
 
-# Session vocabulary § Q (K282). A harness driver's tool call during one model step: its own tool,
-# read from its stream (`via=harness`), or the session's tool over MCP (`via=mcp`). Neither starts
-# a producer; the step that wrote them still ends with its ModelReply.
+# Session vocabulary § Q (K282, K286). A harness driver's call to one of its OWN tools during one
+# model step, read from its stream. Substrate's tools, called over MCP, are Substrate's ToolCall.
+# Neither kind here starts a producer; the step that wrote them still ends with its ModelReply.
 class HarnessToolCall(Struct, frozen=True):
     call_id: str
     tool: str
     args: dict[str, Any]
-    via: str  # ToolRoute
     step: int
     turn_index: int
 
@@ -677,6 +675,46 @@ def _model_factory(
     return lambda: _model
 
 
+def _answers_reply(ctx: Any) -> bool:
+    """Whether a ToolResult answers a model step's reply, so the next model step reads it (K286).
+    One answering a harness's MCP call goes back over MCP instead."""
+    return bool(ctx.event.payload.get("origin", ToolCallOrigin.REPLY) != ToolCallOrigin.MCP)
+
+
+def _session_tool_factory(tools: dict[str, Tool], session_id: str) -> Callable[[], Any]:
+    """The tool loop's tool producer, plus one step for an MCP call (K286): once it has written
+    the call's ToolResult, the result goes to the harness's waiting MCP request."""
+    from .mcp_channel import deliver
+
+    inner = _tool_loop_tool_factory(tools)
+
+    def factory() -> Any:
+        run = inner()
+
+        async def run_tool(inp: Any) -> AsyncIterator[ToolResult]:
+            async for result in run(inp):
+                yield result
+                if result.origin == ToolCallOrigin.MCP:
+                    out = (
+                        result.output
+                        if isinstance(result.output, str)
+                        else _json_text(result.output)
+                    )
+                    deliver(
+                        session_id, result.call_id, result.ok, out if result.ok else result.error
+                    )
+
+        return run_tool
+
+    return factory
+
+
+def _json_text(value: Any) -> str:
+    import json
+
+    return json.dumps(value, default=str)
+
+
 def _streams(driver: object) -> bool:
     """Whether the driver is a harness CLI that prints its event stream (K283)."""
     return callable(getattr(driver, "astream", None)) and bool(
@@ -694,12 +732,12 @@ async def _harness_stream(
     out: dict[str, Any],
     session_id: str = "",
     mcp_tools: dict[str, Tool] | None = None,
-) -> AsyncIterator[HarnessToolCall | HarnessToolResult]:
-    """One call of a harness driver (session vocabulary § Q). Yields each tool call and result as
-    it happens: the driver's own, read from its stream (`via=harness`, K283), and, with
-    `mcp_tools`, the session's own tools it calls over the MCP channel (`via=mcp`, K284), which
-    this step runs. Both arrive on one queue, so the record has one writer. Leaves the reply text
-    and the call's usage in `out`. Token counts come from the stream (`estimated=False`); with none
+) -> AsyncIterator[HarnessToolCall | HarnessToolResult | ToolCall]:
+    """One call of a harness driver (session vocabulary § Q). Yields what happens as it happens:
+    each of the driver's own tool calls and results, read from its stream, as `HarnessToolCall` /
+    `HarnessToolResult` (K283); and, with `mcp_tools`, each call it makes to the session's tools
+    over MCP as Substrate's own `ToolCall(origin=mcp)`, which the tool producer runs (K286). Both
+    arrive on one queue. Leaves the reply text and the call's usage in `out`. Token counts come from the stream (`estimated=False`); with none
     reported, the counts are the word-count stand-in `call_responder_metered` uses."""
     import asyncio
     import contextlib
@@ -713,7 +751,8 @@ async def _harness_stream(
         calls_substrate_mcp,
     )
     from ...adapters.models import _has_system_channel, joined_prompt
-    from .mcp_channel import McpCall, open_channel, run_call
+    from ..tool_loop.tools import _named_to_positional
+    from .mcp_channel import McpCall, open_channel
 
     if system_text and _has_system_channel(driver):
         items = driver.astream(prompt, system=system_text)
@@ -757,23 +796,20 @@ async def _harness_stream(
                 if isinstance(item, BaseException):
                     raise item
                 if isinstance(item, McpCall):
+                    # K286: the call is Substrate's own. Record it as a ToolCall; the tool
+                    # producer runs it and writes the ToolResult, which `deliver` hands back to
+                    # the waiting MCP request.
                     call_id = f"mcp{step}.{mcp_n}"
                     mcp_n += 1
-                    yield HarnessToolCall(
+                    if channel is not None:
+                        channel.pending[call_id] = item.reply
+                    yield ToolCall(
                         call_id=call_id,
                         tool=item.tool,
-                        args=item.arguments,
-                        via=ToolRoute.MCP,
+                        args=_named_to_positional(item.tool, item.arguments, mcp_tools or {}),
                         step=step,
-                        turn_index=turn_index,
+                        origin=ToolCallOrigin.MCP,
                     )
-                    try:
-                        ok, output = await run_call(item, mcp_tools or {})
-                    except BaseException:
-                        item.reply.set_result((False, "the call was cancelled"))
-                        raise
-                    item.reply.set_result((ok, output))
-                    yield HarnessToolResult(call_id=call_id, ok=ok, output=output)
                 elif isinstance(item, StreamToolCall) and calls_substrate_mcp(item.tool):
                     echoed.add(item.call_id)
                 elif isinstance(item, StreamToolResult) and item.call_id in echoed:
@@ -783,7 +819,6 @@ async def _harness_stream(
                         call_id=item.call_id,
                         tool=item.tool,
                         args=item.args,
-                        via=ToolRoute.HARNESS,
                         step=step,
                         turn_index=turn_index,
                     )
@@ -1074,7 +1109,7 @@ def session_topology(
             PRODUCER_KIND_TOOL,
             schemas=[ToolResult],
             schema_version=1,
-            factory=_tool_loop_tool_factory(tools),
+            factory=_session_tool_factory(tools, session_id),
             deterministic=all(t.deterministic for t in tools.values()) if tools else True,
         )
         b.producer_kind(
@@ -1242,6 +1277,7 @@ def session_topology(
                 "tool": ctx.event.payload["tool"],
                 "args": list(ctx.event.payload["args"]),
                 "step": int(ctx.event.payload["step"]),
+                "origin": ctx.event.payload.get("origin", ToolCallOrigin.REPLY),
             },
             policy=api.PerEvent(),
         )
@@ -1250,7 +1286,9 @@ def session_topology(
             subscription=api.Subscription(kinds=frozenset({TOOL_RESULT})),
             # A pending interrupt fragment reaches the model on this step: the model builds its
             # prompt from the fragment cohort (K261).
-            predicate=lambda ctx: _step_of(ctx) + 1 < turn_max_steps,
+            # K286: an MCP call's result goes back to the harness that is still running; it
+            # starts no model step.
+            predicate=lambda ctx: _answers_reply(ctx) and _step_of(ctx) + 1 < turn_max_steps,
             starts=PRODUCER_KIND_MODEL,
             input_builder=lambda ctx: _continue_input(ctx, final=False),
             policy=api.PerEvent(),
@@ -1258,7 +1296,7 @@ def session_topology(
         b.trigger(
             TRIGGER_ID_MODEL_WRAP_UP_ON_TOOL_RESULT,
             subscription=api.Subscription(kinds=frozenset({TOOL_RESULT})),
-            predicate=lambda ctx: _step_of(ctx) + 1 >= turn_max_steps,
+            predicate=lambda ctx: _answers_reply(ctx) and _step_of(ctx) + 1 >= turn_max_steps,
             starts=PRODUCER_KIND_MODEL,
             input_builder=lambda ctx: _continue_input(ctx, final=True),
             policy=api.PerEvent(),

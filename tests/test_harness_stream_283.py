@@ -151,10 +151,7 @@ def test_a_session_turn_records_the_harness_calls(tmp_path: Path) -> None:
     kinds = [e["kind"] for e in events]
     calls = [e["payload"] for e in events if e["kind"] == "HarnessToolCall"]
     results = [e["payload"] for e in events if e["kind"] == "HarnessToolResult"]
-    assert [(c["tool"], c["via"], c["turn_index"]) for c in calls] == [
-        ("edit", "harness", 0),
-        ("shell", "harness", 0),
-    ]
+    assert [(c["tool"], c["turn_index"]) for c in calls] == [("edit", 0), ("shell", 0)]
     assert {r["call_id"] for r in results} == {c["call_id"] for c in calls}
     reply = next(e["payload"] for e in events if e["kind"] == "ModelReply")
     assert reply["text"].endswith("done") and reply["stop_reason"] == "end_turn"

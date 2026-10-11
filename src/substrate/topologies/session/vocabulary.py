@@ -117,13 +117,6 @@ class StopReason(StrEnum):
     WRAP_UP = "wrap_up"
 
 
-class ToolRoute(StrEnum):
-    """HarnessToolCall.via (§ Q.2): which tool set the harness driver used."""
-
-    HARNESS = "harness"  # its own tool, read from its event stream
-    MCP = "mcp"  # the session's tool, called over Substrate's MCP server and run by Substrate
-
-
 class ToolMode(StrEnum):
     """How a model step offers the session's tools to its driver (§ Q.5)."""
 
@@ -417,7 +410,6 @@ __all__ = [
     "SESSION_CHANGED",
     "HARNESS_TOOL_CALL",
     "HARNESS_TOOL_RESULT",
-    "ToolRoute",
     "ToolMode",
     "RETURNED",
     "ReturnReason",

@@ -1,22 +1,24 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""The MCP channel: a harness driver calls the session's tools as registered tools (K284).
+"""The MCP channel: a harness driver calls the session's tools as registered tools (K284, K286).
 
 While a harness driver's model step runs, the step opens a channel for its session. The daemon's
 MCP endpoint hands each JSON-RPC message to `handle_jsonrpc`. `tools/list` answers from the
-session's tools. `tools/call` puts the call on the channel and waits. The model step takes it from
-the channel, runs the tool, writes `HarnessToolCall` / `HarnessToolResult` with `via=mcp`, and
-sends the result back. The model step is the record's only writer.
+session's tools. `tools/call` puts the call on the channel and waits. The model step takes it off
+the channel and records it as Substrate's own `ToolCall` with `origin = mcp`; the session's tool
+producer runs it like any other call and writes the `ToolResult`, then `deliver` hands that result
+back to the waiting request. Each event has its own writer, and the tool producer's rules apply.
+An MCP call's result starts no model step: the harness that asked is still running and reads it
+over MCP (session vocabulary § Q.6).
 
 MCP's JSON-RPC shapes (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) are
-written here; no MCP library is needed for three methods. Session vocabulary § Q.
+written here; no MCP library is needed for three methods.
 """
 
 from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import json
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -24,13 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from ...adapters.harness_streams import SUBSTRATE_MCP_SERVER
-from ..tool_loop.tools import (
-    ARG_ERROR_KEY,
-    Tool,
-    _named_to_positional,
-    ollama_tools,
-    required_params,
-)
+from ..tool_loop.tools import Tool, ollama_tools
 
 MCP_PROTOCOL_VERSION: Final[str] = "2025-06-18"
 MCP_SERVER_NAME: Final[str] = SUBSTRATE_MCP_SERVER
@@ -58,11 +54,13 @@ class McpCall:
 
 @dataclass
 class McpChannel:
-    """A running harness step's channel: its tools and the queue its step reads."""
+    """A running harness step's channel: its tools, the queue its step reads, and the calls
+    recorded and waiting for their ToolResult, by call id."""
 
     tools: dict[str, Tool]
     loop: asyncio.AbstractEventLoop
     calls: asyncio.Queue[McpCall]
+    pending: dict[str, concurrent.futures.Future[tuple[bool, str]]] = field(default_factory=dict)
 
 
 _CHANNELS: dict[str, McpChannel] = {}
@@ -81,8 +79,13 @@ def open_channel(session_id: str, tools: dict[str, Tool]) -> Iterator[McpChannel
         with _LOCK:
             if _CHANNELS.get(session_id) is channel:
                 del _CHANNELS[session_id]
+        ended = (False, "the session's model step ended before the call returned")
         while not channel.calls.empty():  # calls that arrived as the step ended
-            channel.calls.get_nowait().reply.set_result((False, "the session's model step ended"))
+            channel.calls.get_nowait().reply.set_result(ended)
+        for future in channel.pending.values():  # recorded calls whose result never came
+            if not future.done():
+                future.set_result(ended)
+        channel.pending.clear()
 
 
 def tool_list(tools: dict[str, Tool]) -> list[dict[str, Any]]:
@@ -97,37 +100,16 @@ def tool_list(tools: dict[str, Tool]) -> list[dict[str, Any]]:
     ]
 
 
-async def run_call(call: McpCall, tools: dict[str, Tool]) -> tuple[bool, str]:
-    """Run one call the way the session's tool producer runs a `ToolCall`: unknown tools, bad and
-    missing arguments come back as failures the model reads; the body runs in a worker thread so
-    an interrupt reaches the loop, and a cancel runs the tool's own stop hooks."""
-    from ..tool_loop.tools import _TOOL_CANCEL_HOOKS
-
-    entry = tools.get(call.tool)
-    if entry is None:
-        return False, f"unknown tool '{call.tool}'"
-    args = _named_to_positional(call.tool, call.arguments, tools)
-    if len(args) == 1 and isinstance(args[0], dict) and ARG_ERROR_KEY in args[0]:
-        return False, str(args[0][ARG_ERROR_KEY])
-    missing = required_params(call.tool, tools)[len(args) :]
-    if missing:
-        return False, f"{call.tool}: missing required argument(s): {', '.join(missing)}"
-    cancel_hooks: list[Any] = []
-    token = _TOOL_CANCEL_HOOKS.set(cancel_hooks)
-    try:
-        output = await asyncio.to_thread(entry.run, args)
-    except asyncio.CancelledError:
-        for hook in list(cancel_hooks):
-            try:
-                hook()
-            except Exception:  # noqa: BLE001, S110 — one failed stop must not skip the others
-                pass
-        raise
-    except Exception as e:  # noqa: BLE001 — a tool's failure is the model's observation
-        return False, f"{type(e).__name__}: {e}"
-    finally:
-        _TOOL_CANCEL_HOOKS.reset(token)
-    return True, output if isinstance(output, str) else json.dumps(output, default=str)
+def deliver(session_id: str, call_id: str, ok: bool, output: str) -> None:
+    """Hand an MCP call's ToolResult to the request waiting for it. Called by the session's tool
+    producer once it has written the result; a call no request waits for is ignored."""
+    with _LOCK:
+        channel = _CHANNELS.get(session_id)
+    if channel is None:
+        return
+    future = channel.pending.pop(call_id, None)
+    if future is not None and not future.done():
+        future.set_result((ok, output))
 
 
 def _ok(msg_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -184,7 +166,7 @@ __all__ = [
     "McpCall",
     "McpChannel",
     "handle_jsonrpc",
+    "deliver",
     "open_channel",
-    "run_call",
     "tool_list",
 ]

@@ -5,7 +5,7 @@
 A harness CLI (Claude Code, Codex, cursor-agent) runs its own agent loop and, asked for a stream,
 prints one JSON object per line as it works. Each parser here turns those lines into four items:
 a tool call starting, its result, the final reply text, and the call's token counts. The model step
-writes the first two as `HarnessToolCall` / `HarnessToolResult` (`via=harness`) and takes the last
+writes the first two as `HarnessToolCall` / `HarnessToolResult` and takes the last
 two as the reply and its usage.
 
 The formats were read from real runs on 2026-10-10 (`substrate-ui/process/planning/evidence-2026-
@@ -58,7 +58,7 @@ SUBSTRATE_MCP_SERVER: Final[str] = "substrate"
 def calls_substrate_mcp(tool: str) -> bool:
     """Whether a tool name in a harness's stream is a call to Substrate's own MCP server: Claude
     Code names it `mcp__substrate__<tool>`, Codex `substrate.<tool>`, cursor-agent
-    `substrate-<tool>`. The channel records that call as `via=mcp` where it runs, so the stream's
+    `substrate-<tool>`. Substrate records that call as its own `ToolCall` where it runs, so the stream's
     copy is not recorded again."""
     return tool.startswith(
         (

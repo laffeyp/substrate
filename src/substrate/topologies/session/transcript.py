@@ -263,10 +263,9 @@ def _render_turns(
                 out = payload.get("output") if ok else payload.get("error", "")
                 lines.append(f"{marker}: {out}")
             elif kind == HARNESS_TOOL_CALL:
-                # § Q.4: what a harness driver did inside its own loop, in record order.
+                # § Q.4, § Q.6: what a harness driver did with its own tools, in record order.
                 lines.append(
-                    f"HARNESS TOOL {payload.get('tool', '?')} ({payload.get('via', '?')}): "
-                    f"args={payload.get('args', {})}"
+                    f"HARNESS TOOL {payload.get('tool', '?')}: args={payload.get('args', {})}"
                 )
             elif kind == HARNESS_TOOL_RESULT:
                 marker = "HARNESS RESULT" if payload.get("ok", True) else "HARNESS RESULT(fail)"

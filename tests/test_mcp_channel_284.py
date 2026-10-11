@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""K284: the MCP channel (session vocabulary § Q).
+"""K284, K286: the MCP channel (session vocabulary § Q.6).
 
 A harness driver in the `mcp` tool mode calls the session's tools as registered MCP tools. The
-daemon's endpoint hands each JSON-RPC message to `handle_jsonrpc` on a daemon thread; the running
-model step runs the call and records it as `via=mcp`.
+daemon's endpoint hands each JSON-RPC message to `handle_jsonrpc` on a daemon thread. The running
+model step records the call as Substrate's own `ToolCall(origin=mcp)`; the session's tool producer
+runs it and writes the `ToolResult`, which goes back to the waiting request. No second model step
+starts: the harness that asked is still running.
 """
 
 from __future__ import annotations
@@ -115,21 +117,30 @@ def test_tools_list_names_every_tool_with_its_schema(tmp_path: Path) -> None:
     assert reply is not None and {t["name"] for t in reply["result"]["tools"]} == set(tools)
 
 
-def test_a_harness_writes_a_file_through_the_channel(tmp_path: Path) -> None:
+def _by_kind(events: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    return [e for e in events if e["kind"] == kind]
+
+
+def test_a_harness_writes_a_file_through_the_tool_producer(tmp_path: Path) -> None:
     driver = FakeHarness([_call("write_file", {"path": "a.txt", "text": "ok"})])
     events = _turn(tmp_path, driver)
     assert (tmp_path / "ws" / "a.txt").read_text() == "ok"
     (response,) = driver.responses
     assert response is not None and response["result"]["isError"] is False
-    calls = [e["payload"] for e in events if e["kind"] == "HarnessToolCall"]
-    results = [e["payload"] for e in events if e["kind"] == "HarnessToolResult"]
-    assert [(c["tool"], c["via"], c["args"]) for c in calls] == [
-        ("write_file", "mcp", {"path": "a.txt", "text": "ok"})
-    ]
-    assert results[0]["call_id"] == calls[0]["call_id"] and results[0]["ok"] is True
-    kinds = [e["kind"] for e in events]
-    assert kinds.index("HarnessToolResult") < kinds.index("ModelReply")
-    assert "ToolCall" not in kinds  # Substrate's tool producer never ran
+    assert "wrote 2 bytes" in response["result"]["content"][0]["text"]
+    (call,) = _by_kind(events, "ToolCall")
+    (result,) = _by_kind(events, "ToolResult")
+    # Substrate's own kinds: the model step asked, the tool producer ran it and wrote the result.
+    assert call["producer"]["kind"] == "model" and result["producer"]["kind"] == "tool"
+    assert call["payload"]["origin"] == "mcp" and result["payload"]["origin"] == "mcp"
+    assert (call["payload"]["tool"], call["payload"]["args"]) == ("write_file", ["a.txt", "ok"])
+    assert result["payload"]["call_id"] == call["payload"]["call_id"] and result["payload"]["ok"]
+    assert not _by_kind(events, "HarnessToolCall")
+    # One model step: the result went back over MCP and started none.
+    assert len(_by_kind(events, "PromptComposed")) == 1
+    replies = _by_kind(events, "ModelReply")
+    assert [r["payload"]["stop_reason"] for r in replies] == ["end_turn"]
+    assert len(_by_kind(events, "Returned")) == 1
     # The mcp mode sends no text tool list and no JSON directive.
     (prompt,) = driver.prompts
     assert "Tools you MAY use" not in prompt and '"arguments"' not in prompt
@@ -149,9 +160,22 @@ def test_bad_calls_come_back_as_failures_the_model_reads(tmp_path: Path) -> None
     assert "unknown tool" in texts[0]
     assert "missing required argument(s): text" in texts[1]
     assert "unknown argument(s) ['file']" in texts[2]
-    results = [e["payload"] for e in events if e["kind"] == "HarnessToolResult"]
-    assert [r["ok"] for r in results] == [False, False, False]
+    results = [e["payload"] for e in _by_kind(events, "ToolResult")]
+    assert [(r["ok"], r["origin"]) for r in results] == [(False, "mcp")] * 3
     assert not (tmp_path / "ws" / "a.txt").exists()
+    assert len(_by_kind(events, "PromptComposed")) == 1
+
+
+def test_the_tool_producers_own_rules_apply(tmp_path: Path) -> None:
+    """The repeated-write guard lives in the tool producer. K284 ran MCP calls in the model step,
+    so it never applied; through the tool producer it does."""
+    write = _call("write_file", {"path": "a.txt", "text": "ok"})
+    driver = FakeHarness([write, write])
+    _turn(tmp_path, driver)
+    first, second = driver.responses
+    assert first is not None and first["result"]["isError"] is False
+    assert second is not None and second["result"]["isError"] is True
+    assert "already wrote a.txt" in second["result"]["content"][0]["text"]
 
 
 def test_without_mcp_a_harness_keeps_the_text_tool_list(tmp_path: Path) -> None:
@@ -166,7 +190,5 @@ def test_the_streams_copy_of_a_substrate_mcp_call_is_not_recorded_twice(tmp_path
     `substrate.write_file`. Found live 2026-10-10: each call landed twice, once per route."""
     driver = FakeHarness([_call("write_file", {"path": "a.txt", "text": "ok"})], echo=True)
     events = _turn(tmp_path, driver)
-    calls = [e["payload"] for e in events if e["kind"] == "HarnessToolCall"]
-    results = [e["payload"] for e in events if e["kind"] == "HarnessToolResult"]
-    assert [(c["tool"], c["via"]) for c in calls] == [("write_file", "mcp")]
-    assert [r["output"] for r in results] != ["echo"] and len(results) == 1
+    assert [e["payload"]["tool"] for e in _by_kind(events, "ToolCall")] == ["write_file"]
+    assert not _by_kind(events, "HarnessToolCall") and not _by_kind(events, "HarnessToolResult")

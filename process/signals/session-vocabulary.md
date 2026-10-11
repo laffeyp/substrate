@@ -601,3 +601,12 @@ A model step runs in one of four tool modes: `none`, `native` (Ollama's tool cal
 ### Ratification signature
 
 - **v0.4** — Sprint K270, 2026-10-10. §§ A–O byte-preserved.
+
+### Q.6 Substrate's tools stay Substrate's (K286, 2026-10-10; amends Q.1, Q.2, Q.3)
+
+Q.1 and Q.2 recorded a harness driver's call to one of Substrate's tools over MCP as `HarnessToolCall` with `via = mcp`, and the model step ran the tool. That conflated the two tool sets and bypassed the tool producer. As built from K286:
+
+- **`HarnessToolCall` / `HarnessToolResult` are the harness's own tools only**, read from its stream. `HarnessToolCall` loses `via`; `ToolRoute` is gone.
+- **An MCP call is Substrate's own `ToolCall`.** `ToolCall` and `ToolResult` gain `origin`: `reply` (the default, so earlier records read) or `mcp`. The model step writes `ToolCall(origin = mcp)` and does not run it. `tool-on-tool-call` starts the tool producer as for any call, so its argument checks and its repeated-write guard apply. The producer writes `ToolResult(origin = mcp)`, and the session hands that result to the waiting MCP request.
+- **An MCP call's result starts no model step.** `model-on-tool-result` and `model-wrap-up-on-tool-result` skip `origin = mcp`. The harness that asked is still running in the current step and reads the result over MCP. A new step would start a second CLI process on the same turn.
+- **History** renders an MCP call as any `ToolCall`, with `TOOL <tool>: args=…` and `RESULT: …`. A harness's own tool renders as `HARNESS TOOL <tool>: args=…`.

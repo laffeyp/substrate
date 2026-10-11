@@ -48,6 +48,7 @@ from msgspec import Struct
 from ... import api
 from ...adapters import Responder, call_responder
 from ...encoding import canonical_bytes
+from .kinds import ToolCallOrigin
 from .tools import CALCULATOR, Tool, ollama_tools, parse_tool_call, required_params, suite_describe
 
 _Factory = Callable[[], Any]
@@ -85,6 +86,7 @@ class ToolCall(Struct, frozen=True):
     tool: str
     args: list[Any]  # ints for the calculator; strings (paths, patterns) for the real suite
     step: int
+    origin: str = ToolCallOrigin.REPLY  # K286: `reply` or `mcp` (a harness driver's MCP call)
 
 
 class ToolResult(Struct, frozen=True):
@@ -94,6 +96,7 @@ class ToolResult(Struct, frozen=True):
     step: int
     ok: bool = True
     error: str = ""
+    origin: str = ToolCallOrigin.REPLY  # the origin of the ToolCall this answers
 
 
 class FinalAnswer(Struct, frozen=True):
@@ -317,6 +320,11 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
         args = list(inp.get("args", [])) if hasattr(inp, "get") else []
         call_id = str(inp.get("call_id", "?")) if hasattr(inp, "get") else "?"
         step = int(inp.get("step", 0)) if hasattr(inp, "get") else 0
+        origin = (
+            str(inp.get("origin", ToolCallOrigin.REPLY))
+            if hasattr(inp, "get")
+            else ToolCallOrigin.REPLY
+        )
         prev_write = state["prev_write"]
         state["prev_write"] = (
             None  # any action other than a fresh successful write breaks the streak
@@ -325,6 +333,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
         if entry is None:
             # unknown tool -> a typed failure the model reads, NOT a crash.
             yield ToolResult(
+                origin=origin,
                 call_id=call_id,
                 tool=tool,
                 output="",
@@ -337,6 +346,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
 
         if len(args) == 1 and isinstance(args[0], dict) and ARG_ERROR_KEY in args[0]:
             yield ToolResult(
+                origin=origin,
                 call_id=call_id,
                 tool=tool,
                 output="",
@@ -350,6 +360,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             # under-specified call (model supplied too few args) -> a CLEAR typed error it can act on,
             # not the raw IndexError the tool body would throw (surfaced by a live llama3.2:1b run).
             yield ToolResult(
+                origin=origin,
                 call_id=call_id,
                 tool=tool,
                 output="",
@@ -362,6 +373,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             # a SECOND consecutive write to the same file, with no run/read between — a spin. Do not
             # write again; hand back a typed observation that redirects to verification.
             yield ToolResult(
+                origin=origin,
                 call_id=call_id,
                 tool=tool,
                 output="",
@@ -423,6 +435,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
             Exception  # noqa: BLE001 — bad args, not-found, IO or non-encodable output become ok=False, never a crash
         ) as exc:  # bad args / not-found / IO / non-encodable output -> ok=False, no crash
             yield ToolResult(
+                origin=origin,
                 call_id=call_id,
                 tool=tool,
                 output="",
@@ -465,7 +478,9 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
                 output = f"[{tool} output was {len(raw)} bytes — too large to inline; narrow the request]"
         if tool == "write_file" and args:
             state["prev_write"] = Path(str(args[0])).name  # arm the streak marker for the next call
-        yield ToolResult(call_id=call_id, tool=tool, output=output, step=step, ok=True)
+        yield ToolResult(
+            call_id=call_id, tool=tool, output=output, step=step, ok=True, origin=origin
+        )
 
     return lambda: run_tool
 
