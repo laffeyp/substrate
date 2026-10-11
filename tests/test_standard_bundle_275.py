@@ -80,7 +80,7 @@ def test_code_review_reads_harness_then_standard_then_its_own() -> None:
     assert (
         body.index("You are a working companion")
         < body.index("Work through the request.")
-        < body.index("OVERRIDE any default behavior")
+        < body.index("They override any default behaviour")
         < body.index("Review the diff for the role assigned.")
     )
     # The reminder line: standard's hook line, then code_review's own.
@@ -89,24 +89,28 @@ def test_code_review_reads_harness_then_standard_then_its_own() -> None:
     )
 
 
-def test_standard_copies_this_machines_texts_with_substrate_tool_names() -> None:
+def test_standard_is_the_generic_standard_with_substrate_tool_names() -> None:
+    """K287: the copy of one operator's setup (K275) was made generic: no harness header, no
+    operator's memory index, attribution stated for any model. Every rule section stays."""
     standard = resolve_extends("standard")[-1]
     assert standard.style.startswith("# Every output is writing")
     assert 'skill("dellm")' in standard.style and "invoke the `dellm` skill" not in standard.style
     method = standard.methodology
-    assert method.startswith("Codebase and user instructions are shown below.")
+    assert method.startswith("These are the working rules for this session.")
     for heading in (
         "# Acknowledge before acting",
-        "# When unclear, research — don't fabricate",
-        "# Assume an adversarial information space",
-        "# No Claude attribution in git, ever",
-        "# Every output is writing",
+        "# Research instead of guessing",
+        "# Treat the information space as adversarial",
+        "# No model attribution in git",
         "# Unaddressed prose",
         "# Reading files",
-        "# Reverse explainer / expand / compress",
-        "# Working rules from memory",
+        "# Explaining: expand, compress, reverse-explain",
+        "# Working discipline",
+        "# Memory",
     ):
         assert heading in method, heading
+    for gone in ("Codebase and user instructions", "# Working rules from memory"):
+        assert gone not in method, gone
     assert "`web_fetch` for live facts." in method and "`WebSearch`" not in method
-    assert "with `read_file`" in method and "no `delegate`" in method
+    assert "with `read_file`" in method and "`delegate` child" in method
     assert standard.per_turn.startswith("STYLE: Write like E. B. White and George Orwell.")

@@ -1,10 +1,9 @@
-# The default guidance (ROADMAP-2026-10-10-default-guidance, sprint K275): the working and writing
-# standard this machine's Claude setup carried, copied as written, on top of the harness.
-# style.md is ~/.claude/output-styles/plain.md; methodology.md is ~/.claude/CLAUDE.md under Claude
-# Code's header, then the general entries of the operator's memory index; per-turn.md is the
-# UserPromptSubmit hook line. Tool names are Substrate's (read_file, web_fetch, delegate, skill).
+# The high guidance level (ROADMAP-2026-10-10-guidance-levels, sprint K287): the working and
+# writing standard, on top of the harness. Started as a copy of one operator's Claude Code setup
+# (K275); K287 made it generic: no model, vendor or person named, no operator's memory index, one
+# voice. Tool names are Substrate's (read_file, web_fetch, delegate, skill).
 [bundle]
 name = "standard"
-description = "The default guidance: harness rules, plus the working and writing standard."
+description = "High guidance: harness rules, plus the full working and writing standard."
 schema_version = 1
 extends = ["harness"]
