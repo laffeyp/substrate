@@ -74,6 +74,7 @@ from .vocabulary import (
     StopReason,
     SessionEndReason,
     ToolMode,
+    ToolRoute,
     SessionWarningKind,
 )
 
@@ -621,7 +622,16 @@ def _model_factory(
             kind, chosen = parse_tool_call(message, tools)
             beside_call = str(message.get("content", "") or "")
         else:
-            reply_text, usage = await call_responder_metered(driver, prompt, system=system_text)
+            if _streams(driver):
+                # K283: a harness driver's own tool calls go on the record as they happen.
+                box: dict[str, Any] = {}
+                async for harness_event in _harness_stream(
+                    driver, prompt, system_text, step=step, turn_index=turn_index, out=box
+                ):
+                    yield harness_event
+                reply_text, usage = box["text"], box["usage"]
+            else:
+                reply_text, usage = await call_responder_metered(driver, prompt, system=system_text)
             if wrap_up_reason is None and tool_mode == ToolMode.TEXT:
                 kind, chosen = parse_tool_call({"content": reply_text, "tool_calls": []}, tools)
             else:
@@ -647,6 +657,81 @@ def _model_factory(
         )
 
     return lambda: _model
+
+
+def _streams(driver: object) -> bool:
+    """Whether the driver is a harness CLI that prints its event stream (K283)."""
+    return callable(getattr(driver, "astream", None)) and bool(
+        getattr(driver, "stream_format", None)
+    )
+
+
+async def _harness_stream(
+    driver: Any,
+    prompt: str,
+    system_text: str,
+    *,
+    step: int,
+    turn_index: int,
+    out: dict[str, Any],
+) -> AsyncIterator[HarnessToolCall | HarnessToolResult]:
+    """One call of a harness driver, read from its stream (session vocabulary § Q). Yields each of
+    the driver's own tool calls and results as `via=harness`; leaves the reply text and the call's
+    usage in `out`. Token counts come from the stream (`estimated=False`); with none reported, the
+    counts are the word-count stand-in `call_responder_metered` uses."""
+    import time
+
+    from ...adapters.harness_streams import (
+        StreamReply,
+        StreamToolCall,
+        StreamToolResult,
+        StreamUsage,
+    )
+    from ...adapters.models import _has_system_channel, joined_prompt
+
+    if system_text and _has_system_channel(driver):
+        items = driver.astream(prompt, system=system_text)
+    else:
+        items = driver.astream(joined_prompt(system_text, prompt))
+    started = time.monotonic()
+    reply = ""
+    counts: StreamUsage | None = None
+    async for item in items:
+        if isinstance(item, StreamToolCall):
+            yield HarnessToolCall(
+                call_id=item.call_id,
+                tool=item.tool,
+                args=item.args,
+                via=ToolRoute.HARNESS,
+                step=step,
+                turn_index=turn_index,
+            )
+        elif isinstance(item, StreamToolResult):
+            yield HarnessToolResult(call_id=item.call_id, ok=item.ok, output=item.output)
+        elif isinstance(item, StreamUsage):
+            counts = item
+        elif isinstance(item, StreamReply):
+            reply = item.text
+    wall_ms = int((time.monotonic() - started) * 1000)
+    name = str(getattr(driver, "name", type(driver).__name__))
+    if counts is not None:
+        usage = ModelUsage(
+            model=name,
+            prompt_tokens=counts.prompt_tokens,
+            completion_tokens=counts.completion_tokens,
+            wall_ms=wall_ms,
+            estimated=False,
+        )
+    else:
+        usage = ModelUsage(
+            model=name,
+            prompt_tokens=len(joined_prompt(system_text, prompt).split()),
+            completion_tokens=len(reply.split()),
+            wall_ms=wall_ms,
+            estimated=True,
+        )
+    out["text"] = reply
+    out["usage"] = usage
 
 
 def _system_kw(system_text: str) -> dict[str, str]:

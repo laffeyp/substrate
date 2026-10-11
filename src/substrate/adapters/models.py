@@ -30,7 +30,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from msgspec import Struct
 
@@ -465,6 +467,8 @@ class CliResponder:
         cwd: Path | str | None = None,
         system_flag: list[str] | None = None,
         env: dict[str, str] | None = None,
+        stream_format: str | None = None,
+        stream_flags: list[str] | None = None,
     ) -> None:
         if not command:
             raise ValueError("CliResponder needs a non-empty command, e.g. ['claude', '-p']")
@@ -482,6 +486,22 @@ class CliResponder:
         # Variables the driver profile sets for the subprocess, over the daemon's own environment
         # (U120: `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1` for claude).
         self._env = dict(env) if env else None
+        # Sprint K283 (session vocabulary § Q): a harness CLI asked for its event stream. With a
+        # format set, every call runs with `stream_flags` and reads the stream line by line, so the
+        # harness's own tool calls reach the record; `harness_streams.py` holds one parser per
+        # format.
+        if stream_format is not None:
+            from .harness_streams import STREAM_FORMATS
+
+            if stream_format not in STREAM_FORMATS:
+                raise ValueError(f"unknown stream format {stream_format!r}")
+        self._stream_format = stream_format
+        self._stream_flags = list(stream_flags or [])
+
+    @property
+    def stream_format(self) -> str | None:
+        """The harness stream this CLI prints, or None for plain text."""
+        return self._stream_format
 
     @property
     def command(self) -> tuple[str, ...]:
@@ -510,17 +530,34 @@ class CliResponder:
             cwd=cwd,
             system_flag=self._system_flag,
             env=self._env,
+            stream_format=self._stream_format,
+            stream_flags=self._stream_flags,
         )
 
     def _argv(self, prompt: str, system: str) -> list[str]:
         """The command line for one call: with a flag, the system text through it, empty or not,
         so the CLI never falls back to a system prompt of its own (`claude --system-prompt ""`
-        leaves Claude with none, measured 2026-10-10); then the prompt last."""
+        leaves Claude with none, measured 2026-10-10); then the prompt last. A streaming CLI's
+        flags follow its command."""
+        base = [*self._command, *self._stream_flags]
         if self._system_flag is not None:
-            return [*self._command, *self._system_flag, system, prompt]
+            return [*base, *self._system_flag, system, prompt]
         if system:
-            return [*self._command, f"{system}\n\n{prompt}"]
-        return [*self._command, prompt]
+            return [*base, f"{system}\n\n{prompt}"]
+        return [*base, prompt]
+
+    def _reply_from_stream(self, stdout: str) -> str:
+        """A streaming CLI's reply, read from its whole stdout at once (the sync path)."""
+        from .harness_streams import parser_for
+
+        if self._stream_format is None:
+            raise RuntimeError(f"CliResponder({self.name}) has no stream format")
+        parser = parser_for(self._stream_format)
+        for line in stdout.splitlines():
+            parser.feed(line)
+        if not parser.final_text:
+            raise RuntimeError(f"CliResponder({self.name}) produced no reply in its stream")
+        return parser.final_text
 
     def respond(self, prompt: str, *, system: str = "") -> str:
         import subprocess
@@ -544,11 +581,82 @@ class CliResponder:
             raise RuntimeError(
                 f"CliResponder({self.name}) produced no output (stderr: {proc.stderr.strip()[:200]})"
             )
+        if self._stream_format is not None:
+            return self._reply_from_stream(out)
         return out
 
-    async def arespond(self, prompt: str, *, system: str = "") -> str:
-        """Async, cancellable call over an asyncio subprocess (the path `call_responder` prefers)."""
+    async def astream(self, prompt: str, *, system: str = "") -> AsyncIterator[Any]:
+        """One call of a streaming CLI, item by item: each tool call and result as the harness
+        reports it, its token counts, and last its reply (`harness_streams.StreamReply`).
+        Cancellable like `arespond`: a cancel kills the CLI's process group."""
         import asyncio as _asyncio
+        import os as _os
+        import signal as _signal
+
+        from .harness_streams import StreamReply, parser_for
+
+        if self._stream_format is None:
+            raise RuntimeError(f"CliResponder({self.name}) has no stream format")
+        parser = parser_for(self._stream_format)
+        proc = await _asyncio.create_subprocess_exec(
+            *self._argv(prompt, system),
+            stdin=_asyncio.subprocess.DEVNULL,  # see `respond`
+            stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.PIPE,
+            cwd=self._cwd,
+            env=self._subprocess_env(),
+            start_new_session=True,  # own process group: a kill reaches the agent's children
+            limit=16 * 1024 * 1024,  # one stream line can hold a whole file the harness read
+        )
+        if proc.stdout is None or proc.stderr is None:  # both are PIPE above
+            raise RuntimeError(f"CliResponder({self.name}) has no output pipes")
+        stderr_task = _asyncio.ensure_future(proc.stderr.read())  # a full stderr pipe would block
+        tail: list[str] = []
+        finished = False
+        try:
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", "replace")
+                tail = (tail + [line.strip()])[-5:]
+                for item in parser.feed(line):
+                    yield item
+            await proc.wait()
+            stderr = (await stderr_task).decode("utf-8", "replace").strip()
+            finished = True
+        finally:
+            if not finished:
+                try:
+                    _os.killpg(proc.pid, _signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                stderr_task.cancel()
+                try:
+                    await proc.wait()
+                except _asyncio.CancelledError:
+                    pass
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"CliResponder({self.name}) exit {proc.returncode}: "
+                f"{(stderr or ' '.join(tail)).strip()[:300]}"
+            )
+        if not parser.final_text:
+            raise RuntimeError(f"CliResponder({self.name}) produced no reply in its stream")
+        yield StreamReply(parser.final_text)
+
+    async def arespond(self, prompt: str, *, system: str = "") -> str:
+        """Async, cancellable call over an asyncio subprocess (the path `call_responder` prefers).
+        A streaming CLI's reply is the stream's final text."""
+        import asyncio as _asyncio
+
+        if self._stream_format is not None:
+            from .harness_streams import StreamReply
+
+            async for item in self.astream(prompt, system=system):
+                if isinstance(item, StreamReply):
+                    return item.text
+            raise RuntimeError(f"CliResponder({self.name}) produced no reply in its stream")
         import os as _os
         import signal as _signal
 
