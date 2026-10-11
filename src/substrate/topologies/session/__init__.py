@@ -403,6 +403,7 @@ def _model_factory(
     driver_headroom_frac: float,
     tools: dict[str, Tool],
     session_id: str = "",
+    mcp: bool = False,
 ) -> Callable[[], Any]:
     """Model Producer body: build the prompt, record it, send it, record the reply (K261).
 
@@ -425,7 +426,15 @@ def _model_factory(
     FinalAnswer; `return-on-reply` ends the turn.
     """
     native = callable(getattr(driver, "achat_tools", None))
-    tool_mode = ToolMode.NONE if not tools else (ToolMode.NATIVE if native else ToolMode.TEXT)
+    if not tools:
+        tool_mode = ToolMode.NONE
+    elif native:
+        tool_mode = ToolMode.NATIVE
+    elif mcp and _streams(driver):
+        # K284: a harness driver takes the session's tools as registered MCP tools.
+        tool_mode = ToolMode.MCP
+    else:
+        tool_mode = ToolMode.TEXT
 
     async def _model(
         inp: Any,
@@ -626,7 +635,16 @@ def _model_factory(
                 # K283: a harness driver's own tool calls go on the record as they happen.
                 box: dict[str, Any] = {}
                 async for harness_event in _harness_stream(
-                    driver, prompt, system_text, step=step, turn_index=turn_index, out=box
+                    driver,
+                    prompt,
+                    system_text,
+                    step=step,
+                    turn_index=turn_index,
+                    out=box,
+                    session_id=session_id,
+                    mcp_tools=tools
+                    if tool_mode == ToolMode.MCP and wrap_up_reason is None
+                    else None,
                 ):
                     yield harness_event
                 reply_text, usage = box["text"], box["usage"]
@@ -674,11 +692,17 @@ async def _harness_stream(
     step: int,
     turn_index: int,
     out: dict[str, Any],
+    session_id: str = "",
+    mcp_tools: dict[str, Tool] | None = None,
 ) -> AsyncIterator[HarnessToolCall | HarnessToolResult]:
-    """One call of a harness driver, read from its stream (session vocabulary § Q). Yields each of
-    the driver's own tool calls and results as `via=harness`; leaves the reply text and the call's
-    usage in `out`. Token counts come from the stream (`estimated=False`); with none reported, the
-    counts are the word-count stand-in `call_responder_metered` uses."""
+    """One call of a harness driver (session vocabulary § Q). Yields each tool call and result as
+    it happens: the driver's own, read from its stream (`via=harness`, K283), and, with
+    `mcp_tools`, the session's own tools it calls over the MCP channel (`via=mcp`, K284), which
+    this step runs. Both arrive on one queue, so the record has one writer. Leaves the reply text
+    and the call's usage in `out`. Token counts come from the stream (`estimated=False`); with none
+    reported, the counts are the word-count stand-in `call_responder_metered` uses."""
+    import asyncio
+    import contextlib
     import time
 
     from ...adapters.harness_streams import (
@@ -688,6 +712,7 @@ async def _harness_stream(
         StreamUsage,
     )
     from ...adapters.models import _has_system_channel, joined_prompt
+    from .mcp_channel import McpCall, open_channel, run_call
 
     if system_text and _has_system_channel(driver):
         items = driver.astream(prompt, system=system_text)
@@ -696,22 +721,78 @@ async def _harness_stream(
     started = time.monotonic()
     reply = ""
     counts: StreamUsage | None = None
-    async for item in items:
-        if isinstance(item, StreamToolCall):
-            yield HarnessToolCall(
-                call_id=item.call_id,
-                tool=item.tool,
-                args=item.args,
-                via=ToolRoute.HARNESS,
-                step=step,
-                turn_index=turn_index,
-            )
-        elif isinstance(item, StreamToolResult):
-            yield HarnessToolResult(call_id=item.call_id, ok=item.ok, output=item.output)
-        elif isinstance(item, StreamUsage):
-            counts = item
-        elif isinstance(item, StreamReply):
-            reply = item.text
+    done = object()
+    merged: asyncio.Queue[Any] = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async for item in items:
+                await merged.put(item)
+        except BaseException as e:  # noqa: BLE001 — handed to the reader, which re-raises it
+            await merged.put(e)
+        else:
+            await merged.put(done)
+
+    channel_cm = (
+        open_channel(session_id, mcp_tools) if mcp_tools is not None else contextlib.nullcontext()
+    )
+    with channel_cm as channel:
+        forward: asyncio.Task[Any] | None = None
+        if channel is not None:
+
+            async def forward_calls() -> None:
+                while True:
+                    await merged.put(await channel.calls.get())
+
+            forward = asyncio.ensure_future(forward_calls())
+        reader = asyncio.ensure_future(pump())
+        mcp_n = 0
+        try:
+            while True:
+                item = await merged.get()
+                if item is done:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                if isinstance(item, McpCall):
+                    call_id = f"mcp{step}.{mcp_n}"
+                    mcp_n += 1
+                    yield HarnessToolCall(
+                        call_id=call_id,
+                        tool=item.tool,
+                        args=item.arguments,
+                        via=ToolRoute.MCP,
+                        step=step,
+                        turn_index=turn_index,
+                    )
+                    try:
+                        ok, output = await run_call(item, mcp_tools or {})
+                    except BaseException:
+                        item.reply.set_result((False, "the call was cancelled"))
+                        raise
+                    item.reply.set_result((ok, output))
+                    yield HarnessToolResult(call_id=call_id, ok=ok, output=output)
+                elif isinstance(item, StreamToolCall):
+                    yield HarnessToolCall(
+                        call_id=item.call_id,
+                        tool=item.tool,
+                        args=item.args,
+                        via=ToolRoute.HARNESS,
+                        step=step,
+                        turn_index=turn_index,
+                    )
+                elif isinstance(item, StreamToolResult):
+                    yield HarnessToolResult(call_id=item.call_id, ok=item.ok, output=item.output)
+                elif isinstance(item, StreamUsage):
+                    counts = item
+                elif isinstance(item, StreamReply):
+                    reply = item.text
+        finally:
+            for task in (reader, forward):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with contextlib.suppress(BaseException):
+                        await task
     wall_ms = int((time.monotonic() - started) * 1000)
     name = str(getattr(driver, "name", type(driver).__name__))
     if counts is not None:
@@ -795,6 +876,7 @@ def session_topology(
     cache_layout: bool = False,
     memory: bool = False,
     model_class: str = "",
+    mcp: bool = False,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -978,6 +1060,7 @@ def session_topology(
                 driver_headroom_frac=driver_headroom_frac,
                 tools=tools,
                 session_id=session_id,
+                mcp=mcp,
             ),
             deterministic=model_is_deterministic,
         )
