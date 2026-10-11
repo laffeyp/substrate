@@ -96,6 +96,11 @@ PROMPT_COMPOSED = "PromptComposed"
 # PromptComposed.strategy from K261: the model producer's whole input for one call.
 PROMPT_STRATEGY_MODEL_INPUT: Final[str] = "model_input"
 
+# TranscriptCompacted.strategy and .reason (§ D; § S.4 from v0.7, sprint K291).
+COMPACTION_ROLLING_WINDOW: Final[str] = "rolling_window"
+COMPACTION_TOOL_OUTPUT_CLEARED: Final[str] = "tool_output_cleared"
+COMPACTION_REASON_WINDOW_EXCEEDED: Final[str] = "driver_window_exceeded"
+
 # v0.3 (session-vocabulary.md § K, sprint K259, 2026-10-09). `Returned` ends a turn; `Park` ends a
 # turn on records written before v0.3. Readers accept both (§ K.3).
 RETURNED = "Returned"

@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.7 (2026-10-11).** Sprint K291 adds section S: history compaction clears old tool outputs before it drops turns, and records a cut only when it changes. Directed by the Architect, 2026-10-11; research in `process/planning/RESEARCH-2026-10-11-compaction.md`. §§ A–R byte-preserved; where S differs from D, S governs records written from v0.7 on.
+
 **Status: RATIFIED — v0.3.1 (2026-10-09).** Sprint K261 adds section L: the model producer builds, records and sends each prompt; the composer and the per-turn chain retire. §§ A–K byte-preserved; where L differs from K, L governs.
 
 **Status: RATIFIED — v0.3 (2026-10-09).** Sprint K259 adds section K: `ModelReply` becomes one event per model call with `stop_reason` and `usage`; `Returned` replaces `Park`; a session record no longer carries `FinalAnswer`; the producers and triggers take the names in K.4 and K.5. Decisions by the Architect, 2026-10-09; research in `process/planning/RESEARCH-2026-10-09-session-topology-structure-round4.md`. §§ A–J byte-preserved from v0.2.1; where K differs from them, K governs records written from v0.3 on.
@@ -631,3 +633,55 @@ Every level's text is generic: no model, vendor or person named, no operator's m
 ### R.2 Classes and default levels (amends § P.7)
 
 `classify` has four classes. `harness_agent` (a CLI) and `large` (an Ollama model of 70B parameters or more, or of unreported size) default to `high`. `medium` (14B to under 70B) defaults to `medium`. `small` (under 14B; was under 30B) defaults to `low`. `guidance_level(model_class)` gives the default, and `guidance_bundle(level)` the bundle. A level the operator chooses always wins. `class_variant` now picks only the role prompt and skill variants (`default-small`, `dellm-small`, for `small`).
+
+## S. v0.7 — compaction clears tool output first (2026-10-11, sprint K291)
+
+Roadmap: `process/planning/ROADMAP-2026-10-11-compaction.md`. The record never changes: compaction decides only how the record renders into the prompt, and every decision is computed from recorded events, so replay rebuilds the same prompt.
+
+### S.1 Order of cuts
+
+When the history's estimate passes the budget (`driver_context_tokens × 0.6 − head`, as before):
+1. **Tool outputs clear first.** The bodies of `ToolResult` and `HarnessToolResult` events clear oldest first, the current turn's included. The newest 3 tool results always render whole. Call lines (`TOOL …`, `HARNESS TOOL …`), user messages and model replies never clear.
+2. **Whole turns drop only after that.** When the history still passes the budget with every clearable output cleared, the oldest whole turns drop as in § D. The current turn never drops.
+
+### S.2 Clearing holds still
+
+A clearing pass moves the boundary far enough that the history fits within half the budget, then holds it until the history passes the budget again. The prompt's start therefore stays the same across steps, and prefix caches keep working. The boundary is read back from the record's latest `TranscriptCompacted`, so it only moves forward.
+
+### S.3 The placeholder
+
+A cleared body renders as one line in place of its output:
+
+- `RESULT [cleared: <tool>, seq <n>, <chars> chars]`
+- `HARNESS RESULT [cleared: <tool>, seq <n>, <chars> chars]`
+
+`<tool>` is the call's tool, `<n>` the result's seq, `<chars>` the output's length. The record keeps the output whole.
+
+### S.4 TranscriptCompacted (amends § D)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `strategy` | `str` | `"tool_output_cleared"` when only tool outputs cleared; `"rolling_window"` when whole turns also dropped. |
+| `cleared_through_seq` | `int \| None` | Every `ToolResult` and `HarnessToolResult` at or below this seq, outside the newest 3, renders as a placeholder. `None`: nothing cleared (all records before v0.7). |
+| `dropped_seq_range` | `tuple[int, int] \| None` | As § D, now `None` when no turn dropped. |
+| `kept_seq_start` | `int` | First seq of the oldest kept turn. |
+| `reason` | `str` | `"driver_window_exceeded"`. |
+| `tokens_before`, `tokens_after` | `int` | Estimated tokens of the history before and after the cut, after the scale in S.5. |
+| `token_scale` | `float` | The factor the estimate was multiplied by (S.5); 1.0 in records before v0.7. |
+
+**Cadence (replaces § D's).** At most one per model step, and only when `(cleared_through_seq, dropped_seq_range)` differs from the latest `TranscriptCompacted` in the record. A step that keeps the previous cut records nothing.
+
+### S.5 The estimate's scale
+
+The characters ÷ 4 estimate is multiplied by the driver's measured ratio: the latest `ModelReply` whose `usage.estimated` is false, divided by the `total_tokens` of the `PromptComposed` before it, clamped to 1.0–4.0. With no such reply the scale is 1.0. Harness drivers use 1.0: their reported counts include the harness's own prompt and tool loop, so the ratio does not measure the estimate.
+
+### S.6 Invariants (add to § F)
+
+9. Whole turns drop only when every tool output outside the newest 3 is already cleared.
+10. `cleared_through_seq` never decreases within a record.
+11. No two `TranscriptCompacted` events in a record carry the same `(cleared_through_seq, dropped_seq_range)` in a row.
+
+### Ratification signature
+
+- **v0.7** — Sprint K291, 2026-10-11, by the Architect's direction of the same day. §§ A–R byte-preserved.
+

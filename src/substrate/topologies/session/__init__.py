@@ -33,6 +33,8 @@ from ..tool_loop.background import TaskStatus
 from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from .vocabulary import (
+    COMPACTION_REASON_WINDOW_EXCEEDED,
+    COMPACTION_ROLLING_WINDOW,
     END_ON_EXIT_SENTINEL,
     CACHE_LAYOUT_SOURCES,
     INTERRUPT_REQUESTED,
@@ -539,10 +541,10 @@ def _model_factory(
         if ticket and ticket.get("dropped"):
             lo, hi = ticket["dropped"]
             yield TranscriptCompacted(
-                strategy="rolling_window",
+                strategy=COMPACTION_ROLLING_WINDOW,
                 dropped_seq_range=(int(lo), int(hi)),
                 kept_seq_start=int(ticket["from_seq"]),
-                reason="driver_window_exceeded",
+                reason=COMPACTION_REASON_WINDOW_EXCEEDED,
                 tokens_before=int(ticket["tokens_before"]),
                 tokens_after=_est_tokens(system_text) + _est_tokens(prompt_text),
             )

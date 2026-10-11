@@ -100,11 +100,17 @@ class TranscriptCompacted(Struct, frozen=True):
     """
 
     strategy: str
-    dropped_seq_range: tuple[int, int]
     kept_seq_start: int
     reason: str
     tokens_before: int
     tokens_after: int
+    # v0.7 (§ S.4): None when no whole turn dropped; every record before v0.7 carries a range.
+    dropped_seq_range: tuple[int, int] | None = None
+    # v0.7: tool-output bodies at or below this seq, outside the newest kept whole, render as
+    # placeholders. None: nothing cleared.
+    cleared_through_seq: int | None = None
+    # v0.7 (§ S.5): the factor the chars/4 estimate was multiplied by.
+    token_scale: float = 1.0
 
 
 def _cli_context_from_config(driver_name: str, config_path: Path | None = None) -> int:
