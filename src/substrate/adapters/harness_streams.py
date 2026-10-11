@@ -51,6 +51,24 @@ class StreamReply:
 
 StreamItem = StreamToolCall | StreamToolResult | StreamUsage | StreamReply
 
+# The name Substrate's MCP server goes by in a harness's config (UI sprint 129, kernel K284).
+SUBSTRATE_MCP_SERVER: Final[str] = "substrate"
+
+
+def calls_substrate_mcp(tool: str) -> bool:
+    """Whether a tool name in a harness's stream is a call to Substrate's own MCP server: Claude
+    Code names it `mcp__substrate__<tool>`, Codex `substrate.<tool>`, cursor-agent
+    `substrate-<tool>`. The channel records that call as `via=mcp` where it runs, so the stream's
+    copy is not recorded again."""
+    return tool.startswith(
+        (
+            f"mcp__{SUBSTRATE_MCP_SERVER}__",
+            f"{SUBSTRATE_MCP_SERVER}.",
+            f"{SUBSTRATE_MCP_SERVER}-",
+        )
+    )
+
+
 CLAUDE_STREAM_JSON: Final[str] = "claude-stream-json"
 CODEX_JSON: Final[str] = "codex-json"
 CURSOR_STREAM_JSON: Final[str] = "cursor-stream-json"
@@ -224,6 +242,8 @@ class CursorStreamParser(_Parser):
             call = body[name] or {}
             call_id = str(event.get("call_id", ""))
             tool = name[: -len("ToolCall")]
+            if name == "mcpToolCall":  # an MCP server's tool: args.name is `<server>-<tool>`
+                tool = str((call.get("args") or {}).get("name") or tool)
             if event.get("subtype") == "started":
                 return [
                     StreamToolCall(call_id=call_id, tool=tool, args=dict(call.get("args") or {}))
@@ -272,6 +292,8 @@ __all__ = [
     "CODEX_JSON",
     "CURSOR_STREAM_JSON",
     "STREAM_FORMATS",
+    "SUBSTRATE_MCP_SERVER",
+    "calls_substrate_mcp",
     "HarnessStreamError",
     "StreamItem",
     "StreamReply",

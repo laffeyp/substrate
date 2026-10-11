@@ -710,6 +710,7 @@ async def _harness_stream(
         StreamToolCall,
         StreamToolResult,
         StreamUsage,
+        calls_substrate_mcp,
     )
     from ...adapters.models import _has_system_channel, joined_prompt
     from .mcp_channel import McpCall, open_channel, run_call
@@ -747,6 +748,7 @@ async def _harness_stream(
             forward = asyncio.ensure_future(forward_calls())
         reader = asyncio.ensure_future(pump())
         mcp_n = 0
+        echoed: set[str] = set()  # stream ids of calls the channel already recorded
         try:
             while True:
                 item = await merged.get()
@@ -772,6 +774,10 @@ async def _harness_stream(
                         raise
                     item.reply.set_result((ok, output))
                     yield HarnessToolResult(call_id=call_id, ok=ok, output=output)
+                elif isinstance(item, StreamToolCall) and calls_substrate_mcp(item.tool):
+                    echoed.add(item.call_id)
+                elif isinstance(item, StreamToolResult) and item.call_id in echoed:
+                    pass
                 elif isinstance(item, StreamToolCall):
                     yield HarnessToolCall(
                         call_id=item.call_id,

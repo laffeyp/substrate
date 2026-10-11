@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from ...adapters.harness_streams import SUBSTRATE_MCP_SERVER
 from ..tool_loop.tools import (
     ARG_ERROR_KEY,
     Tool,
@@ -32,7 +33,7 @@ from ..tool_loop.tools import (
 )
 
 MCP_PROTOCOL_VERSION: Final[str] = "2025-06-18"
-MCP_SERVER_NAME: Final[str] = "substrate"
+MCP_SERVER_NAME: Final[str] = SUBSTRATE_MCP_SERVER
 
 # JSON-RPC error codes (JSON-RPC 2.0 § 5.1).
 _METHOD_NOT_FOUND: Final[int] = -32601

@@ -14,7 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from substrate import api
-from substrate.adapters.harness_streams import CLAUDE_STREAM_JSON, StreamReply, StreamUsage
+from substrate.adapters.harness_streams import (
+    CLAUDE_STREAM_JSON,
+    StreamReply,
+    StreamToolCall,
+    StreamToolResult,
+    StreamUsage,
+)
 from substrate.topologies.session import UserMessage, session_topology
 from substrate.topologies.session.mcp_channel import handle_jsonrpc, open_channel, tool_list
 from substrate.topologies.tool_loop.tools import full_suite
@@ -38,17 +44,25 @@ class FakeHarness:
     name = "fake-harness"
     stream_format = CLAUDE_STREAM_JSON
 
-    def __init__(self, calls: list[dict[str, Any]]) -> None:
+    def __init__(self, calls: list[dict[str, Any]], echo: bool = False) -> None:
         self._calls = calls
+        self._echo = echo  # also report each call in the stream, as Claude Code and Codex do
         self.prompts: list[str] = []
         self.responses: list[dict[str, Any] | None] = []
 
     async def astream(self, prompt: str, *, system: str = "") -> Any:
         self.prompts.append(prompt)
         for i, message in enumerate(self._calls):
+            if self._echo:
+                params = message["params"]
+                yield StreamToolCall(
+                    f"toolu_{i}", f"mcp__substrate__{params['name']}", params["arguments"]
+                )
             self.responses.append(
                 await asyncio.to_thread(handle_jsonrpc, SID, {**message, "id": i + 1})
             )
+            if self._echo:
+                yield StreamToolResult(f"toolu_{i}", True, "echo")
         yield StreamUsage(10, 2)
         yield StreamReply("done")
 
@@ -145,3 +159,14 @@ def test_without_mcp_a_harness_keeps_the_text_tool_list(tmp_path: Path) -> None:
     _turn(tmp_path, driver, mcp=False)
     (prompt,) = driver.prompts
     assert "Tools you MAY use" in prompt
+
+
+def test_the_streams_copy_of_a_substrate_mcp_call_is_not_recorded_twice(tmp_path: Path) -> None:
+    """Claude Code reports its call to Substrate's server as `mcp__substrate__write_file`, Codex as
+    `substrate.write_file`. Found live 2026-10-10: each call landed twice, once per route."""
+    driver = FakeHarness([_call("write_file", {"path": "a.txt", "text": "ok"})], echo=True)
+    events = _turn(tmp_path, driver)
+    calls = [e["payload"] for e in events if e["kind"] == "HarnessToolCall"]
+    results = [e["payload"] for e in events if e["kind"] == "HarnessToolResult"]
+    assert [(c["tool"], c["via"]) for c in calls] == [("write_file", "mcp")]
+    assert [r["output"] for r in results] != ["echo"] and len(results) == 1
