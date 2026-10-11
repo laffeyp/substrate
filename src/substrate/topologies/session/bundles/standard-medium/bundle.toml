@@ -1,0 +1,7 @@
+# The medium guidance level (ROADMAP-2026-10-10-guidance-levels, sprint K288): every rule of the
+# high level (`standard`), each stated once without the examples, for models with less room.
+[bundle]
+name = "standard-medium"
+description = "Medium guidance: harness rules, plus the working and writing standard without examples."
+schema_version = 1
+extends = ["harness"]

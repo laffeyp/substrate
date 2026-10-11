@@ -1,7 +1,0 @@
-# The default guidance for a small model (sprint K278): standard's rules, one short line each,
-# to fit a small context window. Same layer as standard: extends the harness.
-[bundle]
-name = "standard-small"
-description = "The default guidance, compressed for small models."
-schema_version = 1
-extends = ["harness"]

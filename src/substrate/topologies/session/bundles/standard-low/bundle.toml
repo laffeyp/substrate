@@ -1,0 +1,7 @@
+# The low guidance level (sprints K278, K288; was standard-small): the rules, one short line each,
+# to fit a small context window. Same layer as standard: extends the harness.
+[bundle]
+name = "standard-low"
+description = "Low guidance: harness rules, plus the working and writing standard in one line per rule."
+schema_version = 1
+extends = ["harness"]

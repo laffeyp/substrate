@@ -610,3 +610,24 @@ Q.1 and Q.2 recorded a harness driver's call to one of Substrate's tools over MC
 - **An MCP call is Substrate's own `ToolCall`.** `ToolCall` and `ToolResult` gain `origin`: `reply` (the default, so earlier records read) or `mcp`. The model step writes `ToolCall(origin = mcp)` and does not run it. `tool-on-tool-call` starts the tool producer as for any call, so its argument checks and its repeated-write guard apply. The producer writes `ToolResult(origin = mcp)`, and the session hands that result to the waiting MCP request.
 - **An MCP call's result starts no model step.** `model-on-tool-result` and `model-wrap-up-on-tool-result` skip `origin = mcp`. The harness that asked is still running in the current step and reads the result over MCP. A new step would start a second CLI process on the same turn.
 - **History** renders an MCP call as any `ToolCall`, with `TOOL <tool>: args=…` and `RESULT: …`. A harness's own tool renders as `HARNESS TOOL <tool>: args=…`.
+
+## R. v0.6 — guidance levels (2026-10-10, sprints K287, K288)
+
+Roadmap: `process/planning/ROADMAP-2026-10-10-guidance-levels.md`.
+
+### R.1 Levels
+
+`GuidanceLevel` (`topologies/session/model_class.py`) has four values. Each is carried by one bundle:
+
+| Level | Bundle | Head, measured 2026-10-10 |
+|---|---|---|
+| `harness` | `harness` | 291 tokens: Substrate's loop rules only |
+| `low` | `standard-low` (was `standard-small`; the old name resolves through `LEGACY_BUNDLE_NAMES`) | 562 tokens |
+| `medium` | `standard-medium` | 1,218 tokens |
+| `high` | `standard` | 2,995 tokens |
+
+Every level's text is generic: no model, vendor or person named, no operator's memory index, and the user referred to in the third person (K287).
+
+### R.2 Classes and default levels (amends § P.7)
+
+`classify` has four classes. `harness_agent` (a CLI) and `large` (an Ollama model of 70B parameters or more, or of unreported size) default to `high`. `medium` (14B to under 70B) defaults to `medium`. `small` (under 14B; was under 30B) defaults to `low`. `guidance_level(model_class)` gives the default, and `guidance_bundle(level)` the bundle. A level the operator chooses always wins. `class_variant` now picks only the role prompt and skill variants (`default-small`, `dellm-small`, for `small`).

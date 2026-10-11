@@ -57,7 +57,7 @@ _PROSE_SLOTS: tuple[str, ...] = ("methodology", "style", "per_turn")
 
 # Session vocabulary v0.4 (§ P.1): the shipped `session` bundle is now `harness`. Manifests,
 # records and callers that still name `session` load `harness`.
-LEGACY_BUNDLE_NAMES: dict[str, str] = {"session": "harness"}
+LEGACY_BUNDLE_NAMES: dict[str, str] = {"session": "harness", "standard-small": "standard-low"}
 
 _SHIPPED_SESSION_BUNDLES = Path(__file__).parent / "topologies" / "session" / "bundles"
 _SHIPPED_APPLICATION_BUNDLES = Path(__file__).parent / "topologies" / "applications"

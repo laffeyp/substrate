@@ -30,7 +30,8 @@ SHIPPED = [
     "pair_coding",
     "best_of_n_verified",
     "research_sweep",
-    "standard-small",
+    "standard-medium",
+    "standard-low",
 ]
 
 
