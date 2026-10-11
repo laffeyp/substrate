@@ -529,6 +529,12 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Research 2026-10-10 — language metrics, rounds 1–3 (no code)
+- **Note.** `process/planning/RESEARCH-2026-10-10-language-metrics-r3.md` is current; rounds 1 and 2 stay on disk.
+- **Scope.** Form and lookup-table measures only, on three texts: the user's (`UserMessage.text`, delegate-written messages excluded), the model's (`ModelReply.text`), and the relation per turn (length ratio, lexical echo, phrase copy, NCD, LSM, convergence).
+- **Design.** A session producer writes `LanguageProfile` and `LanguageDrift` events (CUSUM or Page–Hinkley against the session's own history). A process with no topology appends `.substrate/language/<session_id>.jsonl` in the workspace, with grouping keys and mergeable partials. Reference distributions are later research; the app keeps the data they will need. "Baseline" is not reused, since it already names `SessionStarted.baseline`.
+- **State.** Research only; no roadmap or sprint cards yet. Commits `3747fefb`, `ac76a2dd`, `d08dacf8`.
+
 ### Guidance follow-through (2026-10-10, late night) — K287 redone, levels rebuilt, memory explained
 - **High restored.** K287's first pass rewrote nearly every sentence of the high text. The Architect: rewriting was for medium and low. High was restored from git (`794b397f^`) with 24 of 150 lines changed: names, voice, tool names, and the six memory entries about one operator or this project. Commit `4c3c6729`.
 - **No level names a tool.** A harness model's tools are its own, and Substrate's reach it over MCP under other names, so "with `read_file`" was wrong for every harness driver. A test now checks every bundle, skill and default prompt. `prompts/reviewer.md:66` still names `inspect_record` and `read_file` (a role prompt, left open).
