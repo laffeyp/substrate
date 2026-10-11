@@ -546,28 +546,18 @@ def _model_factory(
                 tokens_before=int(ticket["tokens_before"]),
                 tokens_after=_est_tokens(system_text) + _est_tokens(prompt_text),
             )
-        # The endings below are the pre-K261 wording, unchanged: K261 changes where the prompt's
-        # parts come from and their order, not what the model is told.
-        progress = [
-            {"tool": r.get("tool"), "ok": r.get("ok", True), "output": r.get("output", "")}
-            for r in results
-        ]
+        # K290: this turn's tool results are in the history already, as its TOOL and RESULT lines
+        # (the ticket runs to the triggering ToolResult), so the endings no longer repeat them.
         if wrap_up_reason is not None:
             last_err = str(results[-1].get("error", "")) if results else ""
             prompt = (
                 f"{prompt_text}\n\n"
-                f"Tool results so far, in order: {progress}\n\n"
                 + _WRAP_UP_DIRECTIVE.format(reason=wrap_up_reason)
                 + (f"\n\nLast error was: {last_err}" if last_err else "")
-            )
-        elif script is None and tool_mode == ToolMode.NATIVE:
-            prompt = prompt_text + (
-                f"\n\nTool results so far, in order: {progress}" if progress else ""
             )
         elif script is None and tool_mode == ToolMode.TEXT:
             prompt = (
                 f"{prompt_text}\n\nTools you MAY use:\n{suite_describe(tools)}\n"
-                + (f"Tool results so far, in order: {progress}\n" if progress else "")
                 + _JSON_TOOL_CALL_DIRECTIVE
             )
         else:
