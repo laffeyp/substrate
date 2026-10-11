@@ -806,6 +806,15 @@ The Substrate build is the first project of its class (a runtime / event-sourcin
 
 ---
 
+### 2026-10-10 (later still) — A copied default carried one operator
+
+**67. "Copy first" also copies who the original was written for (2026-10-10, K287).** The default guidance was copied verbatim from one operator's setup (K275). Every session on every model then carried three things:
+- Claude Code's own header;
+- the operator speaking in the first person ("When I tell you…");
+- a 25-line memory index that described the operator, as "he", and this project's history.
+
+No test caught it, because every test checked that the text arrived, not who it addressed. Substrate already had the right home for one operator's rules: the memory directories (K276). A scan for names and first-person speech now gates every shipped text. Before shipping copied text as a default, ask whose voice it is in, and whose facts it carries.
+
 ### 2026-10-10 (late night) — It worked, and the concept was wrong
 
 **66. Working is not the same as right; check each new event against the producer that owns the act (2026-10-10, K286).** K284 passed every test and wrote files through all three drivers in the installed app. It was still wrong. It recorded Substrate's own tool as a harness kind, and it ran the tool inside the model producer. That bypassed the tool producer, which is the one unit that runs tools, applies their rules and writes their results. The Architect caught it from the record, not from a failure. A pressure test against the code then set the right shape:

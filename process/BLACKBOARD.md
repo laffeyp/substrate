@@ -529,6 +529,13 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Roadmap 2026-10-10 (K287–K289) — guidance levels
+- **K287.** The generic high text.
+- **K288.** Medium and low levels; four model classes; `GuidanceLevel` and `guidance_bundle`. Vocabulary § R.
+- **K289.** Spec rounds 15, 9 and 4.
+- **Tests.** Kernel suite 1,468 passed, 8 skipped. The one failure, `test_realmodel_background_bash_103`, uses no bundle and passed alone.
+- **Commits.** `794b397f`, `93b81ec9`, and the commit carrying this entry.
+
 ### Sprint K286 (2026-10-10, closed) — a harness's MCP call is Substrate's own ToolCall
 - **What changed.** `ToolCall` and `ToolResult` gain `origin` (`reply`, `mcp`). An MCP call is written by the model step and run by the tool producer, whose rules now apply. The repeated-write guard refuses a second MCP write, which it never did under K284. The continue-triggers skip `origin=mcp`. `HarnessToolCall` drops `via`, and `ToolRoute` is gone.
 - **Documents.** Vocabulary § Q.6; roadmap r2.
