@@ -47,6 +47,7 @@ __all__ = [
     "call_responder",
     "ModelUsage",
     "call_responder_metered",
+    "joined_prompt",
     "ContextTokensUnknown",
     "DriverIntrospectionUnavailable",
     "ollama_base_url",
@@ -215,12 +216,17 @@ class OllamaResponder:
         self._max_retries = max_retries
         self._system = system
 
+    # Session vocabulary v0.4 (§ P.3): this responder has a system channel, so callers pass the
+    # system text as `system=` rather than prefixing it to the prompt.
+    system_channel = True
+
     def _request(
-        self, prompt: str, tools: list[dict[str, object]] | None = None
+        self, prompt: str, tools: list[dict[str, object]] | None = None, system: str = ""
     ) -> tuple[dict[str, str], dict[str, object]]:
         messages: list[dict[str, str]] = []
-        if self._system:
-            messages.append({"role": "system", "content": self._system})
+        system_text = system or self._system
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
         messages.append({"role": "user", "content": prompt})
         options: dict[str, object] = {"num_ctx": self._num_ctx, "temperature": self._temperature}
         if self._max_tokens is not None:
@@ -277,7 +283,7 @@ class OllamaResponder:
             estimated=False,  # provider truth
         )
 
-    def _chat(self, prompt: str) -> dict[str, object]:
+    def _chat(self, prompt: str, system: str = "") -> dict[str, object]:
         """One POST to /api/chat with simple geometric retry, returning the parsed response dict.
         `max_retries` attempts, 1s/2s/4s backoff, then raise. Rate limits are a real error —
         halting the sweep is the honest response. The 8-attempt 429 marathon (2026-08-09) was a
@@ -292,7 +298,7 @@ class OllamaResponder:
 
         import httpx  # lazy: the openai-compat optional extra; kernel/CI need not have it
 
-        headers, payload = self._request(prompt)
+        headers, payload = self._request(prompt, system=system)
         last_exc: Exception | None = None
         last_body: str = ""
         for attempt in range(self._max_retries):
@@ -319,7 +325,7 @@ class OllamaResponder:
         )
 
     async def _achat(
-        self, prompt: str, tools: list[dict[str, object]] | None = None
+        self, prompt: str, tools: list[dict[str, object]] | None = None, system: str = ""
     ) -> dict[str, object]:
         """Async sibling of `_chat`. Same simple geometric retry (2026-08-09 halt-on-error
         rewrite): `max_retries` attempts, 1s/2s/4s backoff, then raise. Rate-limit halting is the
@@ -328,7 +334,7 @@ class OllamaResponder:
 
         import httpx
 
-        headers, payload = self._request(prompt, tools)
+        headers, payload = self._request(prompt, tools, system)
         last_exc: Exception | None = None
         last_body: str = ""
         for attempt in range(self._max_retries):
@@ -352,43 +358,45 @@ class OllamaResponder:
             f"{last_exc!r}{body_note}"
         )
 
-    def respond(self, prompt: str) -> str:
+    def respond(self, prompt: str, *, system: str = "") -> str:
         """Synchronous call (the Responder protocol + non-async callers). For use INSIDE an async
         Producer, prefer `call_responder`, which routes through `arespond` so the call is cancellable
         rather than orphaning a worker thread on cancel-others / finalise."""
-        return self._content(self._chat(prompt))
+        return self._content(self._chat(prompt, system))
 
-    def respond_metered(self, prompt: str) -> tuple[str, ModelUsage]:
+    def respond_metered(self, prompt: str, *, system: str = "") -> tuple[str, ModelUsage]:
         """`respond`, plus the provider's own token/latency accounting as a ModelUsage — the
         measurement that `_content` alone throws away."""
-        data = self._chat(prompt)
+        data = self._chat(prompt, system)
         return self._content(data), self._usage(data, self._model)
 
-    async def arespond(self, prompt: str) -> str:
+    async def arespond(self, prompt: str, *, system: str = "") -> str:
         """Async, cancellable call (see `_achat`) — the path `call_responder` prefers."""
-        return self._content(await self._achat(prompt))
+        return self._content(await self._achat(prompt, system=system))
 
-    async def arespond_metered(self, prompt: str) -> tuple[str, ModelUsage]:
+    async def arespond_metered(self, prompt: str, *, system: str = "") -> tuple[str, ModelUsage]:
         """Async sibling of `respond_metered`: the cancellable call plus ModelUsage accounting."""
-        data = await self._achat(prompt)
+        data = await self._achat(prompt, system=system)
         return self._content(data), self._usage(data, self._model)
 
-    async def achat_tools(self, prompt: str, tools: list[dict[str, object]]) -> dict[str, object]:
+    async def achat_tools(
+        self, prompt: str, tools: list[dict[str, object]], *, system: str = ""
+    ) -> dict[str, object]:
         """Async tools-chat: hand the model the function `tools` and return the raw `message` dict
         (its `content` + any `tool_calls`) for the caller to parse. Native tool-calling where the
         model supports it (llama3.2 returns `tool_calls`); models that instead emit the call as JSON
         in `content` (qwen2.5-coder) are handled by the caller's `parse_tool_call`. Cancellable like
         `arespond` (routes through `_achat`)."""
-        data = await self._achat(prompt, tools)
+        data = await self._achat(prompt, tools, system)
         msg = data.get("message")
         return msg if isinstance(msg, dict) else {"content": "", "tool_calls": []}
 
     async def achat_tools_metered(
-        self, prompt: str, tools: list[dict[str, object]]
+        self, prompt: str, tools: list[dict[str, object]], *, system: str = ""
     ) -> tuple[dict[str, object], ModelUsage]:
         """`achat_tools`, plus Ollama's own token and latency accounting for the call (K262: every
         model call records its usage, a call that picks a tool included)."""
-        data = await self._achat(prompt, tools)
+        data = await self._achat(prompt, tools, system)
         msg = data.get("message")
         message = msg if isinstance(msg, dict) else {"content": "", "tool_calls": []}
         return message, self._usage(data, self._model)
@@ -455,6 +463,8 @@ class CliResponder:
         timeout: float | None = None,
         name: str | None = None,
         cwd: Path | str | None = None,
+        system_flag: list[str] | None = None,
+        env: dict[str, str] | None = None,
     ) -> None:
         if not command:
             raise ValueError("CliResponder needs a non-empty command, e.g. ['claude', '-p']")
@@ -465,25 +475,69 @@ class CliResponder:
         # and writes relative to it; with none set it runs wherever the caller runs, which for the
         # daemon is the app bundle or the kernel repo.
         self._cwd = cwd
+        # Session vocabulary v0.4 (§ P.3): the flag that carries system text, from the driver's
+        # profile (`["--system-prompt"]` for claude). None: the CLI has no system channel, and
+        # callers prefix the system text to the prompt.
+        self._system_flag = list(system_flag) if system_flag is not None else None
+        # Variables the driver profile sets for the subprocess, over the daemon's own environment
+        # (U120: `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1` for claude).
+        self._env = dict(env) if env else None
+
+    @property
+    def command(self) -> tuple[str, ...]:
+        """The argv before the system text and prompt (session vocabulary § P.8)."""
+        return tuple(self._command)
+
+    def _subprocess_env(self) -> dict[str, str] | None:
+        if self._env is None:
+            return None
+        import os
+
+        return {**os.environ, **self._env}
+
+    @property
+    def system_channel(self) -> bool:
+        """Whether this CLI takes system text through its own flag."""
+        return self._system_flag is not None
 
     def at(self, cwd: Path | str) -> CliResponder:
         """The same CLI, run in `cwd`. A new instance: a cached responder keeps its own directory
         (UI sprint 115, a delegated child runs in its own workspace)."""
-        return CliResponder(self._command, timeout=self._timeout, name=self.name, cwd=cwd)
+        return CliResponder(
+            self._command,
+            timeout=self._timeout,
+            name=self.name,
+            cwd=cwd,
+            system_flag=self._system_flag,
+            env=self._env,
+        )
 
-    def respond(self, prompt: str) -> str:
+    def _argv(self, prompt: str, system: str) -> list[str]:
+        """The command line for one call: with a flag, the system text through it, empty or not,
+        so the CLI never falls back to a system prompt of its own (`claude --system-prompt ""`
+        leaves Claude with none, measured 2026-10-10); then the prompt last."""
+        if self._system_flag is not None:
+            return [*self._command, *self._system_flag, system, prompt]
+        if system:
+            return [*self._command, f"{system}\n\n{prompt}"]
+        return [*self._command, prompt]
+
+    def respond(self, prompt: str, *, system: str = "") -> str:
         import subprocess
 
         proc = subprocess.run(  # noqa: S603 — an explicit, operator-chosen agent CLI driver
-            [*self._command, prompt],
+            self._argv(prompt, system),
+            stdin=subprocess.DEVNULL,  # the prompt is an argument; `claude` waits 3 s on an open stdin, then fails
             capture_output=True,
             text=True,
             timeout=self._timeout,
             cwd=self._cwd,
+            env=self._subprocess_env(),
         )
         if proc.returncode != 0:
             raise RuntimeError(
-                f"CliResponder({self.name}) exit {proc.returncode}: {proc.stderr.strip()[:300]}"
+                f"CliResponder({self.name}) exit {proc.returncode}: "
+                f"{(proc.stderr.strip() or proc.stdout.strip())[:300]}"
             )
         out = proc.stdout.strip()
         if not out:
@@ -492,18 +546,19 @@ class CliResponder:
             )
         return out
 
-    async def arespond(self, prompt: str) -> str:
+    async def arespond(self, prompt: str, *, system: str = "") -> str:
         """Async, cancellable call over an asyncio subprocess (the path `call_responder` prefers)."""
         import asyncio as _asyncio
         import os as _os
         import signal as _signal
 
         proc = await _asyncio.create_subprocess_exec(
-            *self._command,
-            prompt,
+            *self._argv(prompt, system),
+            stdin=_asyncio.subprocess.DEVNULL,  # see `respond`
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
             cwd=self._cwd,
+            env=self._subprocess_env(),
             start_new_session=True,  # own process group: a kill reaches the agent's children
         )
 
@@ -535,7 +590,8 @@ class CliResponder:
         if proc.returncode != 0:
             raise RuntimeError(
                 f"CliResponder({self.name}) exit {proc.returncode}: "
-                f"{stderr.decode('utf-8', 'replace').strip()[:300]}"
+                # `claude -p` prints some failures ("Not logged in") on stdout, not stderr
+                f"{(stderr or stdout).decode('utf-8', 'replace').strip()[:300]}"
             )
         out = stdout.decode("utf-8", "replace").strip()
         if not out:
@@ -543,7 +599,18 @@ class CliResponder:
         return out
 
 
-async def call_responder(responder: Responder, prompt: str) -> str:
+def _has_system_channel(responder: object) -> bool:
+    """Session vocabulary v0.4 (§ P.3): whether a responder takes system text as `system=`."""
+    return bool(getattr(responder, "system_channel", False))
+
+
+def joined_prompt(system: str, prompt: str) -> str:
+    """The one string a responder with no system channel receives: the system text, a blank line,
+    then the prompt (§ P.3). No system text leaves the prompt unchanged."""
+    return f"{system}\n\n{prompt}" if system else prompt
+
+
+async def call_responder(responder: Responder, prompt: str, *, system: str = "") -> str:
     """Invoke a Responder from inside an async Producer WITHOUT blocking the event loop.
 
     A real responder (OllamaResponder, any network/IO-backed model) does blocking I/O. Calling it
@@ -565,6 +632,9 @@ async def call_responder(responder: Responder, prompt: str) -> str:
     transform, etc.) still offloads to a thread for concurrency. So: async real responders are
     cancellable; stand-ins stay sync (determinism); other blocking responders offload.
     """
+    if system and _has_system_channel(responder):
+        return str(await responder.arespond(prompt, system=system))  # type: ignore[attr-defined]
+    prompt = joined_prompt(system, prompt)
     arespond = getattr(responder, "arespond", None)
     if callable(arespond):
         return str(await arespond(prompt))
@@ -573,7 +643,9 @@ async def call_responder(responder: Responder, prompt: str) -> str:
     return await asyncio.to_thread(responder.respond, prompt)
 
 
-async def call_responder_metered(responder: Responder, prompt: str) -> tuple[str, ModelUsage]:
+async def call_responder_metered(
+    responder: Responder, prompt: str, *, system: str = ""
+) -> tuple[str, ModelUsage]:
     """Like `call_responder`, but also returns a `ModelUsage` for the call — emit it from the Producer
     so the inner record carries per-call token/latency accounting.
 
@@ -585,13 +657,16 @@ async def call_responder_metered(responder: Responder, prompt: str) -> tuple[str
     through the same `call_responder` path, preserving its concurrency/cancellation discipline."""
     ametered = getattr(responder, "arespond_metered", None)
     if callable(ametered):
-        text, usage = await ametered(prompt)
+        if system and _has_system_channel(responder):
+            text, usage = await ametered(prompt, system=system)
+        else:
+            text, usage = await ametered(joined_prompt(system, prompt))
         return str(text), usage
-    text = await call_responder(responder, prompt)
+    text = await call_responder(responder, prompt, system=system)
     model = str(getattr(responder, "_model", type(responder).__name__))
     usage = ModelUsage(
         model=model,
-        prompt_tokens=len(prompt.split()),
+        prompt_tokens=len(joined_prompt(system, prompt).split()),
         completion_tokens=len(text.split()),
         wall_ms=0,
         estimated=True,  # word-count stand-in, NOT provider truth — marked in the data

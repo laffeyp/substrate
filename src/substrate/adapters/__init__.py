@@ -28,6 +28,7 @@ from .models import (
     Responder,
     call_responder,
     call_responder_metered,
+    joined_prompt,
 )
 from .rate_limit import (
     OllamaQuota,
@@ -63,6 +64,10 @@ class DriverParamKey(StrEnum):
     # UI Sprint 087c: the CLI model the version picker chose; the daemon's
     # driver resolver turns it into the CLI's model flag.
     DRIVER_VERSION = "driver_version"
+    # UI sprint 121 (session vocabulary § P.3): opt in to the layout that puts every
+    # session-stable text on the system channel. Off unless the operator sets it; the daemon
+    # accepts it only for a driver whose profile names a system flag.
+    CACHE_LAYOUT = "cache_layout"
 
 
 __all__ = [
@@ -82,4 +87,5 @@ __all__ = [
     "Responder",
     "call_responder",
     "call_responder_metered",
+    "joined_prompt",
 ]

@@ -28,7 +28,7 @@ Cite the file and the line for every claim. When a claim spans
 multiple sites, list each file:line separately.
 {% endif %}
 
-== personality.md ==
+== style.md ==
 {{voice}}
 
 == per-turn.md ==

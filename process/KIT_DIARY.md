@@ -806,6 +806,12 @@ The Substrate build is the first project of its class (a runtime / event-sourcin
 
 ---
 
+### 2026-10-10 — The default-guidance roadmap (K270–K281, U120–U123): one resume door, and a test cadence
+
+**59. A paused run has one way in; design every mid-session signal through it (2026-10-10, K274, K277, U123).** Three cards designed an injected event (`SessionChanged`, `SkillRequested`, a driver-command pair) and found the same wall: the session pauses on `pause_await_input(resume_condition=UserMessage)`, so a parked session resumes only on a `UserMessage`, and `Runtime.inject_event` reaches live runs only. Each was rebuilt on the door that exists. `SessionChanged` is written by the model step on a turn's first step, comparing the rebuilt topology with a view of the record; this is UI sprint 104's `BackgroundTaskEnded` pattern. The skill request and the driver command ride the turn's own `UserMessage.slash_source`, a field that had always been `"chat"` or `"daemon"`. No new event kind was needed for two of the three. Before designing an event that must reach a session between turns, read its termination policy's resume condition.
+
+**60. Run the tests for the code you changed; run the whole suite once (2026-10-10, Architect).** The roadmap ran the full kernel suite after every card: 12:50, 8:00, 8:36, 7:40 and 17:44, then a run that hung past 24 minutes and was stopped. Each card's targeted tests had caught nearly every break within seconds. The full runs added only the committed CI records and pinned-set tests, which a targeted set that includes the record tests also catches. The Architect set the cadence: targeted tests per card, full suites at the end, and a hung run stopped rather than waited out. K269, the parallel suite, is the fix for full-suite wall time.
+
 ### 2026-10-09 — The session topology roadmap (K259–K268): a skip the run could not name, and a premise no one traced
 
 **Findings 56–58.**

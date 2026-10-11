@@ -53,7 +53,14 @@ class BundleChainTooDeepError(BundleError):
 
 
 _MAX_EXTENDS_DEPTH = 8
-_PROSE_SLOTS: tuple[str, ...] = ("methodology", "personality", "per_turn")
+_PROSE_SLOTS: tuple[str, ...] = ("methodology", "style", "per_turn")
+
+# Session vocabulary v0.4 (§ P.1): the shipped `session` bundle is now `harness`. Manifests,
+# records and callers that still name `session` load `harness`.
+LEGACY_BUNDLE_NAMES: dict[str, str] = {"session": "harness"}
+
+_SHIPPED_SESSION_BUNDLES = Path(__file__).parent / "topologies" / "session" / "bundles"
+_SHIPPED_APPLICATION_BUNDLES = Path(__file__).parent / "topologies" / "applications"
 
 
 def _default_bundles_root() -> Path:
@@ -67,19 +74,18 @@ def _bundles_root(override: Path | None) -> Path:
 
 
 def _shipped_bundle_dir(name: str) -> Path | None:
-    """Sprint 231: default bundles ship inside the installed package at
-    two locations at two locations:
-      - `topologies/session/bundle/`                     -> "session"
+    """Default bundles ship inside the installed package at two locations:
+      - `topologies/session/bundles/<name>/`             -> "harness", "standard", …
       - `topologies/applications/<app>.bundle/`          -> "<app>"
 
     `load_bundle(name)` falls back here when the user's bundles dir
     has no entry — the operator gets a working default without any
     `~/.substrate/bundles/` writes, and can shadow the shipped default
     by scaffolding a `~/.substrate/bundles/<name>/` of the same name."""
-    if name == "session":
-        candidate = Path(__file__).parent / "topologies" / "session" / "bundle"
-        return candidate if candidate.is_dir() else None
-    candidate = Path(__file__).parent / "topologies" / "applications" / f"{name}.bundle"
+    candidate = _SHIPPED_SESSION_BUNDLES / name
+    if candidate.is_dir():
+        return candidate
+    candidate = _SHIPPED_APPLICATION_BUNDLES / f"{name}.bundle"
     return candidate if candidate.is_dir() else None
 
 
@@ -88,7 +94,8 @@ class Bundle(Struct, frozen=True):
 
     - `name`, `description`, `schema_version`, `extends`: `[bundle]`
       metadata block.
-    - `methodology`, `personality`, `per_turn`: the three prose slots.
+    - `methodology`, `style`, `per_turn`: the three prose slots (`style` was
+      `personality` before session vocabulary v0.4).
       Each is the concatenated text (empty string if no slot file
       exists — the loader does not raise on missing prose; a fresh
       bundle just has empty slots).
@@ -105,7 +112,7 @@ class Bundle(Struct, frozen=True):
     schema_version: int
     extends: tuple[str, ...]
     methodology: str
-    personality: str
+    style: str
     per_turn: str
     corpus_paths: tuple[str, ...]
     retrieval_kind: str
@@ -144,22 +151,32 @@ def _read_prose_slot(bundle_dir: Path, slot_name: str) -> str:
     return ""
 
 
-def load_bundle(name: str, *, bundles_root: Path | None = None) -> Bundle:
+def load_bundle(
+    name: str, *, bundles_root: Path | None = None, shipped_fallback: bool | None = None
+) -> Bundle:
     """Load one bundle from `<bundles_root>/<name>/`. Reads
     `bundle.toml` plus the three prose slots plus the corpus/retrieval/
     tools blocks. Raises `BundleNotFoundError` if the directory is
     absent; `BundleShapeError` on a duplicate slot; propagates
     `tomllib.TOMLDecodeError` on a malformed `bundle.toml`."""
     check_path_component("bundle", name)
+    if shipped_fallback is None:
+        shipped_fallback = bundles_root is None
     root = _bundles_root(bundles_root)
+    if not (root / name).is_dir():
+        # A user bundle with the old name shadows the rename; otherwise the old name loads the
+        # renamed shipped bundle.
+        name = LEGACY_BUNDLE_NAMES.get(name, name)
     bundle_dir = root / name
     if not bundle_dir.is_dir():
         # Sprint 231: fall back to the shipped defaults inside the
         # installed package. `~/.substrate/bundles/<name>/` shadows the
         # shipped default when present; absent, the shipped version
         # loads. A caller with `bundles_root=` override skips this
-        # fallback (tests use it to isolate).
-        if bundles_root is None:
+        # fallback (tests use it to isolate) unless it asks for it;
+        # an `extends` chain always does, so a user bundle can extend a
+        # shipped one.
+        if shipped_fallback:
             shipped = _shipped_bundle_dir(name)
             if shipped is not None:
                 bundle_dir = shipped
@@ -221,7 +238,7 @@ def load_bundle(name: str, *, bundles_root: Path | None = None) -> Bundle:
         schema_version=schema_version,
         extends=extends,
         methodology=_read_prose_slot(bundle_dir, "methodology"),
-        personality=_read_prose_slot(bundle_dir, "personality"),
+        style=_read_prose_slot(bundle_dir, "style") or _read_prose_slot(bundle_dir, "personality"),
         per_turn=_read_prose_slot(bundle_dir, "per_turn"),
         corpus_paths=corpus_paths,
         retrieval_kind=retrieval_kind,
@@ -237,6 +254,8 @@ def _c3_linearise(
     diamond rule). Raises `BundleCycleError` if the chain revisits an
     ancestor, `BundleChainTooDeepError` if the chain nests past
     `_MAX_EXTENDS_DEPTH`."""
+    if name not in seen and not (bundles_root / name).is_dir():
+        name = LEGACY_BUNDLE_NAMES.get(name, name)
     if name in path:
         cycle = " -> ".join(path[path.index(name) :] + [name])
         raise BundleCycleError(f"bundle extends cycle: {cycle}")
@@ -247,7 +266,7 @@ def _c3_linearise(
         )
     bundle = seen.get(name)
     if bundle is None:
-        bundle = load_bundle(name, bundles_root=bundles_root)
+        bundle = load_bundle(name, bundles_root=bundles_root, shipped_fallback=True)
         seen[name] = bundle
     ordered: list[Bundle] = []
     for parent_name in bundle.extends:
@@ -262,8 +281,8 @@ def list_bundles(bundles_root: Path | None = None) -> list[Bundle]:
     """Enumerate every shipped and user bundle. Returns Bundles sorted by name.
 
     Sources, in name-shadowing order (later wins if a name collides):
-      1. Shipped defaults under `topologies/session/bundle/` (name "session")
-         and `topologies/applications/<app>.bundle/` (name "<app>").
+      1. Shipped defaults under `topologies/session/bundles/<name>/` and
+         `topologies/applications/<app>.bundle/` (name "<app>").
       2. User bundles under `_bundles_root(bundles_root)` — every direct
          subdirectory that contains a `bundle.toml` file is loaded via
          `load_bundle(name)`; per `load_bundle`, a user bundle of the same
@@ -283,10 +302,11 @@ def list_bundles(bundles_root: Path | None = None) -> list[Bundle]:
     # user_root so they shadow correctly). A name in both pools loads from
     # user_root and the shipped entry is skipped — user shadows shipped.
     shipped: set[str] = set()
-    session_dir = Path(__file__).parent / "topologies" / "session" / "bundle"
-    if session_dir.is_dir() and (session_dir / "bundle.toml").is_file():
-        shipped.add("session")
-    apps_dir = Path(__file__).parent / "topologies" / "applications"
+    if _SHIPPED_SESSION_BUNDLES.is_dir():
+        for child in _SHIPPED_SESSION_BUNDLES.iterdir():
+            if child.is_dir() and (child / "bundle.toml").is_file():
+                shipped.add(child.name)
+    apps_dir = _SHIPPED_APPLICATION_BUNDLES
     if apps_dir.is_dir():
         for child in apps_dir.iterdir():
             if (
@@ -334,12 +354,13 @@ def resolve_extends(name: str, *, bundles_root: Path | None = None) -> list[Bund
 # Zero call sites outside their own tests. The prompt-composition arc
 # (sprints 058-064) replaced their shape with the fragment/composer
 # Producer graph — bundle prose slots emit as PromptFragment(source=
-# bundle_methodology|bundle_personality) via `topologies/session/
+# bundle_methodology|bundle_style) via `topologies/session/
 # bundle_producer.py`. The composed seed lives on the record now, not
 # in a Python string returned from a helper function nothing called.
 
 
 __all__ = [
+    "LEGACY_BUNDLE_NAMES",
     "Bundle",
     "BundleChainTooDeepError",
     "BundleCycleError",

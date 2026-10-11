@@ -719,8 +719,8 @@ errors defaults to 'strict'.
 Enumerate every shipped and user bundle. Returns Bundles sorted by name.
 
 Sources, in name-shadowing order (later wins if a name collides):
-  1. Shipped defaults under `topologies/session/bundle/` (name "session")
-     and `topologies/applications/<app>.bundle/` (name "<app>").
+  1. Shipped defaults under `topologies/session/bundles/<name>/` and
+     `topologies/applications/<app>.bundle/` (name "<app>").
   2. User bundles under `_bundles_root(bundles_root)` — every direct
      subdirectory that contains a `bundle.toml` file is loaded via
      `load_bundle(name)`; per `load_bundle`, a user bundle of the same
@@ -735,7 +735,7 @@ Sprint 238: added as the substrate-side prerequisite for substrate-ui
 sprint 034a's `GET /api/bundles` endpoint. The daemon calls this and
 surfaces `[{name, description, slot_count}]` to the UI's bundle picker.
 
-### `load_bundle(name: 'str', *, bundles_root: 'Path | None' = None) -> 'Bundle'`
+### `load_bundle(name: 'str', *, bundles_root: 'Path | None' = None, shipped_fallback: 'bool | None' = None) -> 'Bundle'`
 
 Load one bundle from `<bundles_root>/<name>/`. Reads
 `bundle.toml` plus the three prose slots plus the corpus/retrieval/

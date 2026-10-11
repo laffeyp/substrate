@@ -546,6 +546,8 @@ class SessionRegistry:
           - "timeout"    (float > 0.0)      — request timeout, seconds
           - "num_ctx"    (int ≥ 1)          — Ollama context window override
           - "driver_version" (str)          — CLI model chosen in the version picker
+          - "cache_layout" (bool)           — session-stable texts on the system channel
+                                               (UI sprint 121; the daemon checks the driver)
 
         None clears every override — the resolver builds Responders with
         pure defaults again. An unknown key or wrong type raises
@@ -577,6 +579,7 @@ class SessionRegistry:
                 DriverParamKey.TIMEOUT: (int, float),
                 DriverParamKey.NUM_CTX: int,
                 DriverParamKey.DRIVER_VERSION: str,
+                DriverParamKey.CACHE_LAYOUT: bool,
             }
             allowed_names = {k.value for k in allowed}
             unknown = set(params.keys()) - allowed_names
@@ -591,13 +594,17 @@ class SessionRegistry:
                     continue
                 value = params[key]
                 # bool is a subclass of int; guard bool-vs-int mixups first.
+                if key_enum is DriverParamKey.CACHE_LAYOUT and not isinstance(value, bool):
+                    raise ValueError(
+                        f"driver_params.cache_layout must be a bool; got {type(value).__name__}"
+                    )
                 if key_enum is DriverParamKey.THINK and not isinstance(value, bool):
                     raise ValueError(
                         f"driver_params.think must be a bool; got {type(value).__name__}"
                     )
                 if (
                     expected is not str
-                    and key_enum is not DriverParamKey.THINK
+                    and key_enum not in (DriverParamKey.THINK, DriverParamKey.CACHE_LAYOUT)
                     and isinstance(value, bool)
                 ):
                     raise ValueError(f"driver_params.{key} must be numeric, not bool")

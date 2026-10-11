@@ -87,12 +87,12 @@ def test_wizard_writes_valid_bundle_that_loads_back(wizard_env: Path) -> None:
 
     runner = CliRunner()
     # Feed answers per default.tmpl.md's slot list, in declared order:
-    # role, methodology, personality, per_turn_prefix, security_flag.
+    # role, methodology, style, per_turn_prefix, security_flag.
     piped = "\n".join(
         [
             "reviewer",  # role
             "review the diff carefully",  # methodology
-            "blunt",  # personality
+            "blunt",  # style
             "",  # per_turn_prefix (empty)
             "y",  # security_flag
         ]
@@ -102,7 +102,7 @@ def test_wizard_writes_valid_bundle_that_loads_back(wizard_env: Path) -> None:
     bundle = load_bundle("wizard-test", bundles_root=wizard_env)
     assert bundle.name == "wizard-test"
     assert bundle.methodology == "review the diff carefully"
-    assert bundle.personality == "blunt"
+    assert bundle.style == "blunt"
     assert "unsafe pattern" in bundle.per_turn.lower()
 
 
@@ -116,7 +116,7 @@ def test_wizard_bare_no_flag_still_scaffolds_empty(wizard_env: Path) -> None:
     assert result.exit_code == 0, result.output
     bundle = load_bundle("empty-bundle", bundles_root=wizard_env)
     assert bundle.methodology == ""
-    assert bundle.personality == ""
+    assert bundle.style == ""
     assert bundle.per_turn == ""
 
 

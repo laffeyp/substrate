@@ -31,6 +31,8 @@ from ...adapters import (
 from ..tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 from .vocabulary import (
     BACKGROUND_TASK_ENDED,
+    DRIVER_SLASH_SOURCE,
+    SESSION_CHANGED,
     StopReason,
 )
 from .vocabulary import (
@@ -60,7 +62,6 @@ _DETERMINISTIC_CONTEXT_TOKENS = 4096
 _context_cache: dict[tuple[str, str], tuple[float, int]] = {}
 
 _CHARS_PER_TOKEN = 4  # coarse conservative estimator; see module docstring
-_PER_TURN_PRECEDENCE = 10  # the per_turn band of session-vocabulary.md § I
 
 # _KIND_USER_MESSAGE, _KIND_MODEL_REPLY, _KIND_PARK, _KIND_TRANSCRIPT_COMPACTED
 # imported above from `.vocabulary` (single source of truth per REVIEW F5).
@@ -73,6 +74,7 @@ _KIND_FINAL_ANSWER = FINAL_ANSWER
 TURN_EVENT_KINDS = frozenset(
     {
         BACKGROUND_TASK_ENDED,
+        SESSION_CHANGED,
         _KIND_USER_MESSAGE,
         _KIND_MODEL_REPLY,
         _KIND_TOOL_CALL,
@@ -198,8 +200,21 @@ def _group_by_turn(events: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return turns
 
 
-def _render_turns(kept_turns: list[list[dict[str, Any]]]) -> list[str]:
-    """The history lines for `kept_turns`: a range header, then each turn's events."""
+def session_changed_line(field: str, old: str, new: str) -> str:
+    """The line a SessionChanged puts beside the message (§ P.4). The reminder line's own text
+    is not repeated: the new one sits beside the message from the next step, and the record keeps
+    both."""
+    if field == "per_turn":
+        return "Environment update: the reminder line beside each message changed."
+    return f"Environment update: {field} changed from {old or '(none)'} to {new or '(none)'}."
+
+
+def _render_turns(
+    kept_turns: list[list[dict[str, Any]]], after_current_user: list[str] | None = None
+) -> list[str]:
+    """The history lines for `kept_turns`: a range header, then each turn's events.
+    `after_current_user` goes on the lines right after the last turn's `USER:` line: the
+    session's reminder line and this step's environment updates (§ P.2, § P.4)."""
     lines: list[str] = []
     if kept_turns:
         first = kept_turns[0][0].get("payload") or {}
@@ -217,6 +232,16 @@ def _render_turns(kept_turns: list[list[dict[str, Any]]]) -> list[str]:
             if kind == _KIND_USER_MESSAGE:
                 text = str(payload.get("assembled_prompt") or payload.get("text", ""))
                 lines.append(f"USER: {text}")
+                if turn_idx == len(kept_turns) - 1 and after_current_user:
+                    lines.extend(after_current_user)
+            elif kind == SESSION_CHANGED:
+                lines.append(
+                    session_changed_line(
+                        str(payload.get("field", "")),
+                        str(payload.get("old", "")),
+                        str(payload.get("new", "")),
+                    )
+                )
             elif kind == _KIND_MODEL_REPLY:
                 # v0.3 writes a ModelReply for every call. One that requests a tool is rendered by
                 # its ToolCall line; any prose the model wrote beside the call stays on the record
@@ -251,8 +276,16 @@ def _render_turns(kept_turns: list[list[dict[str, Any]]]) -> list[str]:
     return lines
 
 
+def is_driver_turn(turn: list[dict[str, Any]]) -> bool:
+    """Whether a turn is a driver pass-through (`//`, § P.11): the model never sees it."""
+    payload = (turn[0].get("payload") or {}) if turn else {}
+    return isinstance(payload, Mapping) and payload.get("slash_source") == DRIVER_SLASH_SOURCE
+
+
 def turn_cost(turn: list[dict[str, Any]]) -> int:
     """One turn's estimated rendered size in tokens, as the history window prices it."""
+    if is_driver_turn(turn):
+        return 0
     return _est_tokens("\n".join(_render_turns([turn])))
 
 
@@ -275,52 +308,78 @@ def plan_window(
 
 
 def head_block(
-    seed: str, per_turn: str, fragments: list[tuple[int, dict[str, Any]]]
-) -> tuple[str, tuple[int, ...]]:
-    """The prompt's head and the seqs of the fragments in it: the seed, then the session's prompt
-    fragments and `per_turn` by precedence (the interrupt fragment among them, at 95)."""
-    from .vocabulary import PromptSource
+    seed: str,
+    fragments: list[tuple[int, dict[str, Any]]],
+    system_sources: frozenset[str] | None = None,
+) -> tuple[str, str, str, tuple[int, ...]]:
+    """The prompt's system part, its head, the reminder line, and the seqs of the fragments used.
 
-    parts: list[tuple[int, int, str]] = []  # (precedence, seq, text)
+    Fragments whose source is in `SYSTEM_SOURCES` (session vocabulary § P.2) form the system
+    part, by precedence. The head is the seed, then the other fragments by precedence (the
+    interrupt fragment among them, at 95). The reminder line is the newest `per_turn`
+    fragment's text; the composer places it after the current message. `system_sources`
+    replaces `SYSTEM_SOURCES` for a session that opted into `cache_layout` (§ P.3)."""
+    from .vocabulary import SYSTEM_SOURCES, PromptSource, parse_prompt_source
+
+    system_parts: list[tuple[int, int, str]] = []  # (precedence, seq, text)
+    parts: list[tuple[int, int, str]] = []
     used: list[int] = []
+    per_turn: tuple[int, str] | None = None  # (seq, text) of the newest
     for seq, frag in fragments:
         text = str(frag.get("text", ""))
         if not text:
             continue
-        if frag.get("source") in (PromptSource.PER_TURN, PromptSource.USER_MESSAGE):
-            continue  # records before K261; per_turn and the message come from their own fields
-        parts.append((int(frag.get("precedence", 0)), seq, text))
+        source = parse_prompt_source(str(frag.get("source", "")))
+        if source == PromptSource.USER_MESSAGE:
+            continue  # records before K261; the message comes from the history
+        if source == PromptSource.PER_TURN:
+            # Records before K261 wrote one per turn; v0.4 writes one per session or change.
+            if per_turn is None or seq > per_turn[0]:
+                per_turn = (seq, text)
+            continue
+        on_system = system_sources if system_sources is not None else SYSTEM_SOURCES
+        target = system_parts if source in on_system else parts
+        target.append((int(frag.get("precedence", 0)), seq, text))
         used.append(seq)
-    if per_turn:
-        parts.append((_PER_TURN_PRECEDENCE, -1, per_turn))
+    if per_turn is not None:
+        used.append(per_turn[0])
+    system_parts.sort(key=lambda p: (p[0], p[1]))
     parts.sort(key=lambda p: (p[0], p[1]))
     head = [seed.rstrip()] if seed else []
     head += [text for _p, _s, text in parts]
-    return "\n\n".join(head), tuple(sorted(used))
+    system = "\n\n".join(text for _p, _s, text in system_parts)
+    reminder = per_turn[1] if per_turn is not None else ""
+    return system, "\n\n".join(head), reminder, tuple(sorted(used))
 
 
 def compose_model_prompt(
     *,
     history: list[dict[str, Any]],
     seed: str,
-    per_turn: str,
     fragments: list[tuple[int, dict[str, Any]]],
     notices: list[str] | None = None,
-) -> tuple[str, tuple[int, ...]]:
-    """The base prompt for one model call and the seqs of the fragments it used.
+    after_message: list[str] | None = None,
+    system_sources: frozenset[str] | None = None,
+) -> tuple[str, str, tuple[int, ...]]:
+    """The system part and base prompt for one model call, and the seqs of the fragments used.
 
     `history` is the kept window's events (the trigger chose it with `plan_window`). Order: the
-    head (`head_block`); the kept turns, the current one last; background-task notices. The model
+    head (`head_block`); the kept turns, the current one last, with the reminder line and
+    `after_message` (this step's environment updates) right after its `USER:` line;
+    background-task notices. The model
     step appends its pre-K261 endings (tool results, the tool list, the directives) and records the
     final text as `PromptComposed`.
     """
-    head_text, used_seqs = head_block(seed, per_turn, fragments)
-    turns = _group_by_turn(history)
+    system, head_text, reminder, used_seqs = head_block(seed, fragments, system_sources)
+    beside = ([reminder] if reminder else []) + list(after_message or [])
+    turns = [t for t in _group_by_turn(history) if not is_driver_turn(t)]
     blocks = [head_text] if head_text else []
     if turns:
-        blocks.append("\n".join(_render_turns(turns)))
+        blocks.append("\n".join(_render_turns(turns, beside)))
+    else:
+        blocks += beside
     blocks += notices or []
-    return "\n\n".join(blocks), used_seqs
+    return system, "\n\n".join(blocks), used_seqs
 
 
 # spec-audit: 2026-09-01

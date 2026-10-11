@@ -6,9 +6,9 @@ slots:
   - name: methodology
     kind: text_paragraph
     prompt: "Multi-line: the working methodology (how to approach the task)"
-  - name: personality
+  - name: style
     kind: text_paragraph
-    prompt: "Multi-line: personality (blunt? gentle? terse?)"
+    prompt: "Multi-line: how should the model write? (blunt? gentle? terse?)"
   - name: per_turn_prefix
     kind: text_paragraph
     prompt: "Prefixed to every UserMessage; empty for none"
@@ -26,8 +26,8 @@ extends = []
 == methodology.md ==
 {{methodology}}
 
-== personality.md ==
-{{personality}}
+== style.md ==
+{{style}}
 
 == per-turn.md ==
 {{per_turn_prefix}}{% if security_flag %}

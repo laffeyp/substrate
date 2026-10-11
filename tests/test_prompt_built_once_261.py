@@ -73,7 +73,8 @@ def test_one_prompt_per_call_seed_first_message_once_and_on_the_record(tmp_path:
     assert len(driver.prompts) == 2
     first, second = driver.prompts
     assert first.count("HELLO-ONE") == 1, first
-    assert first.index(SEED) < first.index(PER_TURN) < first.index("HELLO-ONE"), first
+    # K274 (§ P.2): the reminder line sits right after the current message.
+    assert first.index(SEED) < first.index("HELLO-ONE") < first.index(PER_TURN), first
     assert second.count("HELLO-ONE") == 1 and second.count("HELLO-TWO") == 1, second
     assert second.count("first answer") == 1, second
     assert second.index("HELLO-ONE") < second.index("first answer") < second.index("HELLO-TWO")

@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Peter Laffey
 """bundle prose-slot fragment sources — sprint 062 tests.
 
-Verifies both bundle Producers (methodology + personality):
+Verifies both bundle sources (methodology + style):
  - Session with a shipped bundle emits fragments matching the bundle's
    slot contents.
  - Session without bundle emits zero bundle fragments.
@@ -52,16 +52,16 @@ def test_bundle_methodology_fragment_lands_for_shipped_session_bundle(tmp_path: 
     for env in frags:
         payload = env["payload"]
         assert payload["text"], "bundle methodology text should be non-empty"
-        assert 50 <= payload["precedence"] <= 59, (
-            f"methodology precedence should be in the 50-59 band, got {payload['precedence']}"
+        assert payload["precedence"] == 5, (
+            f"every methodology link takes precedence 5 (§ P.2), got {payload['precedence']}"
         )
         assert payload["provenance"]["bundle_name"], "provenance names the bundle"
 
 
-def test_bundle_personality_empty_for_shipped_session_bundle(tmp_path: Path) -> None:
-    """The shipped `session` bundle ships an empty personality.md.
-    Consequence: the personality producer yields zero fragments. Locks
-    the empty-shipped-personality behavior; changing personality.md
+def test_bundle_style_empty_for_shipped_harness_bundle(tmp_path: Path) -> None:
+    """The shipped `harness` bundle ships an empty style.md.
+    Consequence: the style source yields zero fragments. Locks
+    the empty-shipped-style behavior; changing style.md
     from empty to non-empty is a substantive edit that would flip this
     test — which is the point of the pin."""
 
@@ -78,42 +78,40 @@ def test_bundle_personality_empty_for_shipped_session_bundle(tmp_path: Path) -> 
     frags = [
         e
         for e in envs
-        if e.get("kind") == "PromptFragment" and e["payload"].get("source") == "bundle_personality"
+        if e.get("kind") == "PromptFragment" and e["payload"].get("source") == "bundle_style"
     ]
     assert len(frags) == 0
 
 
-def test_personality_source_takes_the_callers_voice(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The personality source on a two-bundle synthetic chain: the caller wins over its
-    ancestor. The chain lookup is replaced, so no ~/.substrate/bundles/ directory is read."""
-    ancestor = Bundle(
-        name="anc",
-        description="",
-        schema_version=1,
-        extends=(),
-        methodology="",
-        personality="ANCESTOR_VOICE",
-        per_turn="",
-        corpus_paths=(),
-        retrieval_kind="none",
-        tools_enabled=(),
-    )
-    caller = Bundle(
-        name="caller",
-        description="",
-        schema_version=1,
-        extends=("anc",),
-        methodology="",
-        personality="CALLER_VOICE",
-        per_turn="",
-        corpus_paths=(),
-        retrieval_kind="none",
-        tools_enabled=(),
-    )
-    monkeypatch.setattr(sp, "resolve_chain", lambda _name: [ancestor, caller])
-    frags = sp.bundle_personality_fragments("caller")
+def test_style_stacks_ancestor_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session vocabulary v0.4 (§ P.2): every non-empty style in the chain is a fragment,
+    ancestor first, all at precedence 3. Before v0.4 the caller's style replaced its ancestor's.
+    The chain lookup is replaced, so no ~/.substrate/bundles/ directory is read."""
+
+    def _bundle(name: str, style: str, extends: tuple[str, ...] = ()) -> Bundle:
+        return Bundle(
+            name=name,
+            description="",
+            schema_version=1,
+            extends=extends,
+            methodology="",
+            style=style,
+            per_turn="",
+            corpus_paths=(),
+            retrieval_kind="none",
+            tools_enabled=(),
+        )
+
+    chain = [
+        _bundle("anc", "ANCESTOR_VOICE"),
+        _bundle("mid", ""),
+        _bundle("caller", "CALLER_VOICE"),
+    ]
+    monkeypatch.setattr(sp, "resolve_chain", lambda _name: chain)
+    frags = sp.bundle_style_fragments("caller")
     assert [(f.text, f.precedence, f.provenance) for f in frags] == [
-        ("CALLER_VOICE", 3, {"bundle_name": "caller", "chain_position": 1})
+        ("ANCESTOR_VOICE", 3, {"bundle_name": "anc", "chain_position": 0}),
+        ("CALLER_VOICE", 3, {"bundle_name": "caller", "chain_position": 2}),
     ]
 
 
@@ -130,7 +128,7 @@ def test_no_bundle_kwarg_yields_zero_bundle_fragments(tmp_path: Path) -> None:
 
     asyncio.run(_run())
     envs = list(api.read_record(tmp_path / "ci"))
-    for source in ("bundle_methodology", "bundle_personality"):
+    for source in ("bundle_methodology", "bundle_style"):
         matching = [
             e
             for e in envs
@@ -140,15 +138,15 @@ def test_no_bundle_kwarg_yields_zero_bundle_fragments(tmp_path: Path) -> None:
 
 
 def test_resolve_chain_falls_back_to_shipped_for_top_level_bundle() -> None:
-    """`resolve_chain("session")` returns [Bundle(name='session')] even
+    """`resolve_chain("session")` returns [Bundle(name='harness')] even
     though the user has no ~/.substrate/bundles/session/ directory. The
     fallback uses `load_bundle`'s shipped-default lookup. Without this,
     the bundle sources trip BundleNotFoundError for every session
     that names a shipped bundle."""
     chain = sp.resolve_chain("session")
     assert len(chain) >= 1
-    assert chain[-1].name == "session"
-    # Shipped session bundle has methodology.md; personality.md ships empty.
+    assert chain[-1].name == "harness"
+    # The shipped harness bundle has methodology.md; style.md ships empty.
     assert chain[-1].methodology
 
 
@@ -169,11 +167,11 @@ def test_bundle_types_import_cleanly() -> None:
         schema_version=1,
         extends=(),
         methodology="M",
-        personality="P",
+        style="P",
         per_turn="",
         corpus_paths=(),
         retrieval_kind="none",
         tools_enabled=(),
     )
     assert b.methodology == "M"
-    assert b.personality == "P"
+    assert b.style == "P"

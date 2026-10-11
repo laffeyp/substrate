@@ -16,7 +16,7 @@ role = "default"
 
 # Bundle identifier — empty means no bundle (§9 piece H). Set to a bundle
 # name under ~/.substrate/bundles/ to seed the session's methodology +
-# personality + per-turn text.
+# style + per-turn text.
 bundle = ""
 
 # Workspace path — the directory tools operate in for this session. Relative

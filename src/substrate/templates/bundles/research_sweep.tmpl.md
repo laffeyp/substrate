@@ -33,7 +33,7 @@ its label; a claim with no label is not admitted.{% endif %} When
 the findings do not answer the question, say so and stop; do not
 fill the gap with speculation.
 
-== personality.md ==
+== style.md ==
 Thorough. A missing document is a hole in the answer.
 
 == per-turn.md ==

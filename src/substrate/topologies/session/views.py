@@ -18,9 +18,11 @@ from ...types import Event, Subscription
 from .vocabulary import (
     PROMPT_COMPOSED,
     PROMPT_FRAGMENT,
+    SESSION_CHANGED,
+    SESSION_STARTED,
     SESSION_OPEN_SOURCES,
     TURN_SCOPED_SOURCES,
-    PromptSource,
+    parse_prompt_source,
 )
 
 
@@ -104,9 +106,8 @@ class FragmentCohort:
         raw_source = payload.get("source")
         if not isinstance(raw_source, str):
             return
-        try:
-            source = PromptSource(raw_source)
-        except ValueError:
+        source = parse_prompt_source(raw_source)
+        if source is None:
             return
         entry = (event.seq, dict(payload))
         if source in SESSION_OPEN_SOURCES:
@@ -115,6 +116,64 @@ class FragmentCohort:
             self._turn.append(entry)
 
     def value(self) -> list[tuple[int, dict[str, Any]]]:
-        merged = self._session_open + self._turn
+        merged = _newest_generation(self._session_open) + self._turn
         merged.sort(key=lambda item: item[0])
         return merged
+
+
+def _generation(payload: dict[str, Any]) -> int:
+    provenance = payload.get("provenance")
+    raw = provenance.get("generation") if isinstance(provenance, dict) else None
+    return int(raw) if isinstance(raw, int) else -1
+
+
+def _newest_generation(
+    entries: list[tuple[int, dict[str, Any]]],
+) -> list[tuple[int, dict[str, Any]]]:
+    """K274: a SessionChanged of the bundle or per_turn writes those sources again, each fragment
+    carrying the change's seq as `generation`. For each source keep only its newest generation;
+    fragments written at session open are generation -1."""
+    newest: dict[str, int] = {}
+    for _seq, payload in entries:
+        source = str(payload.get("source", ""))
+        newest[source] = max(newest.get(source, -1), _generation(payload))
+    return [
+        (seq, payload)
+        for seq, payload in entries
+        if _generation(payload) == newest[str(payload.get("source", ""))]
+    ]
+
+
+class SessionSettings:
+    """The last recorded driver, bundle, reminder line and date (K274). The model step compares
+    them with the session's current settings and writes a SessionChanged for each that differs.
+
+    Folds `SessionStarted` (driver, bundle, the baseline's date), the newest `per_turn` fragment,
+    and `SessionChanged` (the new value). A field never recorded is absent, and absent fields
+    are not compared."""
+
+    deterministic = True
+
+    def __init__(self) -> None:
+        self.subscription = Subscription(
+            kinds=frozenset({SESSION_STARTED, PROMPT_FRAGMENT, SESSION_CHANGED})
+        )
+        self._settings: dict[str, str] = {}
+
+    def update(self, event: Event) -> None:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if event.kind == SESSION_STARTED:
+            self._settings["driver"] = str(payload.get("driver_model") or "")
+            self._settings["bundle"] = str(payload.get("bundle") or "")
+            self._settings.setdefault("per_turn", "")
+            baseline = payload.get("baseline")
+            if isinstance(baseline, dict) and baseline.get("date"):
+                self._settings["date"] = str(baseline["date"])
+        elif event.kind == PROMPT_FRAGMENT:
+            if parse_prompt_source(str(payload.get("source", ""))) == "per_turn":
+                self._settings["per_turn"] = str(payload.get("text", ""))
+        elif event.kind == SESSION_CHANGED:
+            self._settings[str(payload.get("field", ""))] = str(payload.get("new", ""))
+
+    def value(self) -> dict[str, str]:
+        return dict(self._settings)

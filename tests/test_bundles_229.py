@@ -27,7 +27,7 @@ def _write_bundle(
     name: str,
     *,
     methodology: str = "",
-    personality: str = "",
+    style: str = "",
     per_turn: str = "",
     extends: list[str] | None = None,
     description: str = "",
@@ -45,8 +45,8 @@ def _write_bundle(
     (bundle_dir / "bundle.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
     if methodology:
         (bundle_dir / "methodology.md").write_text(methodology, encoding="utf-8")
-    if personality:
-        (bundle_dir / "personality.md").write_text(personality, encoding="utf-8")
+    if style:
+        (bundle_dir / "style.md").write_text(style, encoding="utf-8")
     if per_turn:
         (bundle_dir / "per-turn.md").write_text(per_turn, encoding="utf-8")
     return bundle_dir
@@ -57,7 +57,7 @@ def test_load_bundle_reads_file_slots(tmp_path: Path) -> None:
         tmp_path,
         "solo",
         methodology="the-methodology",
-        personality="the-personality",
+        style="the-style",
         per_turn="the-per-turn",
         tools=["read_file", "grep"],
     )
@@ -65,7 +65,7 @@ def test_load_bundle_reads_file_slots(tmp_path: Path) -> None:
     assert isinstance(bundle, Bundle)
     assert bundle.name == "solo"
     assert bundle.methodology == "the-methodology"
-    assert bundle.personality == "the-personality"
+    assert bundle.style == "the-style"
     assert bundle.per_turn == "the-per-turn"
     assert bundle.tools_enabled == ("read_file", "grep")
 
@@ -133,8 +133,33 @@ def test_resolve_extends_depth_cap_raises(tmp_path: Path) -> None:
 # tests removed with them. The seed-composition responsibility moved
 # to the fragment/composer Producer graph (sprints 060-064) —
 # bundle prose slots emit as PromptFragment(source=bundle_methodology|
-# bundle_personality) via `topologies/session/bundle_producer.py`, and
+# bundle_style) via `topologies/session/bundle_producer.py`, and
 # `topologies/session/composer.py` yields PromptComposed with the same
 # precedence-ordered join the deleted assemble_seed_from_chain
 # implemented. The behavior lives on the record, tested by
 # tests/test_prompt_fragment_bundle.py and tests/test_prompt_composer.py.
+
+
+def test_a_bundle_with_only_personality_md_loads_it_as_style(tmp_path: Path) -> None:
+    """Session vocabulary v0.4 (§ P.1): the slot is `style`; a bundle written before the rename,
+    with `personality.md` and no `style.md`, still loads its text as the style."""
+    bundle_dir = tmp_path / "old"
+    bundle_dir.mkdir()
+    (bundle_dir / "bundle.toml").write_text('[bundle]\nname = "old"\n', encoding="utf-8")
+    (bundle_dir / "personality.md").write_text("Terse.", encoding="utf-8")
+    assert load_bundle("old", bundles_root=tmp_path).style == "Terse."
+
+
+def test_the_old_shipped_name_loads_harness() -> None:
+    """§ P.1: `session` was the shipped bundle's name; it loads `harness`."""
+    assert load_bundle("session").name == "harness"
+
+
+def test_a_user_bundle_can_extend_a_shipped_bundle(tmp_path: Path) -> None:
+    """An `extends` chain reaches shipped ancestors (K271)."""
+    child = tmp_path / "child"
+    child.mkdir()
+    (child / "bundle.toml").write_text(
+        '[bundle]\nname = "child"\nextends = ["harness"]\n', encoding="utf-8"
+    )
+    assert [b.name for b in resolve_extends("child", bundles_root=tmp_path)] == ["harness", "child"]

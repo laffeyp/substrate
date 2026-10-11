@@ -18,14 +18,14 @@ def test_list_bundles_enumerates_shipped_defaults(tmp_path: Path) -> None:
     """
     result = list_bundles(bundles_root=tmp_path)
     names = [b.name for b in result]
-    assert "session" in names, f"shipped session default missing; got {names}"
+    assert "harness" in names, f"shipped harness bundle missing; got {names}"
     # The five sprint-231 application bundles ship as *.bundle directories.
     # Enumeration must yield at least the session default; the exact application
     # names are pinned by piece H's ship list (see substrate/process/sprints/
     # sprint-231-default-bundles-shipped.md). We assert at least one non-session
     # shipped bundle so a regression that hides the application-bundle branch
     # fails the test.
-    non_session = [n for n in names if n != "session"]
+    non_session = [n for n in names if n != "harness"]
     assert non_session, f"no shipped application bundles enumerated; got {names}"
 
 

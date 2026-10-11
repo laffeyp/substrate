@@ -131,7 +131,10 @@ def test_prompt_source_enum_has_all_v02_plus_interrupt_values() -> None:
         PromptSource.PER_TURN,
         PromptSource.ROLE,
         PromptSource.BUNDLE_METHODOLOGY,
-        PromptSource.BUNDLE_PERSONALITY,
+        PromptSource.BUNDLE_STYLE,
+        PromptSource.BASELINE,
+        PromptSource.MEMORY,
+        PromptSource.SKILL,
         PromptSource.PARENT_CONTEXT,
         PromptSource.TOOLS_SUITE,
         PromptSource.USER_MESSAGE,
@@ -152,7 +155,9 @@ def test_prompt_source_string_values_are_the_documented_values() -> None:
     assert PromptSource.PER_TURN == "per_turn"
     assert PromptSource.ROLE == "role"
     assert PromptSource.BUNDLE_METHODOLOGY == "bundle_methodology"
-    assert PromptSource.BUNDLE_PERSONALITY == "bundle_personality"
+    assert PromptSource.BUNDLE_STYLE == "bundle_style"
+    # § P.1: records before v0.4 name the style source `bundle_personality`.
+    assert is_prompt_source("bundle_personality")
     assert PromptSource.PARENT_CONTEXT == "parent_context"
     assert PromptSource.TOOLS_SUITE == "tools_suite"
     assert PromptSource.USER_MESSAGE == "user_message"
@@ -161,19 +166,23 @@ def test_prompt_source_string_values_are_the_documented_values() -> None:
 def test_session_open_and_turn_scoped_partition_prompt_sources() -> None:
     """SESSION_OPEN_SOURCES and TURN_SCOPED_SOURCES together cover every
     PromptSource member exactly once — the split FragmentCohort enforces.
-    role, bundle_methodology, bundle_personality, tools_suite,
+    role, bundle_methodology, bundle_style, tools_suite,
     parent_context fire once at RunStarted and appear in every turn's
-    PromptComposed. per_turn and user_message fire per turn and appear
-    only in that turn's PromptComposed."""
+    PromptComposed. Since v0.4 (§ P.2) per_turn is session-open too: written
+    once, placed after every message. user_message (records before K261) and
+    interrupt reach one prompt only."""
     assert SESSION_OPEN_SOURCES == {
+        PromptSource.PER_TURN,
         PromptSource.ROLE,
         PromptSource.BUNDLE_METHODOLOGY,
-        PromptSource.BUNDLE_PERSONALITY,
+        PromptSource.BUNDLE_STYLE,
+        PromptSource.BASELINE,
+        PromptSource.MEMORY,
+        PromptSource.SKILL,
         PromptSource.TOOLS_SUITE,
         PromptSource.PARENT_CONTEXT,
     }
     assert TURN_SCOPED_SOURCES == {
-        PromptSource.PER_TURN,
         PromptSource.USER_MESSAGE,
         PromptSource.INTERRUPT,
     }

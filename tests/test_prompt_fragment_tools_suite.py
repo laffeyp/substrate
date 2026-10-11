@@ -47,8 +47,8 @@ def test_tools_suite_fragment_lands_at_session_open(tmp_path: Path) -> None:
 
 
 def test_prompt_orders_per_turn_tools_then_message(tmp_path: Path) -> None:
-    """K261: the model's recorded prompt on turn 1 holds per_turn (precedence 10), the tool list
-    (20) and the user's message, in that order, each once."""
+    """K261, K274: the model's recorded prompt on turn 1 holds the tool list (20), then the user's
+    message, then the reminder line (`per_turn`, placed after the message since v0.4), each once."""
 
     async def _run() -> None:
         topology = ci_session_topology(
@@ -69,5 +69,5 @@ def test_prompt_orders_per_turn_tools_then_message(tmp_path: Path) -> None:
         text.find("compose-me"),
     )
     assert -1 not in (per_turn_pos, tools_pos, user_pos), text
-    assert per_turn_pos < tools_pos < user_pos, text
+    assert tools_pos < user_pos < per_turn_pos, text
     assert text.count("PT-LINE") == 1 and text.count("compose-me") == 1, text

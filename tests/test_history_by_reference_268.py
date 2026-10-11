@@ -73,7 +73,7 @@ def test_the_recorded_input_is_a_small_ticket_and_the_prompt_matches_the_record(
             for e in envs
             if ticket["from_seq"] <= e["seq"] <= ticket["to_seq"] and e["kind"] in TURN_EVENT_KINDS
         ]
-        expected, _ = compose_model_prompt(history=kept, seed="SEED", per_turn="", fragments=[])
+        _system, expected, _ = compose_model_prompt(history=kept, seed="SEED", fragments=[])
         assert prompt == expected
 
     compactions = [e for e in envs if e["kind"] == "TranscriptCompacted"]

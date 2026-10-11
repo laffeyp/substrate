@@ -82,6 +82,9 @@ SESSION_WARNING = "SessionWarning"
 BACKGROUND_TASK_ENDED = "BackgroundTaskEnded"  # UI sprint 104
 # Written by the daemon on a soft interrupt (Phase 8 item 6).
 INTERRUPT_REQUESTED = "InterruptRequested"
+# Written by the model step when the session's driver, bundle, per_turn or date differs from the
+# last recorded value (session vocabulary § P.4, K274).
+SESSION_CHANGED = "SessionChanged"
 
 # v0.2 additions (session-vocabulary.md § I, sprint 058, 2026-09-01).
 PROMPT_FRAGMENT = "PromptFragment"
@@ -155,6 +158,7 @@ SESSION_KINDS: frozenset[str] = frozenset(
         PROMPT_COMPOSED,
         BACKGROUND_TASK_ENDED,
         INTERRUPT_REQUESTED,
+        SESSION_CHANGED,
     }
 )
 
@@ -176,7 +180,10 @@ class PromptSource(StrEnum):
     PER_TURN = "per_turn"
     ROLE = "role"
     BUNDLE_METHODOLOGY = "bundle_methodology"
-    BUNDLE_PERSONALITY = "bundle_personality"
+    BUNDLE_STYLE = "bundle_style"  # `bundle_personality` before v0.4 (§ P.1)
+    BASELINE = "baseline"  # the environment, computed at session open (§ P.2, K273)
+    MEMORY = "memory"  # a memory index, operator or repo (§ P.2, K276)
+    SKILL = "skill"  # a skill's body, loaded on request and kept for the session (§ P.2, K277)
     PARENT_CONTEXT = "parent_context"
     TOOLS_SUITE = "tools_suite"
     USER_MESSAGE = "user_message"
@@ -187,13 +194,17 @@ class PromptSource(StrEnum):
     INTERRUPT = "interrupt"
 
 
-# Session-open sources: fire once at RunStarted, appear in every turn's
-# PromptComposed. FragmentCohort keeps one slot per source (latest wins).
+# Session-open sources: written once by `session_prompt`, used in every prompt. `per_turn` moved
+# here from the turn-scoped set in v0.4 (§ P.2): written once, placed after every message.
 SESSION_OPEN_SOURCES: Final[frozenset[PromptSource]] = frozenset(
     {
+        PromptSource.PER_TURN,
         PromptSource.ROLE,
         PromptSource.BUNDLE_METHODOLOGY,
-        PromptSource.BUNDLE_PERSONALITY,
+        PromptSource.BUNDLE_STYLE,
+        PromptSource.BASELINE,
+        PromptSource.MEMORY,
+        PromptSource.SKILL,
         PromptSource.TOOLS_SUITE,
         PromptSource.PARENT_CONTEXT,
     }
@@ -204,7 +215,6 @@ SESSION_OPEN_SOURCES: Final[frozenset[PromptSource]] = frozenset(
 # on older records.
 TURN_SCOPED_SOURCES: Final[frozenset[PromptSource]] = frozenset(
     {
-        PromptSource.PER_TURN,
         PromptSource.USER_MESSAGE,
         PromptSource.INTERRUPT,
     }
@@ -212,6 +222,42 @@ TURN_SCOPED_SOURCES: Final[frozenset[PromptSource]] = frozenset(
 
 
 PROMPT_SOURCES: Final[frozenset[PromptSource]] = frozenset(PromptSource)
+
+# Session vocabulary v0.4 (§ P.2): the sources whose fragments compose into
+# `PromptComposed.system`, the text sent on the driver's system channel. Claude Code sends the
+# same two in its system prompt: the output style and the environment.
+SYSTEM_SOURCES: Final[frozenset[PromptSource]] = frozenset(
+    {PromptSource.BUNDLE_STYLE, PromptSource.BASELINE}
+)
+
+# Session vocabulary § P.3 (UI sprint 121): with `driver_params.cache_layout`, these session-stable
+# sources also go on the system channel. Off by default; never part of the default layout.
+CACHE_LAYOUT_SOURCES: Final[frozenset[PromptSource]] = frozenset(
+    {
+        PromptSource.ROLE,
+        PromptSource.BUNDLE_METHODOLOGY,
+        PromptSource.MEMORY,
+        PromptSource.TOOLS_SUITE,
+    }
+)
+
+# Session vocabulary v0.4 (§ P.1): source values renamed since a record was written. A reader
+# maps an old value through this table before parsing it.
+LEGACY_PROMPT_SOURCES: Final[dict[str, PromptSource]] = {
+    "bundle_personality": PromptSource.BUNDLE_STYLE,
+}
+
+
+def parse_prompt_source(raw: str) -> PromptSource | None:
+    """The PromptSource a recorded `source` value names, legacy names included; None for any
+    other string."""
+    legacy = LEGACY_PROMPT_SOURCES.get(raw)
+    if legacy is not None:
+        return legacy
+    try:
+        return PromptSource(raw)
+    except ValueError:
+        return None
 
 
 # Sprint 071 (2026-09-02): every session-topology producer_kind name
@@ -226,7 +272,7 @@ PRODUCER_KIND_TOOL: Final[str] = "tool"
 PRODUCER_KIND_RETURN: Final[str] = "return"
 PRODUCER_KIND_SESSION_END: Final[str] = "session_end"
 # K263: one producer for every session-open prompt source and the session's warnings (replaces
-# role_fragment, bundle_methodology_fragment, bundle_personality_fragment,
+# role_fragment, bundle_methodology_fragment, bundle_personality_fragment (now bundle_style),
 # parent_context_fragment, tools_suite_fragment, session_warning and fragment_error_warning).
 PRODUCER_KIND_SESSION_PROMPT: Final[str] = "session_prompt"
 # K263: writes the first turn's UserMessage on a fresh record (was session_open).
@@ -234,6 +280,8 @@ PRODUCER_KIND_FIRST_MESSAGE: Final[str] = "first_message"
 # Phase 8 item 7 — emits PromptFragment(source=interrupt) in response to an
 # InterruptRequested envelope the daemon injected via Runtime.inject_event.
 PRODUCER_KIND_INTERRUPT_FRAGMENT: Final[str] = "interrupt_fragment"
+# K277: writes a requested skill's body as a session-open `skill` fragment.
+PRODUCER_KIND_SKILL_FRAGMENT: Final[str] = "skill_fragment"
 # Also declared by the CI wrapper (ci.py); listed here so the frozenset
 # below covers every kind a session-shape topology can emit.
 PRODUCER_KIND_DRIVER_STEPPER: Final[str] = "driver_stepper"
@@ -248,6 +296,7 @@ SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
         PRODUCER_KIND_SESSION_PROMPT,
         PRODUCER_KIND_FIRST_MESSAGE,
         PRODUCER_KIND_INTERRUPT_FRAGMENT,
+        PRODUCER_KIND_SKILL_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
     }
 )
@@ -276,6 +325,16 @@ TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED: Final[str] = "driver-stepper-on-returned"
 TRIGGER_ID_MODEL_ON_USER_MESSAGE: Final[str] = "model-on-user-message"
 # K261: starts first_message once session_prompt has ended (K263: one producer to wait for).
 TRIGGER_ID_FIRST_MESSAGE_ON_SESSION_PROMPT: Final[str] = "first-message-on-session-prompt"
+# K274: a SessionChanged of the bundle or per_turn writes those sources again (§ P.4).
+TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED: Final[str] = "session-prompt-on-session-changed"
+# K277: a UserMessage sent with `/dellm` (slash_source "skill:<name>") starts skill_fragment, and the
+# model starts when skill_fragment ends, so the turn's first step reads the skill (§ P.10).
+TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE: Final[str] = "skill-fragment-on-user-message"
+TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT: Final[str] = "model-on-skill-fragment"
+SKILL_SLASH_PREFIX: Final[str] = "skill:"
+# UI sprint 123 (§ P.11): a UserMessage the operator sent with `//`. The model step passes its text
+# to the driver as written, and the history leaves the turn out.
+DRIVER_SLASH_SOURCE: Final[str] = "driver"
 
 SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -292,17 +351,16 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED,
         TRIGGER_ID_MODEL_ON_USER_MESSAGE,
         TRIGGER_ID_FIRST_MESSAGE_ON_SESSION_PROMPT,
+        TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED,
+        TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
+        TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
     }
 )
 
 
 def is_prompt_source(source: str) -> bool:
-    """Whether `source` is a PromptSource value."""
-    try:
-        PromptSource(source)
-    except ValueError:
-        return False
-    return True
+    """Whether `source` is a PromptSource value, or a legacy name for one."""
+    return parse_prompt_source(source) is not None
 
 
 def is_session_kind(kind: str) -> bool:
@@ -326,6 +384,15 @@ __all__ = [
     "PROMPT_COMPOSED",
     "PROMPT_FRAGMENT",
     "PROMPT_SOURCES",
+    "SYSTEM_SOURCES",
+    "TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE",
+    "TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT",
+    "SKILL_SLASH_PREFIX",
+    "DRIVER_SLASH_SOURCE",
+    "PRODUCER_KIND_SKILL_FRAGMENT",
+    "CACHE_LAYOUT_SOURCES",
+    "TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED",
+    "SESSION_CHANGED",
     "RETURNED",
     "ReturnReason",
     "SESSION_ENDED",
@@ -340,6 +407,8 @@ __all__ = [
     "TURN_SCOPED_SOURCES",
     "USER_MESSAGE",
     "is_prompt_source",
+    "parse_prompt_source",
+    "LEGACY_PROMPT_SOURCES",
     "is_session_kind",
     "turn_replies",
 ]

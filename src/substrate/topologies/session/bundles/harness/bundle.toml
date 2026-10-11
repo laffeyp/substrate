@@ -1,0 +1,5 @@
+[bundle]
+name = "harness"
+description = "The harness layer: Substrate's loop and record rules. Every shipped bundle extends it."
+schema_version = 1
+extends = []

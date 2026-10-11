@@ -33,7 +33,7 @@ and what it does.{% if constraint %}
 Constraint: {{constraint}}
 {% endif %}
 
-== personality.md ==
+== style.md ==
 {{voice}}. Short words over long. Active voice, named subject,
 concrete noun.
 

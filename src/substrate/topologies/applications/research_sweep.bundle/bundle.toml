@@ -2,4 +2,4 @@
 name = "research_sweep"
 description = "Reader / critic / synthesizer roles for the research sweep."
 schema_version = 1
-extends = []
+extends = ["standard"]

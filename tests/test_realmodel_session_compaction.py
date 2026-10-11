@@ -79,9 +79,9 @@ OBSERVED: list[dict[str, Any]] = []
 class _Observed(OllamaResponder):
     """The real OllamaResponder, recording what Ollama received and reported on every call."""
 
-    async def _achat(self, prompt: str, tools: Any = None) -> dict[str, object]:
-        _headers, payload = self._request(prompt, tools)
-        data = await super()._achat(prompt, tools)
+    async def _achat(self, prompt: str, tools: Any = None, system: str = "") -> dict[str, object]:
+        _headers, payload = self._request(prompt, tools, system)
+        data = await super()._achat(prompt, tools, system)
         OBSERVED.append(
             {
                 "num_ctx": payload["options"]["num_ctx"],  # type: ignore[index]
@@ -205,7 +205,7 @@ async def test_live_compaction_fires_and_model_still_answers(tmp_path: Path) -> 
             for e in envelopes
             if ticket["from_seq"] <= e["seq"] <= ticket["to_seq"] and e["kind"] in TURN_EVENT_KINDS
         ]
-        base, _ = compose_model_prompt(
-            history=kept, seed="You are a helpful assistant.", per_turn="", fragments=[]
+        _system, base, _ = compose_model_prompt(
+            history=kept, seed="You are a helpful assistant.", fragments=[]
         )
         assert prompt == base, (prompt[-200:], base[-200:])

@@ -1588,7 +1588,7 @@ extends = []
 enabled = []
 """
 
-_BUNDLE_SLOTS = ("methodology.md", "personality.md", "per-turn.md")
+_BUNDLE_SLOTS = ("methodology.md", "style.md", "per-turn.md")
 
 
 @main.group("bundle")
@@ -1615,7 +1615,7 @@ def bundle_group() -> None:
 def bundle_create(name: str, template: str | None) -> None:
     """Scaffold `~/.substrate/bundles/<name>/`.
 
-    Bare: writes empty slot files (methodology.md, personality.md,
+    Bare: writes empty slot files (methodology.md, style.md,
     per-turn.md) + bundle.toml + corpus/.
     --wizard[=<template>]: walks the named template's slots via
     click.prompt, interpolates the answers, writes the rendered
@@ -1684,7 +1684,7 @@ def _write_rendered_bundle(target: Path, rendered: str) -> None:
     file_map = {
         "bundle.toml": "bundle.toml",
         "methodology.md": "methodology.md",
-        "personality.md": "personality.md",
+        "style.md": "style.md",
         "per-turn.md": "per-turn.md",
     }
     current: str | None = None

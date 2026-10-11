@@ -30,7 +30,7 @@ def _bundle(name: str, extends: tuple[str, ...], methodology: str) -> Bundle:
         schema_version=1,
         extends=extends,
         methodology=methodology,
-        personality="",
+        style="",
         per_turn="",
         corpus_paths=(),
         retrieval_kind="none",
@@ -72,7 +72,7 @@ def test_every_link_of_a_bundle_chain_reaches_the_prompt_across_a_resume(
     envs = list(api.read_record(root))
     fragments = [e for e in envs if e["kind"] == "PromptFragment"]
     # Written once, in the first run; the resumed turn writes none.
-    assert [f["payload"]["precedence"] for f in fragments] == [50, 51]
+    assert [f["payload"]["precedence"] for f in fragments] == [5, 5]
     first_um_of_turn_two = next(
         e["seq"] for e in envs if e["kind"] == "UserMessage" and e["payload"]["text"] == "two"
     )

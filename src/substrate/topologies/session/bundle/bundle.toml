@@ -1,5 +1,0 @@
-[bundle]
-name = "session"
-description = "The default bundle a `substrate chat` session opens with."
-schema_version = 1
-extends = []

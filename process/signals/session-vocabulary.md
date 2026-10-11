@@ -464,3 +464,107 @@ Every id is hyphen-case. K.5's `interrupt_fragment-on-interrupt-request` put the
 ### Ratification signature
 
 - **v0.3.4** — Sprint K264 close, 2026-10-09. §§ A–N byte-preserved.
+
+## P. v0.4 — default guidance (2026-10-10, sprint K270)
+
+Why: `ROADMAP-2026-10-10-default-guidance.md` gives every driver this machine's working and writing standard, on top of Substrate's harness rules, through each driver's own channels. It needs a system channel, three new prompt sources, two injected events, and two renames. Research: `RESEARCH-2026-10-10-substrate-default-guidance-r7.md`.
+
+### P.1 Renames
+
+| Old | New | Legacy reading |
+|---|---|---|
+| `PromptSource.BUNDLE_PERSONALITY` = `bundle_personality` | `PromptSource.BUNDLE_STYLE` = `bundle_style` | Records before v0.4 keep `bundle_personality`; readers map it to `bundle_style` (`LEGACY_PROMPT_SOURCES`). |
+| bundle slot `personality.md` / `personality/`, field `Bundle.personality` | `style.md` / `style/`, `Bundle.style` | The loader reads a `personality.md` when no `style.md` exists. |
+| shipped bundle `session` | `harness` | `load_bundle("session")` resolves to `harness` (`LEGACY_BUNDLE_NAMES`); manifests and `SessionStarted.bundle` values of `session` load. |
+
+### P.2 Prompt sources (adds to § I)
+
+| Value | Scope | Precedence | Channel | Meaning |
+|---|---|---|---|---|
+| `bundle_style` | session-open | 3 | system | One fragment per link of the bundle's `extends` chain with a non-empty style, ancestor first. Replaces § I's caller-wins rule. |
+| `baseline` | session-open | 4 | system | The environment computed at session open: workspace path; in a git repo root, branch, commit, README head (8 KiB), `git diff HEAD` (32 KiB); outside one, cwd and hostname; platform; driver and model ID; date; `<repo>/.substrate/context.md`. The same dict is `RunStarted.baseline` and `SessionStarted.baseline`. |
+| `bundle_methodology` | session-open | 5 | user | One fragment per link, every link at 5; `seq` gives ancestor-first order. Replaces the code's 50 + position. |
+| `memory` | session-open | 8 | user | One fragment per memory index (`~/.substrate/memory/MEMORY.md`, `<repo>/.substrate/memory/MEMORY.md`), each capped at 200 lines or 25 KB. Provenance: `{"path", "lines", "truncated"}`. |
+| `per_turn` | session-open (moved from turn-scoped) | — | user | Written once at session open, and again after a `SessionChanged` of `per_turn` or `bundle`. Default: the bundle chain's `per_turn` slots joined ancestor first; a manifest value overrides. Placed directly after the current turn's `USER:` line on every step, not in the head. Provenance: `{"from": <bundle path> or "manifest"}`. |
+| `skill` | session-open | 40 | user | A skill body loaded by `SkillRequested`. Kept for the rest of the session. Provenance: `{"name", "resolved_from", "model_class"}`. |
+
+`SESSION_OPEN_SOURCES` gains `bundle_style`, `baseline`, `memory`, `skill` and `per_turn`. `TURN_SCOPED_SOURCES` keeps `user_message` and `interrupt`.
+
+`SYSTEM_SOURCES = {bundle_style, baseline}`. Their fragments compose into `PromptComposed.system`; every other fragment composes into `.text`.
+
+### P.3 PromptComposed.system (adds to § I and § L.1)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `system` | `str` | The text sent on the driver's system channel: an Ollama `{"role":"system"}` message, or the driver profile's flag for a CLI (`--system-prompt` for `claude`). Empty when the session has no system-channel fragment. Records before v0.4 have no field and read as `""`. |
+
+The invariant of § L becomes: `system` and `text` together are the bytes the driver reads. A CLI with no system flag receives `system`, a blank line, then `text`, as one prompt.
+
+With `driver_params.cache_layout = true` (`claude` only, default false), `role`, `bundle_methodology`, `memory` and `tools_suite` also compose into `system`. The record shows which layout a step used.
+
+### P.4 Injected events
+
+| Struct | Fields | Written by | Effect |
+|---|---|---|---|
+| `SessionChanged` | `field: str` (`driver` \| `bundle` \| `per_turn` \| `date`), `old: str`, `new: str` | the daemon, on a PATCH of that field or on `/model`; the model step, when the date differs from the baseline's | The next model step carries one line directly after the current message: `Environment update: <field> changed from <old> to <new>.` For `bundle` or `per_turn`, the session prompt writes that source again and `FragmentCohort` drops the earlier fragments of the same source. |
+| `SkillRequested` | `name: str`, `source: str` | the daemon, on `/dellm` | Starts `skill_fragment`, which writes `PromptFragment(skill)`. |
+
+Both reach a live run through `Runtime.inject_event`, as `InterruptRequested` does. A parked session receives them ahead of the next turn's `UserMessage`.
+
+### P.5 Producers and triggers (adds to N.1 and O.1)
+
+| Trigger | Starts | Emits |
+|---|---|---|
+| `skill-fragment-on-skill-request` | `skill_fragment` | `PromptFragment(skill)`, or `SessionWarning(kind=fragment_source_failed, source_name=skill)` when the name resolves nowhere |
+
+`session_prompt` gains the `bundle_style` (per link), `baseline`, `memory` and `per_turn` sources.
+
+### P.6 Tool
+
+`skill(name)`: returns the resolved body of a named skill as `ToolResult.output`. Its description lists each available skill's name and one-line description. Resolution: `<repo>/.substrate/skills/<name>/`, `~/.substrate/skills/<name>/`, shipped `topologies/session/skills/<name>/`; the model class picks `<name>-small` when it exists.
+
+### P.7 Shipped names
+
+| Kind | Names |
+|---|---|
+| Bundles | `harness` (today's `session` text, unchanged), `standard` (`extends = ["harness"]`), `standard-small` (`extends = ["harness"]`), and the four application bundles with `extends = ["standard"]` |
+| Roles | `default` (unchanged), `default-small` |
+| Skills | `dellm`, `dellm-small` |
+| Model classes | `harness_agent`, `large`, `small`, recorded as `SessionStarted.model_class` |
+
+### P.8 SessionStarted.driver_command (added with U120, 2026-10-10)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `driver_command` | `tuple[str, ...]` | For a CLI driver, the argv it runs before the system text and prompt: the command, the profile's isolation flags, the version pin. Empty for any other driver and on records before v0.4. |
+
+### P.9 SessionChanged as built (K274, 2026-10-10; amends P.4)
+
+- **Writer.** The model step writes `SessionChanged`, not the daemon. A parked session resumes only on a `UserMessage`, so an injected event could not reach one. On a turn's first step the model step compares the session's current driver, bundle, `per_turn` and date with the `session_settings` view, which folds `SessionStarted`, the newest `per_turn` fragment and earlier changes. It writes one event per difference. A field never recorded is not compared. `SessionStarted.bundle` is compared as written, so a manifest that still says `session` against a topology built with `harness` would count as a change.
+- **Line.** `Environment update: <field> changed from <old> to <new>.` goes right after the current message on that step. For `per_turn` the line is `Environment update: the reminder line beside each message changed.`, since the new text itself follows on the next step. `SessionChanged` is a turn event, so later steps render the line in history where it happened.
+- **Rewrite.** `session-prompt-on-session-changed` starts `session_prompt` with `only` set to the changed field's sources: `bundle` rewrites `bundle_style`, `bundle_methodology` and `per_turn`; `per_turn` rewrites `per_turn`. Each new fragment's provenance carries `generation`, the change's seq. `FragmentCohort` keeps only each source's newest generation; fragments written at session open are generation −1.
+- **Placement.** The `per_turn` fragment's text sits on the line after the current turn's `USER:` line, on every step, with no precedence slot in the head. A bundle's change also changes the `per_turn` it supplies, and both changes are recorded.
+
+### P.10 Skill requests as built (K277, 2026-10-10; replaces SkillRequested in P.4 and its trigger in P.5)
+
+`SkillRequested` is not built. A parked session resumes only on a `UserMessage`, so the daemon could not write a separate event ahead of the turn. The request rides the turn's own `UserMessage`, in the field made for slash commands: `slash_source = "skill:<name>"` (`SKILL_SLASH_PREFIX`). Then:
+
+1. `skill-fragment-on-user-message` starts `skill_fragment` on such a message. It writes `PromptFragment(source=skill, precedence=40)`, with provenance `{name, resolved_from, model_class}`, or a `SessionWarning(fragment_source_failed, source_name=skill)` when no layer has the skill.
+2. `model-on-user-message` skips such a message. `model-on-skill-fragment` starts the model when `skill_fragment` completes or fails, so the turn's first step reads the skill. This is the ordering `first-message-on-session-prompt` uses.
+3. `skill` is session-open, so the fragment stays for the rest of the session.
+
+The `skill` tool (P.6) lives in `topologies/session/skills.py` as a `Tool` with its own schema; the daemon adds it to a session's suite.
+
+### P.11 Driver slash commands (UI sprint 123, 2026-10-10)
+
+The operator's `//<command>` reaches the driver as `/<command>`.
+
+1. **The message.** It rides the turn's `UserMessage` with `slash_source = "driver"` (`DRIVER_SLASH_SOURCE`). The daemon accepts one only for a driver whose profile sets `slash_commands`; any other driver gets a 400, "This driver has no slash commands."
+2. **The model step.** It sends the text as written, with no head, history or system text. It records that text as `PromptComposed` (`system` empty, no fragments) and the driver's answer as `ModelReply(end_turn)`, and the turn returns as usual.
+3. **History.** `compose_model_prompt` leaves a driver turn out, and the history window prices it at zero, so later steps never see the command or its output.
+
+No new kind is needed: the card's `DriverCommand` and `DriverCommandResult` are not built.
+
+### Ratification signature
+
+- **v0.4** — Sprint K270, 2026-10-10. §§ A–O byte-preserved.

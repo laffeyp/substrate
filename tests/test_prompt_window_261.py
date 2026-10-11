@@ -54,10 +54,10 @@ def _compose(history: list[dict[str, Any]], ctx: int) -> tuple[str, list[Any]]:
     build the prompt from the kept turns."""
     turns = transcript._group_by_turn(history)
     costs = [transcript.turn_cost(t) for t in turns]
-    head, _ = transcript.head_block("SEED", "", [])
+    _system, head, _reminder, _ = transcript.head_block("SEED", [])
     keep = transcript.plan_window(costs, transcript._est_tokens(head), ctx, 0.6)
     kept = [e for t in turns[keep:] for e in t]
-    prompt, _seqs = compose_model_prompt(history=kept, seed="SEED", per_turn="", fragments=[])
+    _system, prompt, _seqs = compose_model_prompt(history=kept, seed="SEED", fragments=[])
     compaction: list[Any] = []
     if keep > 0:
         compaction.append(

@@ -34,12 +34,18 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from .vocabulary import (
     END_ON_EXIT_SENTINEL,
+    CACHE_LAYOUT_SOURCES,
     INTERRUPT_REQUESTED,
+    SESSION_CHANGED,
+    SKILL_SLASH_PREFIX,
+    DRIVER_SLASH_SOURCE,
+    SYSTEM_SOURCES,
     MODEL_REPLY,
     RETURNED,
     PROMPT_STRATEGY_MODEL_INPUT,
     PRODUCER_KIND_FIRST_MESSAGE,
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
+    PRODUCER_KIND_SKILL_FRAGMENT,
     PRODUCER_KIND_MODEL,
     PRODUCER_KIND_RETURN,
     PRODUCER_KIND_SESSION_END,
@@ -54,6 +60,9 @@ from .vocabulary import (
     TRIGGER_ID_END_ON_EXIT,
     TRIGGER_ID_END_ON_END_REQUEST,
     TRIGGER_ID_FIRST_MESSAGE_ON_SESSION_PROMPT,
+    TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED,
+    TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
+    TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
     TRIGGER_ID_MODEL_ON_USER_MESSAGE,
     TRIGGER_ID_RETURN_ON_INTERRUPT,
     TRIGGER_ID_RETURN_ON_MODEL_ERROR,
@@ -100,6 +109,10 @@ class SessionStarted(Struct, frozen=True):
     baseline: dict[str, Any]
     parent_session_id: str | None
     parent_seq_at_call: int | None
+    # Session vocabulary § P.8: a CLI driver's argv before the system text and prompt.
+    driver_command: tuple[str, ...] = ()
+    # Session vocabulary § P.7 (K278): harness_agent | large | small; empty before v0.4.
+    model_class: str = ""
 
 
 class UserMessage(Struct, frozen=True):
@@ -191,6 +204,15 @@ class InterruptRequested(Struct, frozen=True):
     source: str  # "daemon:interrupt-soft" or a delegate's caller
 
 
+# Session vocabulary § P.4 (K274). The model step writes one on the first step of a turn for each
+# of the session's driver, bundle, per_turn and date that differs from the last recorded value; the
+# daemon rebuilds the topology from the manifest every turn, so a PATCH or `/model` shows here.
+class SessionChanged(Struct, frozen=True):
+    field: str  # "driver" | "bundle" | "per_turn" | "date"
+    old: str
+    new: str
+
+
 class SessionWarning(Struct, frozen=True):
     """Written by `session_prompt` at session open (vocabulary § E, § J, § N).
 
@@ -226,6 +248,9 @@ class PromptComposed(Struct, frozen=True):
     strategy: (
         str  # "model_input" since K261 (PROMPT_STRATEGY_MODEL_INPUT); "precedence_join" before
     )
+    # Session vocabulary v0.4 (§ P.3): the text sent on the driver's system channel. `system`
+    # and `text` together are what the driver read. Records before v0.4 have none.
+    system: str = ""
 
 
 # The core producer bodies. The model producer reads the just-appended UserMessage /
@@ -236,6 +261,12 @@ class PromptComposed(Struct, frozen=True):
 
 
 _MAX_CONSECUTIVE_FAILS = 3
+
+# K274: the sources a SessionChanged of each field writes again.
+_REWRITTEN_ON_CHANGE: dict[str, tuple[str, ...]] = {
+    "bundle": ("bundle_style", "bundle_methodology", "per_turn"),
+    "per_turn": ("per_turn",),
+}
 
 
 # The model step's two directives. Wrap-up is decided inside the model step (`final=True` from
@@ -288,6 +319,9 @@ def _session_started_factory(
     bundle: str | None,
     parent_session_id: str | None,
     parent_seq_at_call: int | None,
+    driver_command: tuple[str, ...] = (),
+    baseline: dict[str, Any] | None = None,
+    model_class: str = "",
 ) -> Callable[[], Any]:
     """Sprint 240 — the SessionStarted instrument's producer body.
 
@@ -312,9 +346,11 @@ def _session_started_factory(
             workspace_path=workspace_path,
             workspace_shape=workspace_shape,
             bundle=bundle,
-            baseline={},
+            baseline=dict(baseline or {}),
             parent_session_id=parent_session_id,
             parent_seq_at_call=parent_seq_at_call,
+            driver_command=driver_command,
+            model_class=model_class,
         )
 
     return lambda: _session_started
@@ -339,8 +375,9 @@ def _first_message_factory(user_message: "UserMessage") -> Callable[[], Any]:
 def _model_factory(
     *,
     driver: Responder,
-    per_turn: str,
+    current_settings: dict[str, str],
     script: list[tuple[str, list[Any]]] | None,
+    system_sources: frozenset[str] | None = None,
     seed: str,
     driver_context_tokens: int,
     driver_headroom_frac: float,
@@ -350,7 +387,8 @@ def _model_factory(
     """Model Producer body: build the prompt, record it, send it, record the reply (K261).
 
     Each firing builds the whole prompt with `transcript.compose_model_prompt` from the turn
-    history view, the session's prompt fragments, `per_turn` and this step's state, writes it as
+    history view, the session's prompt fragments (the reminder line among them) and this step's
+    state, writes it as
     `PromptComposed`, and sends exactly that text. Recording where the call happens is what keeps
     the record and the call equal. Then:
 
@@ -372,13 +410,39 @@ def _model_factory(
     async def _model(
         inp: Any,
     ) -> AsyncIterator[
-        ToolCall | ModelReply | TranscriptCompacted | BackgroundTaskEnded | PromptComposed
+        ToolCall
+        | ModelReply
+        | TranscriptCompacted
+        | BackgroundTaskEnded
+        | PromptComposed
+        | SessionChanged
     ]:
         step = int(inp.get("step", 0)) if hasattr(inp, "get") else 0
         results = list(inp.get("results", [])) if hasattr(inp, "get") else []
         final = bool(inp.get("final", False)) if hasattr(inp, "get") else False
         turn_index = int(inp.get("turn_index", 0)) if hasattr(inp, "get") else 0
         fragments = list(inp.get("fragments", [])) if hasattr(inp, "get") else []
+        recorded = dict(inp.get("settings") or {}) if hasattr(inp, "get") else {}
+        driver_text = inp.get("driver_command") if hasattr(inp, "get") else None
+        if driver_text:
+            # UI sprint 123 (§ P.11): the operator's `//` line goes to the driver as written, with
+            # no prompt around it; the record holds exactly that, and the history leaves it out.
+            yield PromptComposed(
+                text=str(driver_text),
+                fragment_seqs=(),
+                total_tokens=_est_tokens(str(driver_text)),
+                strategy=PROMPT_STRATEGY_MODEL_INPUT,
+                system="",
+            )
+            reply_text, usage = await call_responder_metered(driver, str(driver_text))
+            yield ModelReply(
+                text=reply_text,
+                stop_reason=StopReason.END_TURN,
+                usage=_usage_of(usage),
+                turn_index=int(inp.get("turn_index", 0)),
+                step=0,
+            )
+            return
         ticket = inp.get("history_ref") if hasattr(inp, "get") else None
         # K268: the history is read from the record by the ticket the trigger issued (claim
         # check). The kept seqs were written before this step started, so the read is the same
@@ -414,6 +478,17 @@ def _model_factory(
                 yield ended
                 notices.append(background_notice(ended))
 
+        # K274 (§ P.4): on a turn's first step, anything the session now runs with that differs
+        # from what the record last said is recorded and told to the model beside the message.
+        updates: list[str] = []
+        if step == 0:
+            for field in ("driver", "bundle", "per_turn", "date"):
+                if field in recorded and field in current_settings:
+                    old, new = recorded[field], current_settings[field]
+                    if old != new:
+                        yield SessionChanged(field=field, old=old, new=new)
+                        updates.append(session_changed_line(field, old, new))
+
         trailing_fails = 0
         for r in reversed(results):
             if r.get("ok", True):
@@ -424,8 +499,13 @@ def _model_factory(
             wrap_up_reason = "budget reached"
         elif trailing_fails >= _MAX_CONSECUTIVE_FAILS:
             wrap_up_reason = f"tool failed {trailing_fails} times in a row"
-        prompt_text, fragment_seqs = compose_model_prompt(
-            history=history, seed=seed, per_turn=per_turn, fragments=fragments, notices=notices
+        system_text, prompt_text, fragment_seqs = compose_model_prompt(
+            history=history,
+            seed=seed,
+            fragments=fragments,
+            notices=notices,
+            after_message=updates,
+            system_sources=system_sources,
         )
         if ticket and ticket.get("dropped"):
             lo, hi = ticket["dropped"]
@@ -435,7 +515,7 @@ def _model_factory(
                 kept_seq_start=int(ticket["from_seq"]),
                 reason="driver_window_exceeded",
                 tokens_before=int(ticket["tokens_before"]),
-                tokens_after=_est_tokens(prompt_text),
+                tokens_after=_est_tokens(system_text) + _est_tokens(prompt_text),
             )
         # The endings below are the pre-K261 wording, unchanged: K261 changes where the prompt's
         # parts come from and their order, not what the model is told.
@@ -467,8 +547,9 @@ def _model_factory(
         yield PromptComposed(
             text=prompt,
             fragment_seqs=fragment_seqs,
-            total_tokens=_est_tokens(prompt),
+            total_tokens=_est_tokens(system_text) + _est_tokens(prompt),
             strategy=PROMPT_STRATEGY_MODEL_INPUT,
+            system=system_text,
         )
         if script is not None and wrap_up_reason is None:
             # CI: the script stands in for the model's choice; the prompt above is what a model
@@ -502,9 +583,13 @@ def _model_factory(
         if wrap_up_reason is None and tool_mode == "native":
             metered = getattr(driver, "achat_tools_metered", None)
             if callable(metered):
-                message, usage = await metered(prompt, ollama_tools(tools))
+                message, usage = await metered(
+                    prompt, ollama_tools(tools), **_system_kw(system_text)
+                )
             else:
-                message = await driver.achat_tools(prompt, ollama_tools(tools))  # type: ignore[attr-defined]
+                message = await driver.achat_tools(  # type: ignore[attr-defined]
+                    prompt, ollama_tools(tools), **_system_kw(system_text)
+                )
                 usage = ModelUsage(
                     model=str(getattr(driver, "name", "driver")),
                     prompt_tokens=len(prompt.split()),
@@ -515,7 +600,7 @@ def _model_factory(
             kind, chosen = parse_tool_call(message, tools)
             beside_call = str(message.get("content", "") or "")
         else:
-            reply_text, usage = await call_responder_metered(driver, prompt)
+            reply_text, usage = await call_responder_metered(driver, prompt, system=system_text)
             if wrap_up_reason is None and tool_mode == "text":
                 kind, chosen = parse_tool_call({"content": reply_text, "tool_calls": []}, tools)
             else:
@@ -541,6 +626,12 @@ def _model_factory(
         )
 
     return lambda: _model
+
+
+def _system_kw(system_text: str) -> dict[str, str]:
+    """`system=` for the native tool call: the native path runs only on a responder with
+    `achat_tools`, which takes the system text on its own channel (§ P.3)."""
+    return {"system": system_text} if system_text else {}
 
 
 def _usage_of(usage: ModelUsage) -> dict[str, Any]:
@@ -594,6 +685,10 @@ def session_topology(
     role: str | None = None,
     role_repo_root: Path | None = None,
     parent_context: dict[str, Any] | None = None,
+    baseline: dict[str, Any] | None = None,
+    cache_layout: bool = False,
+    memory: bool = False,
+    model_class: str = "",
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -622,6 +717,18 @@ def session_topology(
         n = int(ctx.views["user_turns"].value())
         return max(n - 1, 0)
 
+    def _skill_of(event: Any) -> str | None:
+        """The skill a UserMessage asks for: `slash_source` "skill:<name>", else None."""
+        source = str((getattr(event, "payload", None) or {}).get("slash_source") or "")
+        return source[len(SKILL_SLASH_PREFIX) :] if source.startswith(SKILL_SLASH_PREFIX) else None
+
+    def _driver_command_of(event: Any) -> dict[str, str]:
+        """`{"driver_command": text}` for a `//` turn (§ P.11), else nothing."""
+        payload = getattr(event, "payload", None) or {}
+        if payload.get("slash_source") == DRIVER_SLASH_SOURCE:
+            return {"driver_command": str(payload.get("text", ""))}
+        return {}
+
     def _producer_kind_from_ref(ctx: Any) -> str | None:
         payload = getattr(ctx.event, "payload", None) or {}
         return producer_kind_from_lifecycle_payload(payload)
@@ -636,8 +743,8 @@ def session_topology(
         turns = ctx.views["turn_history"].value()
         if not turns:
             return {"fragments": fragments, "history_ref": None}
-        head_text, _seqs = head_block(seed, per_turn, fragments)
-        head_tokens = _est_tokens(head_text)
+        system_text, head_text, reminder, _seqs = head_block(seed, fragments, system_sources)
+        head_tokens = _est_tokens(system_text) + _est_tokens(head_text) + _est_tokens(reminder)
         keep = plan_window(
             [cost for _a, _b, cost in turns],
             head_tokens,
@@ -684,6 +791,24 @@ def session_topology(
     # stays `deterministic=False` on those paths.
     model_is_deterministic = isinstance(driver, DeterministicResponder)
 
+    # § P.3, UI sprint 121: the opt-in layout; None keeps the default (SYSTEM_SOURCES).
+    system_sources: frozenset[str] | None = (
+        frozenset(SYSTEM_SOURCES | CACHE_LAYOUT_SOURCES) if cache_layout else None
+    )
+
+    # K274: what the session runs with now; the model step compares it with the record.
+    try:
+        resolved_per_turn = resolve_per_turn(per_turn, bundle)[0]
+    except Exception:  # noqa: BLE001 — a bad bundle is reported by session_prompt, not here
+        resolved_per_turn = per_turn
+    current_settings: dict[str, str] = {
+        "driver": driver_name,
+        "bundle": bundle or "",
+        "per_turn": resolved_per_turn,
+    }
+    if baseline and baseline.get("date"):
+        current_settings["date"] = str(baseline["date"])
+
     # Sprint 240: freeze the tool_names tuple at build time so the
     # SessionStarted instrument's closure captures a snapshot even if the
     # `tools` dict is mutated later (it should not be, but the freeze is
@@ -691,6 +816,9 @@ def session_topology(
     _tool_names_frozen: tuple[str, ...] = tuple(sorted(tools.keys()))
 
     def topo(b: api.TopologyBuilder) -> None:
+        if baseline:
+            # § P.2: the environment, on the kernel's own baseline slot (RunStarted.baseline).
+            b.baseline(**baseline)
         # Sprint 240: SessionStarted emit on RunStarted. Closes the
         # substrate-side gap REVIEW-2026-08-28-piece-g-full SDD-1 named.
         # `substrate.RunStarted` fires exactly once at run open (seq 0); the
@@ -715,6 +843,9 @@ def session_topology(
                 bundle=bundle,
                 parent_session_id=parent_session_id,
                 parent_seq_at_call=parent_seq_at_call,
+                driver_command=tuple(str(a) for a in getattr(driver, "command", ())),
+                baseline=baseline,
+                model_class=model_class,
             ),
             deterministic=True,
         )
@@ -726,11 +857,13 @@ def session_topology(
                 TranscriptCompacted,
                 BackgroundTaskEnded,
                 PromptComposed,
+                SessionChanged,
             ],
             schema_version=1,
             factory=_model_factory(
                 driver=driver,
-                per_turn=per_turn,
+                current_settings=current_settings,
+                system_sources=system_sources,
                 script=script,
                 seed=seed,
                 driver_context_tokens=driver_context_tokens,
@@ -768,10 +901,11 @@ def session_topology(
         # fragment (an interrupt directive, cleared on the next PromptComposed). The model
         # triggers pass its value as the step's `fragments`.
         b.view("fragment_cohort", FragmentCohort())
+        b.view("session_settings", SessionSettings())
         # K263: one `session_prompt` producer runs every session-open prompt source and the
         # seed-size check. It runs only when the session names a source or the seed alone passes
         # the driver's headroom (the 0.6 the history window also uses).
-        seed_tokens = _est_tokens(seed) + _est_tokens(per_turn)
+        seed_tokens = _est_tokens(seed) + _est_tokens(resolved_per_turn)
         seed_warning = (
             SessionWarning(
                 session_id=session_id,
@@ -788,6 +922,9 @@ def session_topology(
             bundle=bundle,
             parent_context=parent_context,
             tools=tools,
+            baseline=baseline,
+            per_turn=per_turn,
+            memory=memory,
         )
         has_session_prompt = bool(sources) or seed_warning is not None
         if has_session_prompt:
@@ -801,6 +938,19 @@ def session_topology(
                 deterministic=True,
             )
             b.initial(PRODUCER_KIND_SESSION_PROMPT, input={})
+            # K274 (§ P.4): a changed bundle or reminder line writes those sources again; the
+            # fragments carry the change's seq, and the cohort keeps each source's newest.
+            b.trigger(
+                TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED,
+                subscription=api.Subscription(kinds=frozenset({SESSION_CHANGED})),
+                predicate=lambda ctx: ctx.event.payload.get("field") in _REWRITTEN_ON_CHANGE,
+                starts=PRODUCER_KIND_SESSION_PROMPT,
+                input_builder=lambda ctx: {
+                    "only": list(_REWRITTEN_ON_CHANGE[str(ctx.event.payload.get("field"))]),
+                    "generation": int(ctx.event.seq),
+                },
+                policy=api.PerEvent(),
+            )
         if first_turn_user_message is not None:
             b.producer_kind(
                 PRODUCER_KIND_FIRST_MESSAGE,
@@ -843,6 +993,43 @@ def session_topology(
             schema_version=1,
             factory=interrupt_fragment_producer_factory(),
             deterministic=True,
+        )
+        # K277 (§ P.10): a UserMessage the operator sent with `/dellm` (slash_source "skill:<name>")
+        # loads the skill's body as a session-open fragment, kept for the rest of the session; the
+        # model starts once it has landed, so the turn's first step reads it.
+        b.producer_kind(
+            PRODUCER_KIND_SKILL_FRAGMENT,
+            schemas=[PromptFragment, SessionWarning],
+            schema_version=1,
+            factory=skill_fragment_producer_factory(
+                session_id=session_id, repo_root=role_repo_root, model_class=model_class
+            ),
+            deterministic=True,
+        )
+        b.trigger(
+            TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
+            subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
+            predicate=lambda ctx: _skill_of(ctx.event) is not None,
+            starts=PRODUCER_KIND_SKILL_FRAGMENT,
+            input_builder=lambda ctx: {"name": _skill_of(ctx.event)},
+            policy=api.PerEvent(),
+        )
+        b.trigger(
+            TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
+            subscription=api.Subscription(
+                kinds=frozenset({api.PRODUCER_COMPLETED, api.PRODUCER_FAILED})
+            ),
+            predicate=lambda ctx: _producer_kind_from_ref(ctx) == PRODUCER_KIND_SKILL_FRAGMENT,
+            starts=PRODUCER_KIND_MODEL,
+            input_builder=lambda ctx: {
+                "step": 0,
+                "results": [],
+                "final": False,
+                "turn_index": _turn_index(ctx),
+                "settings": ctx.views["session_settings"].value(),
+                **_prompt_input(ctx),
+            },
+            policy=api.PerEvent(),
         )
         # K261: the model producer builds each prompt from the turn history (this view) instead of
         # reading the whole record from disk on every call.
@@ -933,13 +1120,16 @@ def session_topology(
         b.trigger(
             TRIGGER_ID_MODEL_ON_USER_MESSAGE,
             subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
-            predicate=lambda ctx: True,
+            # A `/dellm` message waits for its skill (model-on-skill-fragment).
+            predicate=lambda ctx: _skill_of(ctx.event) is None,
             starts=PRODUCER_KIND_MODEL,
             input_builder=lambda ctx: {
                 "step": 0,
                 "results": [],
                 "final": False,
                 "turn_index": _turn_index(ctx),
+                "settings": ctx.views["session_settings"].value(),
+                **_driver_command_of(ctx.event),
                 **_prompt_input(ctx),
             },
             policy=api.PerEvent(),
@@ -1036,9 +1226,11 @@ from .interrupt_fragment_producer import (  # noqa: E402  # phase 8 item 7
     interrupt_fragment_producer_factory,
 )
 from .session_prompt_producer import (  # noqa: E402
+    resolve_per_turn,
     session_prompt_producer_factory,
     session_prompt_sources,
 )
+from .skills import skill_fragment_producer_factory  # noqa: E402
 from .transcript import (  # noqa: E402
     TURN_EVENT_KINDS,
     TranscriptCompacted,
@@ -1047,9 +1239,11 @@ from .transcript import (  # noqa: E402
     head_block,
     plan_window,
     resolve_driver_context_tokens,
+    session_changed_line,
 )
 from .views import (  # noqa: E402
     FragmentCohort,
+    SessionSettings,
     TurnHistory,
     producer_kind_from_lifecycle_payload,
 )
@@ -1065,6 +1259,7 @@ __all__ = [
     "SessionEnded",
     "SessionEndRequested",
     "InterruptRequested",
+    "SessionChanged",
     "SessionStarted",
     "SessionWarning",
     "ToolCall",

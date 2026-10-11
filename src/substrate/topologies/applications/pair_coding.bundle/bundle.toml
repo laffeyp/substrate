@@ -2,4 +2,4 @@
 name = "pair_coding"
 description = "Builder + reviewer roles for the pair_coding composite."
 schema_version = 1
-extends = []
+extends = ["standard"]

@@ -33,7 +33,7 @@ Refuse vague claims — if you cannot name a concrete file:line, do
 not raise the concern.
 {% endif %}
 
-== personality.md ==
+== style.md ==
 Collaborative. Read each other's work; the record is the source of
 truth about what happened.
 

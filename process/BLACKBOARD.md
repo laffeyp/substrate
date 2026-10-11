@@ -529,6 +529,21 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Roadmap 2026-10-10 (K270–K278, K281) — the default guidance
+- **What it does.** Every session now gets this machine's working and writing standard on top of Substrate's harness rules, delivered at the moments and through the channels Claude Code uses: style and environment on the system channel, CLAUDE.md and the memory index at the top of the user turn, and the hook line after each message. `dellm` loads on request. Research: `RESEARCH-2026-10-10-substrate-default-guidance-r7.md`; roadmap: `ROADMAP-2026-10-10-default-guidance.md`; vocabulary v0.4, § P.
+- **Kernel.**
+  - **Bundles:** `personality` became `style` and stacks across `extends`. The `session` bundle became `harness`, with a legacy name map. Shipped `extends` works, every methodology link sits at precedence 5, and `standard` and `standard-small` ship.
+  - **The prompt:** `PromptComposed.system` and a per-call `system=` on the responders that have a channel; the environment baseline built at last; `per_turn` from the bundle, placed after the message.
+  - **Session events:** `SessionChanged`, written by the model step.
+  - **Memory, skills and passthrough:** the memory indexes; the `skill` tool and `/dellm` through `UserMessage.slash_source`; the `//` driver pass-through; model classes (`harness_agent`, `large`, `small`).
+- **Specs amended (K281):** product spec round 13, tech spec round 7, design spec round 2.
+- **Found:**
+  - `CliResponder` left stdin open, and `claude` failed after 3 s; it also hid errors that `claude` prints on stdout.
+  - A system flag must always be sent, or `claude` loads its own 2.5k-token system prompt.
+  - A parked session resumes only on a `UserMessage`, so `SessionChanged`, skill requests and driver commands ride the turn's own message or step rather than an injected event.
+- **Withdrawn by the Architect:** K279 (Codex and Cursor profiles) and K280 (the assay comparison), which are future work.
+- **Test cadence (Architect, 2026-10-10):** each card runs the tests for the code it changed; the full suites run once, at the end.
+
 ### Sprint K266 (2026-10-09, closed) — the session's documents match the code
 - Session docstrings no longer state counts or name retired parts; `SESSION_KINDS` now lists every session event Struct, with a test that keeps it so.
 - The Docker test tier is now gated once, in `tests/conftest.py`: before, one Docker test ran or skipped depending on how fast Docker answered, which moved the default suite's skip count between 4 and 5. The default run now always skips the same 5 tests, each named.

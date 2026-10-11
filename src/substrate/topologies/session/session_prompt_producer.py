@@ -7,9 +7,9 @@ It runs once at session open and emits, in order:
 1. `SessionWarning(kind=seed_alone_exceeds)` when the seed and `per_turn` alone pass the driver's
    headroom (sprint 208);
 2. one or more `PromptFragment` per source the session names: `role` (precedence 0),
-   `bundle_methodology` (50 and up, one per link of the bundle's `extends` chain, ancestor
-   first), `bundle_personality` (3, the caller's or the nearest ancestor's), `parent_context`
-   (30, a slice of the parent's record) and `tools_suite` (20, the tool list).
+   `bundle_style` (3) and `bundle_methodology` (5), each one fragment per non-empty link of the
+   bundle's `extends` chain, ancestor first (session vocabulary § P.2), `parent_context` (30, a
+   slice of the parent's record) and `tools_suite` (20, the tool list).
 
 Before K263 each source was its own producer, so a failure stopped that source alone. Here each
 source builds its fragments in full before any is yielded; a source that raises yields none, and
@@ -23,19 +23,25 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
-from ...bundles import Bundle, BundleNotFoundError, load_bundle, resolve_extends
+from ...bundles import Bundle, resolve_extends
 from ..tool_loop.tools import Tool, suite_describe
 from . import PromptFragment, SessionWarning
 from .context_slice import extract_context_slice
+from .environment import render_baseline
 from .roles import resolve_role_prompt_with_source
 from .vocabulary import PromptSource, SessionWarningKind
 
 # Precedence bands, session-vocabulary.md § I.
 ROLE_PRECEDENCE = 0
-PERSONALITY_PRECEDENCE = 3
+STYLE_PRECEDENCE = 3
+BASELINE_PRECEDENCE = 4
+MEMORY_PRECEDENCE = 8
+MEMORY_INDEX_MAX_LINES = 200  # Claude Code's limits for its MEMORY.md (K276)
+MEMORY_INDEX_MAX_BYTES = 25 * 1024
+PER_TURN_PRECEDENCE = 10  # recorded only; the composer places per_turn after the message
+METHODOLOGY_PRECEDENCE = 5  # every link of the extends chain; seq keeps ancestors first
 TOOLS_SUITE_PRECEDENCE = 20
 PARENT_CONTEXT_PRECEDENCE = 30
-METHODOLOGY_PRECEDENCE_BASE = 50  # one per link of the extends chain: 50, 51, …
 PARENT_CONTEXT_CAP_BYTES = 64 * 1024
 
 Source = Callable[[], list[PromptFragment]]
@@ -58,14 +64,10 @@ def role_fragments(role: str, repo_root: Path | None) -> list[PromptFragment]:
 
 
 def resolve_chain(bundle_name: str) -> list[Bundle]:
-    """A bundle's `extends` chain, ancestor first. `resolve_extends` walks only
-    `~/.substrate/bundles/`; a shipped bundle with no `extends` (the `session` default and the
-    `<app>.bundle` defaults) is found by `load_bundle`'s package fallback instead. A missing
-    ancestor further up still raises."""
-    try:
-        return resolve_extends(bundle_name)
-    except BundleNotFoundError:
-        return [load_bundle(bundle_name)]
+    """A bundle's `extends` chain, ancestor first. User bundles shadow shipped ones; a chain
+    reaches shipped ancestors (`harness`, `standard`) through `load_bundle`'s package fallback.
+    A missing ancestor raises."""
+    return resolve_extends(bundle_name)
 
 
 def bundle_methodology_fragments(bundle: str) -> list[PromptFragment]:
@@ -79,28 +81,112 @@ def bundle_methodology_fragments(bundle: str) -> list[PromptFragment]:
             PromptFragment(
                 source=PromptSource.BUNDLE_METHODOLOGY,
                 text=entry.methodology,
-                precedence=METHODOLOGY_PRECEDENCE_BASE + len(out),
+                precedence=METHODOLOGY_PRECEDENCE,
                 provenance={"bundle_name": entry.name, "chain_position": position},
             )
         )
     return out
 
 
-def bundle_personality_fragments(bundle: str) -> list[PromptFragment]:
-    """The caller's personality, else the nearest ancestor's; none if every link is empty."""
-    chain = resolve_chain(bundle)
-    for position in range(len(chain) - 1, -1, -1):
-        entry = chain[position]
-        if entry.personality:
-            return [
-                PromptFragment(
-                    source=PromptSource.BUNDLE_PERSONALITY,
-                    text=entry.personality,
-                    precedence=PERSONALITY_PRECEDENCE,
-                    provenance={"bundle_name": entry.name, "chain_position": position},
-                )
-            ]
-    return []
+def bundle_style_fragments(bundle: str) -> list[PromptFragment]:
+    """One fragment per non-empty style in the chain, ancestor first (§ P.2). A child's style
+    adds to what it inherits; before v0.4 the nearest one replaced the rest."""
+    return [
+        PromptFragment(
+            source=PromptSource.BUNDLE_STYLE,
+            text=entry.style,
+            precedence=STYLE_PRECEDENCE,
+            provenance={"bundle_name": entry.name, "chain_position": position},
+        )
+        for position, entry in enumerate(resolve_chain(bundle))
+        if entry.style
+    ]
+
+
+def resolve_per_turn(per_turn: str, bundle: str | None) -> tuple[str, dict[str, Any]]:
+    """The reminder line a session sends beside every message, and where it came from (§ P.2):
+    the manifest's `per_turn` when set, else the bundle chain's `per_turn` slots joined ancestor
+    first."""
+    if per_turn:
+        return per_turn, {"from": "manifest"}
+    if bundle is None:
+        return "", {}
+    chain = [entry for entry in resolve_chain(bundle) if entry.per_turn]
+    text = "\n\n".join(entry.per_turn for entry in chain)
+    return text, {"from": "bundle", "bundles": [entry.name for entry in chain]}
+
+
+def per_turn_fragments(per_turn: str, bundle: str | None) -> list[PromptFragment]:
+    """One fragment holding the session's reminder line; none when there is none."""
+    text, provenance = resolve_per_turn(per_turn, bundle)
+    if not text:
+        return []
+    return [
+        PromptFragment(
+            source=PromptSource.PER_TURN,
+            text=text,
+            precedence=PER_TURN_PRECEDENCE,
+            provenance=provenance,
+        )
+    ]
+
+
+def memory_dirs(repo_root: Path | None) -> list[tuple[str, Path]]:
+    """The memory directories a session reads (K276): the operator's, then the repo's."""
+    from substrate.api import substrate_home
+
+    dirs = [("operator", substrate_home() / "memory")]
+    if repo_root is not None:
+        dirs.append(("repo", repo_root / ".substrate" / "memory"))
+    return dirs
+
+
+def memory_fragments(repo_root: Path | None) -> list[PromptFragment]:
+    """One fragment per memory index that exists, capped at 200 lines or 25 KB. Topic files are
+    not loaded; the model reads one with `read_file` when it bears on the task."""
+    out: list[PromptFragment] = []
+    for scope, directory in memory_dirs(repo_root):
+        index = directory / "MEMORY.md"
+        if not index.is_file():
+            continue
+        lines = index.read_text(encoding="utf-8", errors="replace").splitlines()
+        kept: list[str] = []
+        size = 0
+        for line in lines[:MEMORY_INDEX_MAX_LINES]:
+            size += len(line.encode("utf-8")) + 1
+            if size > MEMORY_INDEX_MAX_BYTES:
+                break
+            kept.append(line)
+        truncated = len(kept) < len(lines)
+        text = (
+            f"Contents of {index} ({scope} memory index; topic files sit beside it):\n\n"
+            + "\n".join(kept)
+        )
+        out.append(
+            PromptFragment(
+                source=PromptSource.MEMORY,
+                text=text,
+                precedence=MEMORY_PRECEDENCE,
+                provenance={"path": str(index), "lines": len(kept), "truncated": truncated},
+            )
+        )
+    return out
+
+
+def baseline_fragments(baseline: dict[str, Any]) -> list[PromptFragment]:
+    """The environment the daemon computed at session open (§ P.2), as the model reads it. The
+    dict itself is on `RunStarted.baseline` and `SessionStarted.baseline`; provenance names its
+    keys."""
+    if not baseline:
+        return []
+    return [
+        PromptFragment(
+            source=PromptSource.BASELINE,
+            text=render_baseline(baseline),
+            precedence=BASELINE_PRECEDENCE,
+            provenance={"keys": sorted(baseline)},
+        )
+    ]
 
 
 def parent_context_fragments(parent_context: dict[str, Any]) -> list[PromptFragment]:
@@ -163,14 +249,23 @@ def session_prompt_sources(
     bundle: str | None,
     parent_context: dict[str, Any] | None,
     tools: dict[str, Tool],
+    baseline: dict[str, Any] | None = None,
+    per_turn: str = "",
+    memory: bool = False,
 ) -> dict[PromptSource, Source]:
     """The sources a session names, in the order the producer runs them."""
     sources: dict[PromptSource, Source] = {}
+    if per_turn or bundle is not None:
+        sources[PromptSource.PER_TURN] = lambda: per_turn_fragments(per_turn, bundle)
     if role is not None:
         sources[PromptSource.ROLE] = lambda: role_fragments(role, role_repo_root)
     if bundle is not None:
         sources[PromptSource.BUNDLE_METHODOLOGY] = lambda: bundle_methodology_fragments(bundle)
-        sources[PromptSource.BUNDLE_PERSONALITY] = lambda: bundle_personality_fragments(bundle)
+        sources[PromptSource.BUNDLE_STYLE] = lambda: bundle_style_fragments(bundle)
+    if baseline:
+        sources[PromptSource.BASELINE] = lambda: baseline_fragments(baseline)
+    if memory:
+        sources[PromptSource.MEMORY] = lambda: memory_fragments(role_repo_root)
     if parent_context is not None:
         sources[PromptSource.PARENT_CONTEXT] = lambda: parent_context_fragments(parent_context)
     if tools:
@@ -187,10 +282,16 @@ def session_prompt_producer_factory(
     """The producer body. `seed_warning` is built at topology build time, when the seed's size
     is known."""
 
-    async def _session_prompt(_inp: Any) -> AsyncIterator[PromptFragment | SessionWarning]:
-        if seed_warning is not None:
+    async def _session_prompt(inp: Any) -> AsyncIterator[PromptFragment | SessionWarning]:
+        # A run after a SessionChanged (K274) writes only the changed sources, and marks each
+        # fragment with the change's seq so the cohort keeps the newest generation.
+        only = set(inp.get("only") or ()) if hasattr(inp, "get") else set()
+        generation = inp.get("generation") if hasattr(inp, "get") else None
+        if seed_warning is not None and not only:
             yield seed_warning
         for name, source in sources.items():
+            if only and str(name) not in only:
+                continue
             try:
                 fragments = source()
             except Exception as exc:  # noqa: BLE001 — a failed source is recorded, not raised
@@ -204,6 +305,13 @@ def session_prompt_producer_factory(
                 )
                 continue
             for fragment in fragments:
+                if generation is not None:
+                    fragment = PromptFragment(
+                        source=fragment.source,
+                        text=fragment.text,
+                        precedence=fragment.precedence,
+                        provenance={**fragment.provenance, "generation": int(generation)},
+                    )
                 yield fragment
 
     return lambda: _session_prompt
@@ -212,7 +320,12 @@ def session_prompt_producer_factory(
 __all__ = [
     "Source",
     "bundle_methodology_fragments",
-    "bundle_personality_fragments",
+    "baseline_fragments",
+    "memory_dirs",
+    "memory_fragments",
+    "per_turn_fragments",
+    "resolve_per_turn",
+    "bundle_style_fragments",
     "parent_context_fragments",
     "resolve_chain",
     "role_fragments",

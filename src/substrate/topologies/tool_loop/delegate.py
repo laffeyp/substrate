@@ -372,7 +372,7 @@ def _run_fanout(
         driver = str(spec.get("driver") or "deterministic")
         workspace = spec.get("workspace")
         workspace_shape = str(spec.get("workspace_shape") or "flat")
-        bundle = spec.get("bundle", "session")
+        bundle = spec.get("bundle", "standard")
         tools_raw = spec.get("tools")
         tools = tuple(str(t) for t in tools_raw) if tools_raw else None
         # Session_id fresh per child; workspace defaults to a child of the

@@ -30,7 +30,7 @@ def test_bundle_create_scaffolds_directory(bundles_root: Path) -> None:
     assert result.exit_code == 0, result.output
     target = bundles_root / "team-review"
     assert (target / "bundle.toml").is_file()
-    for slot in ("methodology.md", "personality.md", "per-turn.md"):
+    for slot in ("methodology.md", "style.md", "per-turn.md"):
         assert (target / slot).is_file()
     assert (target / "corpus").is_dir()
     toml_text = (target / "bundle.toml").read_text(encoding="utf-8")

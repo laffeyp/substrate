@@ -29,7 +29,7 @@ Verifier ({{verifier_stance}}): read the draft looking for the one
 thing that breaks it. State the fault plainly in one sentence with
 the condition that shows it. If the draft holds, say so and stop.
 
-== personality.md ==
+== style.md ==
 Rigorous. A verified answer beats a plausible answer.
 
 == per-turn.md ==

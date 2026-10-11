@@ -52,7 +52,8 @@ def _registration(topo: Any) -> api.Registration:
     return b.build()
 
 
-def test_the_session_registers_eight_producer_kinds(tmp_path: Path) -> None:
+def test_the_session_registers_nine_producer_kinds(tmp_path: Path) -> None:
+    """Eight after K263; K277 added skill_fragment, which loads a skill the operator asked for."""
     reg = _registration(_topo(tmp_path))
     assert set(reg.producer_kinds) == {
         "session_started",
@@ -63,14 +64,16 @@ def test_the_session_registers_eight_producer_kinds(tmp_path: Path) -> None:
         "interrupt_fragment",
         PRODUCER_KIND_SESSION_PROMPT,
         PRODUCER_KIND_FIRST_MESSAGE,
+        "skill_fragment",
     }
-    # One trigger listens to a producer's end: the first message waits for the session prompt.
+    # Two triggers listen to a producer's end: the first message waits for the session prompt,
+    # and a `/dellm` turn's model waits for its skill (K277).
     on_lifecycle = [
         t.id
         for t in reg.triggers
         if api.PRODUCER_COMPLETED in (t.subscription.kinds or frozenset())
     ]
-    assert on_lifecycle == ["first-message-on-session-prompt"]
+    assert sorted(on_lifecycle) == ["first-message-on-session-prompt", "model-on-skill-fragment"]
 
 
 def test_session_open_writes_thirteen_envelopes_and_keeps_each_source(tmp_path: Path) -> None:
@@ -88,7 +91,7 @@ def test_session_open_writes_thirteen_envelopes_and_keeps_each_source(tmp_path: 
     fragments = [e["payload"] for e in envs if e["kind"] == "PromptFragment"]
     assert [(f["source"], f["precedence"]) for f in fragments] == [
         ("role", 0),
-        ("bundle_methodology", 50),
+        ("bundle_methodology", 5),
         ("tools_suite", 20),
     ]
     # The first model call's prompt was built from all three.

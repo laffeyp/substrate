@@ -17,6 +17,7 @@ from substrate.topologies.session.vocabulary import (
     PRODUCER_KIND_DRIVER_STEPPER,
     PRODUCER_KIND_FIRST_MESSAGE,
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
+    PRODUCER_KIND_SKILL_FRAGMENT,
     PRODUCER_KIND_MODEL,
     PRODUCER_KIND_RETURN,
     PRODUCER_KIND_SESSION_END,
@@ -115,6 +116,7 @@ def test_session_producer_kinds_frozenset_covers_all() -> None:
         PRODUCER_KIND_FIRST_MESSAGE,
         PRODUCER_KIND_INTERRUPT_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
+        PRODUCER_KIND_SKILL_FRAGMENT,
     }
     assert SESSION_PRODUCER_KINDS == expected
 
@@ -138,5 +140,7 @@ def test_session_trigger_ids_frozenset_covers_all() -> None:
     """SESSION_TRIGGER_IDS holds every declared trigger id. K261 removed the per-turn chain's
     four triggers and compose-on-interrupt-tool-result, and added model-on-user-message and
     first-message-on-session-prompt. K263 removed warn-on-fragment-error: session_prompt records a
-    failed source itself."""
-    assert len(SESSION_TRIGGER_IDS) == 13
+    failed source itself. K274 added session-prompt-on-session-changed; K277 added
+    skill-fragment-on-user-message and model-on-skill-fragment."""
+    assert len(SESSION_TRIGGER_IDS) == 16
+    assert "session-prompt-on-session-changed" in SESSION_TRIGGER_IDS
