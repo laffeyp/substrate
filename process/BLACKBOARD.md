@@ -529,6 +529,12 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Sprint K286 (2026-10-10, closed) — a harness's MCP call is Substrate's own ToolCall
+- **What changed.** `ToolCall` and `ToolResult` gain `origin` (`reply`, `mcp`). An MCP call is written by the model step and run by the tool producer, whose rules now apply. The repeated-write guard refuses a second MCP write, which it never did under K284. The continue-triggers skip `origin=mcp`. `HarnessToolCall` drops `via`, and `ToolRoute` is gone.
+- **Documents.** Vocabulary § Q.6; roadmap r2.
+- **Records.** The `session`, `daily` and `tool_loop` CI records were regenerated.
+- **Tests.** Full suite: 1,424 passed. Commit `309c7e2c`.
+
 ### Roadmap 2026-10-10 (K282–K285) — a harness driver's tool calls on the record
 - **K282.** Session vocabulary v0.5 (§ Q): `HarnessToolCall`, `HarnessToolResult`, `ToolRoute` (`harness`, `mcp`), and `ToolMode` (`mcp` added; it replaces five raw strings).
 - **K283.** `adapters/harness_streams.py` parses each CLI's stream, and `CliResponder.astream()` reads it as it arrives.

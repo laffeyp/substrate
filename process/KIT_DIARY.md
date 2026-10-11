@@ -806,6 +806,15 @@ The Substrate build is the first project of its class (a runtime / event-sourcin
 
 ---
 
+### 2026-10-10 (late night) — It worked, and the concept was wrong
+
+**66. Working is not the same as right; check each new event against the producer that owns the act (2026-10-10, K286).** K284 passed every test and wrote files through all three drivers in the installed app. It was still wrong. It recorded Substrate's own tool as a harness kind, and it ran the tool inside the model producer. That bypassed the tool producer, which is the one unit that runs tools, applies their rules and writes their results. The Architect caught it from the record, not from a failure. A pressure test against the code then set the right shape:
+- producers run concurrently, so the tool producer can serve a running model step;
+- trigger predicates read the payload, so `origin` keeps a second model step from starting;
+- the result goes back in-process, after the tool producer writes it.
+
+The rule for the kit: for every event a design adds, name the producer that already owns that act, and write the event there. A test that only counts events and files cannot see the wrong owner. Separately, `electron_smoke` failed once on the first launch after an install and passed on the next two runs. That is an open intermittent, not fixed.
+
 ### 2026-10-10 (night) — Harness tool calls on the record: a gate that passed by luck, and a forum report that was out of date
 
 **64. A gate that passes against the repo build can pass by a race (2026-10-10, U130).** After U124, `bindPaneAsUser` pressed ↵ twice: once to arm the folder, once to start on the lit model. Against the repo build it passed, because the driver roster had not loaded and the fallback list held only `deterministic`, so ↵ picked it. The installed app loaded the roster first. The lit row was then the folded `cli agents` group, ↵ opened it, and `electron_smoke` recorded 0 signals. A helper that drives a UI has to wait for the state a user sees, here the loaded roster, before it acts. Run gates against the packaged app before calling a UI change done.
