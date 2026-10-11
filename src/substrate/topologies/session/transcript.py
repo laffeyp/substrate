@@ -19,7 +19,7 @@ import time
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from msgspec import Struct
 
@@ -64,6 +64,9 @@ _DETERMINISTIC_CONTEXT_TOKENS = 4096
 _context_cache: dict[tuple[str, str], tuple[float, int]] = {}
 
 _CHARS_PER_TOKEN = 4  # coarse conservative estimator; see module docstring
+# § S.1: the newest tool results always render whole; § S.5: the estimate's scale is clamped.
+KEEP_WHOLE_TOOL_OUTPUTS = 3
+_SCALE_MIN, _SCALE_MAX = 1.0, 4.0
 
 # _KIND_USER_MESSAGE, _KIND_MODEL_REPLY, _KIND_PARK, _KIND_TRANSCRIPT_COMPACTED
 # imported above from `.vocabulary` (single source of truth per REVIEW F5).
@@ -219,13 +222,56 @@ def session_changed_line(field: str, old: str, new: str) -> str:
     return f"Environment update: {field} changed from {old or '(none)'} to {new or '(none)'}."
 
 
+def result_lines(kind: str, payload: Mapping[str, Any], tool: str, seq: int) -> tuple[str, str]:
+    """A tool result's history line whole, and the placeholder that replaces it once cleared
+    (§ S.3). `kind` is `ToolResult` or `HarnessToolResult`; `tool` is its call's tool."""
+    ok = payload.get("ok", True)
+    if kind == HARNESS_TOOL_RESULT:
+        marker = "HARNESS RESULT"
+        out = payload.get("output", "")
+    else:
+        marker = "RESULT"
+        out = payload.get("output") if ok else payload.get("error", "")
+    whole = f"{marker if ok else marker + '(fail)'}: {out}"
+    placeholder = f"{marker} [cleared: {tool}, seq {seq}, {len(str(out))} chars]"
+    return whole, placeholder
+
+
+def output_savings(turn: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """For each tool result in `turn`, its seq and the estimated tokens clearing it saves."""
+    tools: dict[str, str] = {}
+    out: list[tuple[int, int]] = []
+    for env in turn:
+        kind = env.get("kind", "")
+        payload = env.get("payload") or {}
+        if not isinstance(payload, Mapping):
+            continue
+        if kind == HARNESS_TOOL_CALL:
+            tools[str(payload.get("call_id", ""))] = str(payload.get("tool", "?"))
+        elif kind in (_KIND_TOOL_RESULT, HARNESS_TOOL_RESULT):
+            tool = (
+                str(payload.get("tool", "?"))
+                if kind == _KIND_TOOL_RESULT
+                else tools.get(str(payload.get("call_id", "")), "?")
+            )
+            whole, placeholder = result_lines(kind, payload, tool, int(env.get("seq", 0)))
+            out.append(
+                (int(env.get("seq", 0)), max(_est_tokens(whole) - _est_tokens(placeholder), 0))
+            )
+    return out
+
+
 def _render_turns(
-    kept_turns: list[list[dict[str, Any]]], after_current_user: list[str] | None = None
+    kept_turns: list[list[dict[str, Any]]],
+    after_current_user: list[str] | None = None,
+    cleared_through: int | None = None,
 ) -> list[str]:
     """The history lines for `kept_turns`: a range header, then each turn's events.
     `after_current_user` goes on the lines right after the last turn's `USER:` line: the
-    session's reminder line and this step's environment updates (§ P.2, § P.4)."""
+    session's reminder line and this step's environment updates (§ P.2, § P.4). A tool result at
+    or below `cleared_through` renders as its placeholder (§ S.3)."""
     lines: list[str] = []
+    harness_tools: dict[str, str] = {}
     if kept_turns:
         first = kept_turns[0][0].get("payload") or {}
         last = kept_turns[-1][0].get("payload") or {}
@@ -263,19 +309,22 @@ def _render_turns(
                     lines.append(f"MODEL: {last_reply}")
             elif kind == _KIND_TOOL_CALL:
                 lines.append(f"TOOL {payload.get('tool', '?')}: args={payload.get('args', [])}")
-            elif kind == _KIND_TOOL_RESULT:
-                ok = payload.get("ok", True)
-                marker = "RESULT" if ok else "RESULT(fail)"
-                out = payload.get("output") if ok else payload.get("error", "")
-                lines.append(f"{marker}: {out}")
+            elif kind in (_KIND_TOOL_RESULT, HARNESS_TOOL_RESULT):
+                seq = int(env.get("seq", 0))
+                tool = (
+                    str(payload.get("tool", "?"))
+                    if kind == _KIND_TOOL_RESULT
+                    else harness_tools.get(str(payload.get("call_id", "")), "?")
+                )
+                whole, placeholder = result_lines(kind, payload, tool, seq)
+                cleared = cleared_through is not None and seq <= cleared_through
+                lines.append(placeholder if cleared else whole)
             elif kind == HARNESS_TOOL_CALL:
                 # § Q.4, § Q.6: what a harness driver did with its own tools, in record order.
+                harness_tools[str(payload.get("call_id", ""))] = str(payload.get("tool", "?"))
                 lines.append(
                     f"HARNESS TOOL {payload.get('tool', '?')}: args={payload.get('args', {})}"
                 )
-            elif kind == HARNESS_TOOL_RESULT:
-                marker = "HARNESS RESULT" if payload.get("ok", True) else "HARNESS RESULT(fail)"
-                lines.append(f"{marker}: {payload.get('output', '')}")
             elif kind == BACKGROUND_TASK_ENDED:
                 # UI sprint 104: the model keeps hearing that a background task ended
                 from . import BackgroundTaskEnded, background_notice
@@ -323,6 +372,76 @@ def plan_window(
         used += costs[i]
         keep_from = i
     return keep_from if costs else 0
+
+
+class HistoryPlan(NamedTuple):
+    """What the history window keeps (§ S): the index of the oldest kept turn, the clearing
+    boundary, and the estimated tokens of head plus history before and after the cut."""
+
+    keep_from: int
+    cleared_through: int | None
+    tokens_before: int
+    tokens_after: int
+
+
+def plan_history(
+    turns: list[tuple[int, int, list[tuple[int, int]]]],
+    head_tokens: int,
+    driver_context_tokens: int,
+    driver_headroom_frac: float,
+    prev_cleared: int | None,
+    scale: float = 1.0,
+    keep_whole: int = KEEP_WHOLE_TOOL_OUTPUTS,
+) -> HistoryPlan:
+    """§ S.1, S.2: clear old tool outputs first, then drop whole turns.
+
+    `turns` is each turn's `(from_seq, cost, savings)`, `savings` the `(seq, tokens)` that clearing
+    each tool result saves. The current turn's newest `keep_whole` results never clear. The boundary starts at
+    `prev_cleared` (the record's last cut) and moves forward only while the history passes the
+    budget, until it fits within half the budget, so the prompt's start holds still between passes.
+    Whole turns drop, oldest first, only once every clearable result is cleared. Pure: every input
+    comes from the record."""
+    budget = int(driver_context_tokens * driver_headroom_frac) - head_tokens
+    # § S.7: a finished turn ended with the model's reply, so all its outputs can clear; the
+    # current turn (the last) keeps its newest `keep_whole` whole.
+    earlier = [s for _f, _c, savings in turns[:-1] for s in savings]
+    current = sorted(turns[-1][2]) if turns else []
+    clearable = sorted(earlier + current[: max(len(current) - keep_whole, 0)])
+
+    def turn_costs(c: int | None) -> list[int]:
+        return [
+            cost - sum(t for seq, t in savings if c is not None and seq <= c)
+            for _f, cost, savings in turns
+        ]
+
+    def total(c: int | None, keep_from: int = 0) -> int:
+        return int(sum(turn_costs(c)[keep_from:]) * scale)
+
+    cleared = prev_cleared
+    if total(cleared) > budget:
+        for seq, _t in clearable:
+            if cleared is not None and seq <= cleared:
+                continue
+            cleared = seq
+            if total(cleared) <= budget // 2:
+                break
+    keep_from = 0
+    if total(cleared) > budget:
+        scaled = [int(c * scale) for c in turn_costs(cleared)]
+        keep_from = plan_window(scaled, head_tokens, driver_context_tokens, driver_headroom_frac)
+    return HistoryPlan(
+        keep_from=keep_from,
+        cleared_through=cleared,
+        tokens_before=head_tokens + total(None),
+        tokens_after=head_tokens + total(cleared, keep_from),
+    )
+
+
+def measured_scale(reported_prompt_tokens: int, estimated_tokens: int) -> float:
+    """§ S.5: reported over estimated prompt tokens, clamped to 1.0-4.0."""
+    if reported_prompt_tokens <= 0 or estimated_tokens <= 0:
+        return 1.0
+    return min(max(reported_prompt_tokens / estimated_tokens, _SCALE_MIN), _SCALE_MAX)
 
 
 def head_block(
@@ -378,6 +497,7 @@ def compose_model_prompt(
     notices: list[str] | None = None,
     after_message: list[str] | None = None,
     system_sources: frozenset[str] | None = None,
+    cleared_through: int | None = None,
 ) -> tuple[str, str, tuple[int, ...]]:
     """The system part and base prompt for one model call, and the seqs of the fragments used.
 
@@ -393,7 +513,7 @@ def compose_model_prompt(
     turns = [t for t in _group_by_turn(history) if not is_driver_turn(t)]
     blocks = [head_text] if head_text else []
     if turns:
-        blocks.append("\n".join(_render_turns(turns, beside)))
+        blocks.append("\n".join(_render_turns(turns, beside, cleared_through)))
     else:
         blocks += beside
     blocks += notices or []

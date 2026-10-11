@@ -12,7 +12,7 @@ clears its turn slice on every PromptComposed, which the model step records befo
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from ...types import Event, Subscription
 from .vocabulary import (
@@ -37,39 +37,77 @@ def producer_kind_from_lifecycle_payload(payload: Any) -> str | None:
     return ref.get("kind") if isinstance(ref, dict) else None
 
 
-class TurnHistory:
-    """Each turn's seq span and estimated rendered size, in record order (K261, K268).
+class HistoryState(NamedTuple):
+    """`TurnHistory`'s value: each turn as `(from_seq, to_seq, cost, savings)`, the record's last
+    compaction cut, and the driver's measured estimate scale (§ S.2, § S.5)."""
 
-    The model triggers choose the prompt's history window from these sizes and hand the model step
-    a ticket to the kept seq range of the record; the model step reads those events with
+    turns: list[tuple[int, int, int, list[tuple[int, int]]]]
+    cleared_through: int | None
+    dropped: tuple[int, int] | None
+    scale: float
+
+
+class TurnHistory:
+    """Each turn's seq span, estimated rendered size, and what clearing each of its tool results
+    would save, in record order (K261, K268, K292). Also the record's last `TranscriptCompacted`
+    cut, which the next cut starts from, and the driver's measured scale: the latest reported
+    `ModelReply.usage.prompt_tokens` over the `total_tokens` of the `PromptComposed` before it.
+
+    The model triggers choose the prompt's history window from these and hand the model step a
+    ticket to the kept seq range of the record; the model step reads those events with
     `api.read_range`. The view keeps only the current turn's events (to price it as it grows);
-    finished turns are a span and a size.
+    finished turns are a span, a size and their savings.
     """
 
     deterministic = True
 
     def __init__(self, kinds: frozenset[str]) -> None:
-        self.subscription = Subscription(kinds=kinds)
-        self._turns: list[list[int]] = []  # [from_seq, to_seq, cost]
+        self.subscription = Subscription(kinds=kinds | {PROMPT_COMPOSED})
+        self._turns: list[list[Any]] = []  # [from_seq, to_seq, cost, savings]
         self._current: list[dict[str, Any]] = []
+        self._cleared: int | None = None
+        self._dropped: tuple[int, int] | None = None
+        self._last_estimate = 0
+        self._scale = 1.0
 
     def update(self, event: Event) -> None:
-        from .transcript import turn_cost
-        from .vocabulary import USER_MESSAGE
+        from .transcript import measured_scale, output_savings, turn_cost
+        from .vocabulary import MODEL_REPLY, TRANSCRIPT_COMPACTED, USER_MESSAGE
 
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if event.kind == PROMPT_COMPOSED:
+            self._last_estimate = int(payload.get("total_tokens") or 0)
+            return
+        if event.kind == TRANSCRIPT_COMPACTED:
+            cleared = payload.get("cleared_through_seq")
+            dropped = payload.get("dropped_seq_range")
+            self._cleared = int(cleared) if isinstance(cleared, int) else None
+            self._dropped = (int(dropped[0]), int(dropped[1])) if dropped else None
+        elif event.kind == MODEL_REPLY:
+            usage = payload.get("usage")
+            if isinstance(usage, dict) and not usage.get("estimated", True):
+                self._scale = measured_scale(
+                    int(usage.get("prompt_tokens") or 0), self._last_estimate
+                )
         env = {"seq": event.seq, "kind": event.kind, "payload": event.payload}
         if event.kind == USER_MESSAGE:
             self._current = [env]
-            self._turns.append([event.seq, event.seq, 0])
+            self._turns.append([event.seq, event.seq, 0, []])
         elif self._current:
             self._current.append(env)
         else:
             return  # before the first UserMessage: not part of any turn
         self._turns[-1][1] = event.seq
         self._turns[-1][2] = turn_cost(self._current)
+        self._turns[-1][3] = output_savings(self._current)
 
-    def value(self) -> list[tuple[int, int, int]]:
-        return [(a, b, c) for a, b, c in self._turns]
+    def value(self) -> HistoryState:
+        return HistoryState(
+            turns=[(a, b, c, list(d)) for a, b, c, d in self._turns],
+            cleared_through=self._cleared,
+            dropped=self._dropped,
+            scale=self._scale,
+        )
 
 
 class FragmentCohort:

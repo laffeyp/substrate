@@ -35,6 +35,7 @@ from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describ
 from .vocabulary import (
     COMPACTION_REASON_WINDOW_EXCEEDED,
     COMPACTION_ROLLING_WINDOW,
+    COMPACTION_TOOL_OUTPUT_CLEARED,
     END_ON_EXIT_SENTINEL,
     CACHE_LAYOUT_SOURCES,
     INTERRUPT_REQUESTED,
@@ -530,6 +531,7 @@ def _model_factory(
             wrap_up_reason = "budget reached"
         elif trailing_fails >= _MAX_CONSECUTIVE_FAILS:
             wrap_up_reason = f"tool failed {trailing_fails} times in a row"
+        cleared_through = ticket.get("cleared_through") if ticket else None
         system_text, prompt_text, fragment_seqs = compose_model_prompt(
             history=history,
             seed=seed,
@@ -537,16 +539,23 @@ def _model_factory(
             notices=notices,
             after_message=updates,
             system_sources=system_sources,
+            cleared_through=cleared_through,
         )
-        if ticket and ticket.get("dropped"):
-            lo, hi = ticket["dropped"]
+        # § S.4: one event per change of cut. A ticket from before v0.7 has no `changed`; it
+        # recorded a cut whenever turns dropped.
+        if ticket and ticket.get("changed", bool(ticket.get("dropped"))):
+            dropped = ticket.get("dropped")
             yield TranscriptCompacted(
-                strategy=COMPACTION_ROLLING_WINDOW,
-                dropped_seq_range=(int(lo), int(hi)),
+                strategy=COMPACTION_ROLLING_WINDOW if dropped else COMPACTION_TOOL_OUTPUT_CLEARED,
+                dropped_seq_range=(int(dropped[0]), int(dropped[1])) if dropped else None,
+                cleared_through_seq=cleared_through,
                 kept_seq_start=int(ticket["from_seq"]),
                 reason=COMPACTION_REASON_WINDOW_EXCEEDED,
                 tokens_before=int(ticket["tokens_before"]),
-                tokens_after=_est_tokens(system_text) + _est_tokens(prompt_text),
+                tokens_after=int(
+                    ticket.get("tokens_after", _est_tokens(system_text) + _est_tokens(prompt_text))
+                ),
+                token_scale=float(ticket.get("scale", 1.0)),
             )
         # K290: this turn's tool results are in the history already, as its TOOL and RESULT lines
         # (the ticket runs to the triggering ToolResult), so the endings no longer repeat them.
@@ -954,6 +963,8 @@ def session_topology(
         payload = getattr(ctx.event, "payload", None) or {}
         return producer_kind_from_lifecycle_payload(payload)
 
+    harness_driver = _streams(driver)
+
     def _prompt_input(ctx: Any) -> dict[str, Any]:
         """What the model step builds a prompt from (K268): the session's prompt fragments, and a
         ticket to the history it keeps — the seq range of this record's newest turns that fit,
@@ -961,25 +972,37 @@ def session_topology(
         TranscriptCompacted the model step records. The ticket names no path: it is recorded,
         and a recorded path would tie the record's bytes to where it sits."""
         fragments = list(ctx.views["fragment_cohort"].value())
-        turns = ctx.views["turn_history"].value()
+        state = ctx.views["turn_history"].value()
+        turns = state.turns
         if not turns:
             return {"fragments": fragments, "history_ref": None}
         system_text, head_text, reminder, _seqs = head_block(seed, fragments, system_sources)
         head_tokens = _est_tokens(system_text) + _est_tokens(head_text) + _est_tokens(reminder)
-        keep = plan_window(
-            [cost for _a, _b, cost in turns],
+        # § S.5: a harness driver's reported counts include its own prompt and tool loop.
+        scale = 1.0 if harness_driver else state.scale
+        plan = plan_history(
+            [(a, cost, savings) for a, _b, cost, savings in turns],
             head_tokens,
             driver_context_tokens,
             driver_headroom_frac,
+            state.cleared_through,
+            scale,
         )
-        dropped = [turns[0][0], turns[keep][0] - 1] if keep > 0 else None
+        keep = plan.keep_from
+        dropped = (turns[0][0], turns[keep][0] - 1) if keep > 0 else None
         return {
             "fragments": fragments,
             "history_ref": {
                 "from_seq": turns[keep][0],
                 "to_seq": int(ctx.event.seq),
-                "dropped": dropped,
-                "tokens_before": head_tokens + sum(cost for _a, _b, cost in turns),
+                "dropped": list(dropped) if dropped else None,
+                "cleared_through": plan.cleared_through,
+                "tokens_before": plan.tokens_before,
+                "tokens_after": plan.tokens_after,
+                "scale": scale,
+                # § S.4: a cut is recorded only when it differs from the record's last one.
+                "changed": (plan.cleared_through, dropped)
+                != (state.cleared_through, state.dropped),
             },
         }
 
@@ -1464,7 +1487,7 @@ from .transcript import (  # noqa: E402
     _est_tokens,
     compose_model_prompt,
     head_block,
-    plan_window,
+    plan_history,
     resolve_driver_context_tokens,
     session_changed_line,
 )

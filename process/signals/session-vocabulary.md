@@ -681,6 +681,10 @@ The characters ÷ 4 estimate is multiplied by the driver's measured ratio: the l
 10. `cleared_through_seq` never decreases within a record.
 11. No two `TranscriptCompacted` events in a record carry the same `(cleared_through_seq, dropped_seq_range)` in a row.
 
+### S.7 Only the current turn keeps outputs whole (K292, 2026-10-11; amends S.1)
+
+S.1 kept the newest 3 tool results of the whole history whole. Replanning the codex session `s_b8dab6b0cfd443cdba9bc8b3` showed the flaw: its last turn's three file reads cost about 57,000 estimated tokens, the whole budget, so every earlier turn dropped. As built from K292: the newest 3 tool results **of the current turn** render whole. A finished turn ended with the model's reply, and all its outputs may clear. Invariant 9 reads the same with that set.
+
 ### Ratification signature
 
 - **v0.7** — Sprint K291, 2026-10-11, by the Architect's direction of the same day. §§ A–R byte-preserved.
