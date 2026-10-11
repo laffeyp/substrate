@@ -73,6 +73,7 @@ from .vocabulary import (
     ReturnReason,
     StopReason,
     SessionEndReason,
+    ToolMode,
     SessionWarningKind,
 )
 
@@ -211,6 +212,24 @@ class SessionChanged(Struct, frozen=True):
     field: str  # "driver" | "bundle" | "per_turn" | "date"
     old: str
     new: str
+
+
+# Session vocabulary § Q (K282). A harness driver's tool call during one model step: its own tool,
+# read from its stream (`via=harness`), or the session's tool over MCP (`via=mcp`). Neither starts
+# a producer; the step that wrote them still ends with its ModelReply.
+class HarnessToolCall(Struct, frozen=True):
+    call_id: str
+    tool: str
+    args: dict[str, Any]
+    via: str  # ToolRoute
+    step: int
+    turn_index: int
+
+
+class HarnessToolResult(Struct, frozen=True):
+    call_id: str
+    ok: bool
+    output: str
 
 
 class SessionWarning(Struct, frozen=True):
@@ -405,7 +424,7 @@ def _model_factory(
     FinalAnswer; `return-on-reply` ends the turn.
     """
     native = callable(getattr(driver, "achat_tools", None))
-    tool_mode = "none" if not tools else ("native" if native else "text")
+    tool_mode = ToolMode.NONE if not tools else (ToolMode.NATIVE if native else ToolMode.TEXT)
 
     async def _model(
         inp: Any,
@@ -416,6 +435,8 @@ def _model_factory(
         | BackgroundTaskEnded
         | PromptComposed
         | SessionChanged
+        | HarnessToolCall
+        | HarnessToolResult
     ]:
         step = int(inp.get("step", 0)) if hasattr(inp, "get") else 0
         results = list(inp.get("results", [])) if hasattr(inp, "get") else []
@@ -531,11 +552,11 @@ def _model_factory(
                 + _WRAP_UP_DIRECTIVE.format(reason=wrap_up_reason)
                 + (f"\n\nLast error was: {last_err}" if last_err else "")
             )
-        elif script is None and tool_mode == "native":
+        elif script is None and tool_mode == ToolMode.NATIVE:
             prompt = prompt_text + (
                 f"\n\nTool results so far, in order: {progress}" if progress else ""
             )
-        elif script is None and tool_mode == "text":
+        elif script is None and tool_mode == ToolMode.TEXT:
             prompt = (
                 f"{prompt_text}\n\nTools you MAY use:\n{suite_describe(tools)}\n"
                 + (f"Tool results so far, in order: {progress}\n" if progress else "")
@@ -580,7 +601,7 @@ def _model_factory(
                 )
             return
         beside_call = ""  # what the model said beside a native tool call
-        if wrap_up_reason is None and tool_mode == "native":
+        if wrap_up_reason is None and tool_mode == ToolMode.NATIVE:
             metered = getattr(driver, "achat_tools_metered", None)
             if callable(metered):
                 message, usage = await metered(
@@ -601,7 +622,7 @@ def _model_factory(
             beside_call = str(message.get("content", "") or "")
         else:
             reply_text, usage = await call_responder_metered(driver, prompt, system=system_text)
-            if wrap_up_reason is None and tool_mode == "text":
+            if wrap_up_reason is None and tool_mode == ToolMode.TEXT:
                 kind, chosen = parse_tool_call({"content": reply_text, "tool_calls": []}, tools)
             else:
                 kind, chosen = "answer", reply_text
@@ -858,6 +879,8 @@ def session_topology(
                 BackgroundTaskEnded,
                 PromptComposed,
                 SessionChanged,
+                HarnessToolCall,
+                HarnessToolResult,
             ],
             schema_version=1,
             factory=_model_factory(
@@ -1260,6 +1283,8 @@ __all__ = [
     "SessionEndRequested",
     "InterruptRequested",
     "SessionChanged",
+    "HarnessToolCall",
+    "HarnessToolResult",
     "SessionStarted",
     "SessionWarning",
     "ToolCall",

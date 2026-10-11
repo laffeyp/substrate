@@ -32,6 +32,8 @@ from ..tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 from .vocabulary import (
     BACKGROUND_TASK_ENDED,
     DRIVER_SLASH_SOURCE,
+    HARNESS_TOOL_CALL,
+    HARNESS_TOOL_RESULT,
     SESSION_CHANGED,
     StopReason,
 )
@@ -75,6 +77,8 @@ TURN_EVENT_KINDS = frozenset(
     {
         BACKGROUND_TASK_ENDED,
         SESSION_CHANGED,
+        HARNESS_TOOL_CALL,
+        HARNESS_TOOL_RESULT,
         _KIND_USER_MESSAGE,
         _KIND_MODEL_REPLY,
         _KIND_TOOL_CALL,
@@ -258,6 +262,15 @@ def _render_turns(
                 marker = "RESULT" if ok else "RESULT(fail)"
                 out = payload.get("output") if ok else payload.get("error", "")
                 lines.append(f"{marker}: {out}")
+            elif kind == HARNESS_TOOL_CALL:
+                # § Q.4: what a harness driver did inside its own loop, in record order.
+                lines.append(
+                    f"HARNESS TOOL {payload.get('tool', '?')} ({payload.get('via', '?')}): "
+                    f"args={payload.get('args', {})}"
+                )
+            elif kind == HARNESS_TOOL_RESULT:
+                marker = "HARNESS RESULT" if payload.get("ok", True) else "HARNESS RESULT(fail)"
+                lines.append(f"{marker}: {payload.get('output', '')}")
             elif kind == BACKGROUND_TASK_ENDED:
                 # UI sprint 104: the model keeps hearing that a background task ended
                 from . import BackgroundTaskEnded, background_notice

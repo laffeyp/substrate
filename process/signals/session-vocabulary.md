@@ -565,6 +565,39 @@ The operator's `//<command>` reaches the driver as `/<command>`.
 
 No new kind is needed: the card's `DriverCommand` and `DriverCommandResult` are not built.
 
+## Q. v0.5 — a harness driver's tool calls (2026-10-10, sprint K282)
+
+A harness driver (claude, codex, cursor-agent) runs its own agent loop inside one model step. Every tool call it makes during that step is recorded, whichever tool set it used. Roadmap: `process/planning/ROADMAP-2026-10-10-harness-tool-calls.md`.
+
+### Q.1 Kinds
+
+| Kind | Fields | Written by |
+|---|---|---|
+| `HarnessToolCall` | `call_id: str`, `tool: str`, `args: dict`, `via: str`, `step: int`, `turn_index: int` | the model step, as the call starts |
+| `HarnessToolResult` | `call_id: str`, `ok: bool`, `output: str` | the model step, as the call ends |
+
+`call_id` pairs a result with its call. It is the harness's own id for `via = harness`, and Substrate's for `via = mcp`.
+
+### Q.2 Routes (`via`)
+
+- **`harness`.** The driver's own tool (Claude Code's `Bash`, Codex's `command_execution`, cursor-agent's `shellToolCall`), read from the driver's event stream. Substrate did not run it and records what the stream reports.
+- **`mcp`.** One of the session's own tools, which the driver called through Substrate's MCP server. Substrate ran it.
+
+### Q.3 Neither starts a producer
+
+`ToolCall` starts the session's tool producer and, through its `ToolResult`, the next model step. A harness call happens inside a model step that is still running, so `HarnessToolCall` and `HarnessToolResult` subscribe nothing. The step that wrote them ends with its `ModelReply` as before.
+
+### Q.4 History
+
+Both are turn events. History renders them in record order, between the turn's `USER:` line and its reply:
+
+- `HARNESS TOOL <tool> (<via>): args=<args>`
+- `HARNESS RESULT: <output>`, or `HARNESS RESULT(fail): <output>`
+
+### Q.5 The `mcp` tool mode
+
+A model step runs in one of four tool modes: `none`, `native` (Ollama's tool calls), `text` (the tool list and JSON directive in the prompt), and from v0.5 `mcp`. In `mcp` the driver receives the session's tools as registered MCP tools, and the prompt carries no text tool list and no JSON directive.
+
 ### Ratification signature
 
 - **v0.4** — Sprint K270, 2026-10-10. §§ A–O byte-preserved.

@@ -85,6 +85,10 @@ INTERRUPT_REQUESTED = "InterruptRequested"
 # Written by the model step when the session's driver, bundle, per_turn or date differs from the
 # last recorded value (session vocabulary § P.4, K274).
 SESSION_CHANGED = "SessionChanged"
+# v0.5 (session-vocabulary.md § Q, sprint K282): a harness driver's tool calls, written by the model
+# step while the driver's own loop runs. Neither starts a producer (§ Q.3).
+HARNESS_TOOL_CALL = "HarnessToolCall"
+HARNESS_TOOL_RESULT = "HarnessToolResult"
 
 # v0.2 additions (session-vocabulary.md § I, sprint 058, 2026-09-01).
 PROMPT_FRAGMENT = "PromptFragment"
@@ -111,6 +115,22 @@ class StopReason(StrEnum):
     END_TURN = "end_turn"
     TOOL_USE = "tool_use"
     WRAP_UP = "wrap_up"
+
+
+class ToolRoute(StrEnum):
+    """HarnessToolCall.via (§ Q.2): which tool set the harness driver used."""
+
+    HARNESS = "harness"  # its own tool, read from its event stream
+    MCP = "mcp"  # the session's tool, called over Substrate's MCP server and run by Substrate
+
+
+class ToolMode(StrEnum):
+    """How a model step offers the session's tools to its driver (§ Q.5)."""
+
+    NONE = "none"  # no tools
+    NATIVE = "native"  # the driver's own tool-calling API (Ollama)
+    TEXT = "text"  # the tool list and the JSON directive in the prompt
+    MCP = "mcp"  # registered tools over Substrate's MCP server (harness drivers)
 
 
 class ReturnReason(StrEnum):
@@ -159,6 +179,8 @@ SESSION_KINDS: frozenset[str] = frozenset(
         BACKGROUND_TASK_ENDED,
         INTERRUPT_REQUESTED,
         SESSION_CHANGED,
+        HARNESS_TOOL_CALL,
+        HARNESS_TOOL_RESULT,
     }
 )
 
@@ -393,6 +415,10 @@ __all__ = [
     "CACHE_LAYOUT_SOURCES",
     "TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED",
     "SESSION_CHANGED",
+    "HARNESS_TOOL_CALL",
+    "HARNESS_TOOL_RESULT",
+    "ToolRoute",
+    "ToolMode",
     "RETURNED",
     "ReturnReason",
     "SESSION_ENDED",
