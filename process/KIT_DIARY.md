@@ -806,6 +806,19 @@ The Substrate build is the first project of its class (a runtime / event-sourcin
 
 ---
 
+### 2026-10-10 (evening) — CLI drivers that cannot write: claims from code, and an isolation check that rewarded removal
+
+**61. State what a driver can do from its records, not from its code (2026-10-10, Architect).** An audit of the CLI drivers made several claims without a run behind them. It said "Claude can't edit files, the profile working as designed", that Codex had never run in a session before, and that Substrate never saw a Codex write. The Architect rejected each. Two records settled the question in minutes. Substrate's record of the Codex session held six replies and no `ToolCall`. Codex's own rollout log (`~/.codex/sessions/…`) held its 21,736-character base instructions, its read-only `sandbox_policy`, and its own `exec` call failing with "operation not permitted". Before saying what a driver can or cannot do, read the session record and the harness's own log, and label anything else as inference.
+
+**62. An isolation check that only counts what is gone rewards removing capability (2026-10-10, U120).** The ask was to clear Claude Code's setup: CLAUDE.md, hooks, output style and memory. `--tools ""` came in with the research flags, and U120's check rewarded it: `/context` through the profile showed 0 to 21 tokens. Nothing checked that the driver could still act, so Claude Code's own tools went off with no failing test. A check that a driver is isolated must also assert what has to survive. Here, that is a write in a plain folder.
+
+**63. Login is not the only gate; headless harness CLIs answer "no" to permission (2026-10-10).** Each harness CLI asks, per folder, whether to trust it and whether to write there. In a terminal a person answers. Headless, each defaults to no:
+- cursor-agent stops at "Workspace Trust Required" without `--trust`, and only proposes edits without `--force`.
+- `codex exec` runs read-only by default and refuses a folder that is not a git repo.
+- `claude -p` starts in `default` mode, which allows reads only.
+
+Substrate shipped a login step for each driver and no permission step, so a logged-in driver still could not work. Per the vendor docs: `learn.chatgpt.com/docs/non-interactive-mode.md`, `cursor.com/docs/cli/headless`, `code.claude.com/docs/en/permission-modes.md`.
+
 ### 2026-10-10 — The default-guidance roadmap (K270–K281, U120–U123): one resume door, and a test cadence
 
 **59. A paused run has one way in; design every mid-session signal through it (2026-10-10, K274, K277, U123).** Three cards designed an injected event (`SessionChanged`, `SkillRequested`, a driver-command pair) and found the same wall: the session pauses on `pause_await_input(resume_condition=UserMessage)`, so a parked session resumes only on a `UserMessage`, and `Runtime.inject_event` reaches live runs only. Each was rebuilt on the door that exists. `SessionChanged` is written by the model step on a turn's first step, comparing the rebuilt topology with a view of the record; this is UI sprint 104's `BackgroundTaskEnded` pattern. The skill request and the driver command ride the turn's own `UserMessage.slash_source`, a field that had always been `"chat"` or `"daemon"`. No new event kind was needed for two of the three. Before designing an event that must reach a session between turns, read its termination policy's resume condition.
