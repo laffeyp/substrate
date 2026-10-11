@@ -806,6 +806,16 @@ The Substrate build is the first project of its class (a runtime / event-sourcin
 
 ---
 
+### 2026-10-10 (night's end) — Edit the least, carry the idea, name no tool
+
+**68. "Make it generic" is a minimal edit, not a licence to rewrite (2026-10-10, K287 redone).** The ask for the high level was a fine-tooth comb: names out, voice fixed, `dellm`. The first pass rewrote nearly every sentence and renamed the headings, and the operator's own wording was lost. Restored, the honest diff was 24 lines of 150. Before editing someone's text, list the edits the ask requires, apply only those, and report the count.
+
+**69. A shorter version must carry every core idea, so derive it from a list of those ideas (2026-10-10).** Medium and low were written down from memory of high. They dropped "default to skepticism" entirely, 14 of 19 working rules, and low's memory and explaining. One distillation also inverted a rule: "a few lookups, then back to work" made shallow research the default, where the original limited only mid-task detours. The fix was to reduce each original section to one-sentence core ideas, mark each level ✓, ½ or ✗ against them, and rebuild from the list.
+
+**70. Guidance names the act, not the tool (2026-10-10).** "Read each file in full with `read_file`" is true for an Ollama model and false for a harness driver. A harness driver's own read tool is its own, and Substrate's reaches it as `mcp__substrate__read_file`. The session's tool list already tells each model what its tools are called. A text that every model reads should say what to do, and the tool list should say with what.
+
+**71. Describe a place by what it is, not by its path alone (2026-10-10).** The memory section named `~/.substrate/memory/` and `<repo>/.substrate/memory/` and never said what either held. "Repo" was also wrong: the code reads the session's workspace folder. A model can act on "the user's memory, read by every session on this machine" and "the project's memory, which travels with the workspace folder". It cannot act on two bare paths.
+
 ### 2026-10-10 (later still) — A copied default carried one operator
 
 **67. "Copy first" also copies who the original was written for (2026-10-10, K287).** The default guidance was copied verbatim from one operator's setup (K275). Every session on every model then carried three things:

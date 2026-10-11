@@ -529,6 +529,25 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Guidance follow-through (2026-10-10, late night) — K287 redone, levels rebuilt, memory explained
+- **High restored.** K287's first pass rewrote nearly every sentence of the high text. The Architect: rewriting was for medium and low. High was restored from git (`794b397f^`) with 24 of 150 lines changed: names, voice, tool names, and the six memory entries about one operator or this project. Commit `4c3c6729`.
+- **No level names a tool.** A harness model's tools are its own, and Substrate's reach it over MCP under other names, so "with `read_file`" was wrong for every harness driver. A test now checks every bundle, skill and default prompt. `prompts/reviewer.md:66` still names `inspect_record` and `read_file` (a role prompt, left open).
+- **Low's reminder line** is the shared one, minus the two writers' names (`9e909553`).
+- **Medium and low rebuilt from high's core ideas.** Each original section was reduced to the ideas that must survive. Medium states each in one sentence; low states each in its shortest form. Restored:
+  - default skepticism and its parts;
+  - all 19 working rules;
+  - reading-file limits and opt-outs;
+  - explaining and memory in low.
+
+  The research idea is the original's: a mid-task unknown is settled and the task resumes, and a research task is researched fully. Commit `3242c528`.
+- **Memory explained.** Each level now says what memory is, that it lives in two folders, what each holds, and where:
+  - the user's memory, in `~/.substrate/memory/`, read by every session;
+  - the project's memory, in `.substrate/memory/` inside the session's workspace folder, which travels with the folder.
+
+  It also says the `MEMORY.md` index loads at start and the notes are read when they bear on the task. "The repository" was wrong: the code reads the workspace folder. The loaded index's heading uses the same names. Commit `ef4ca371`.
+- **Sizes:** high 4,680 tokens, medium 1,949, low 907 (772 with the small role).
+- **Comparison.** `process/planning/GUIDANCE-LEVELS-COMPARED-2026-10-10.md` shows the three levels side by side.
+
 ### Roadmap 2026-10-10 (K287–K289) — guidance levels
 - **K287.** The generic high text.
 - **K288.** Medium and low levels; four model classes; `GuidanceLevel` and `guidance_bundle`. Vocabulary § R.
