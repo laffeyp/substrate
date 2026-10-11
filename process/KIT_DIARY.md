@@ -806,6 +806,12 @@ The Substrate build is the first project of its class (a runtime / event-sourcin
 
 ---
 
+### 2026-10-10 (night) — Harness tool calls on the record: a gate that passed by luck, and a forum report that was out of date
+
+**64. A gate that passes against the repo build can pass by a race (2026-10-10, U130).** After U124, `bindPaneAsUser` pressed ↵ twice: once to arm the folder, once to start on the lit model. Against the repo build it passed, because the driver roster had not loaded and the fallback list held only `deterministic`, so ↵ picked it. The installed app loaded the roster first. The lit row was then the folded `cli agents` group, ↵ opened it, and `electron_smoke` recorded 0 signals. A helper that drives a UI has to wait for the state a user sees, here the loaded roster, before it acts. Run gates against the packaged app before calling a UI change done.
+
+**65. Test a vendor limit before designing around it (2026-10-10, U129).** A Cursor forum report said `cursor-agent -p` does not hand MCP tools to its model, and the roadmap planned a stream-only fallback on that basis. A ten-line probe server showed the report was out of date: with `--approve-mcps`, cursor-agent ran `tools/list` and `tools/call`. The same probe found the real limit, which no report named: cursor-agent reads `.cursor/mcp.json` only from its workspace, not from a parent folder. One cheap experiment replaced a wrong constraint with the right one.
+
 ### 2026-10-10 (evening) — CLI drivers that cannot write: claims from code, and an isolation check that rewarded removal
 
 **61. State what a driver can do from its records, not from its code (2026-10-10, Architect).** An audit of the CLI drivers made several claims without a run behind them. It said "Claude can't edit files, the profile working as designed", that Codex had never run in a session before, and that Substrate never saw a Codex write. The Architect rejected each. Two records settled the question in minutes. Substrate's record of the Codex session held six replies and no `ToolCall`. Codex's own rollout log (`~/.codex/sessions/…`) held its 21,736-character base instructions, its read-only `sandbox_policy`, and its own `exec` call failing with "operation not permitted". Before saying what a driver can or cannot do, read the session record and the harness's own log, and label anything else as inference.

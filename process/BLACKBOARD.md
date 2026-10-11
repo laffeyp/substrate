@@ -529,6 +529,14 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Roadmap 2026-10-10 (K282–K285) — a harness driver's tool calls on the record
+- **K282.** Session vocabulary v0.5 (§ Q): `HarnessToolCall`, `HarnessToolResult`, `ToolRoute` (`harness`, `mcp`), and `ToolMode` (`mcp` added; it replaces five raw strings).
+- **K283.** `adapters/harness_streams.py` parses each CLI's stream, and `CliResponder.astream()` reads it as it arrives.
+- **K284.** `topologies/session/mcp_channel.py` answers MCP JSON-RPC, and the model step runs each call and records it. The stream's copy of a call to Substrate's own server is skipped.
+- **K285.** Specs amended: product round 14, tech round 8, design round 3.
+- **Tests.** Full kernel suite: 1,423 passed, 8 skipped. Live: three CLIs wrote files read from their streams, and in the installed app all three wrote through both routes.
+- **Commits.** `fd0b6381`, `8429c3b9`, `896c03ad`, `9f7e270e`, and the commit carrying this entry.
+
 ### Roadmap 2026-10-10 (K270–K278, K281) — the default guidance
 - **What it does.** Every session now gets this machine's working and writing standard on top of Substrate's harness rules, delivered at the moments and through the channels Claude Code uses: style and environment on the system channel, CLAUDE.md and the memory index at the top of the user turn, and the hook line after each message. `dellm` loads on request. Research: `RESEARCH-2026-10-10-substrate-default-guidance-r7.md`; roadmap: `ROADMAP-2026-10-10-default-guidance.md`; vocabulary v0.4, § P.
 - **Kernel.**
