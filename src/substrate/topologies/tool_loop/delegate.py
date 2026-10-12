@@ -54,6 +54,7 @@ from ...adapters import (
     OllamaResponder,
     Responder,
 )
+from ...errors import describe_error
 from ..session.context_slice import extract_context_slice
 from ..session.vocabulary import turn_replies
 from ..session_registry import SessionEndedMidTurn, SessionRegistry
@@ -396,7 +397,7 @@ def _run_fanout(
             )
         except Exception as exc:  # noqa: BLE001 — surface as a per-child failure
             return name, {
-                "error": f"session_create_failed: {type(exc).__name__}: {exc}",
+                "error": f"session_create_failed: {describe_error(exc)}",
                 "child_root": "",
                 "steps": -1,
                 "ok": False,
@@ -416,7 +417,7 @@ def _run_fanout(
             )
         except Exception as exc:  # noqa: BLE001 — surface as a per-child failure
             return name, {
-                "error": f"turn_failed: {type(exc).__name__}: {exc}",
+                "error": f"turn_failed: {describe_error(exc)}",
                 "child_root": str(Path(manifest.record_root)),
                 "steps": -1,
                 "ok": False,
@@ -747,7 +748,7 @@ def make_delegate(
                 resolved_responder = resolver(str(per_call_model))
             except Exception as exc:  # noqa: BLE001 — surface as typed tool failure
                 raise ValueError(
-                    f"delegate: unknown model {per_call_model!r}: {type(exc).__name__}: {exc}"
+                    f"delegate: unknown model {per_call_model!r}: {describe_error(exc)}"
                 ) from exc
             run_factory: ChildFactory = _default_child_factory(
                 resolved_responder,

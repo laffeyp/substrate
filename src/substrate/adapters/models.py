@@ -534,6 +534,28 @@ class CliResponder:
             stream_flags=self._stream_flags,
         )
 
+    def _spawnable(self, argv: list[str]) -> list[str]:
+        """`argv`, once its program and working folder are known to exist (kernel sprint 297). A
+        missing one otherwise surfaces as the spawn's bare `FileNotFoundError`, which a record
+        renders without the path and which never says which of the two was missing."""
+        import errno
+        import shutil
+
+        # The three-argument form keeps errno and `filename`; str() reads "[Errno 2] <text>: '<path>'".
+        if self._cwd is not None and not Path(self._cwd).is_dir():
+            raise FileNotFoundError(
+                errno.ENOENT,
+                f"CliResponder({self.name}): working folder does not exist (the session's workspace)",
+                str(self._cwd),
+            )
+        program = argv[0]
+        env = self._subprocess_env() or os.environ
+        if os.sep not in program and shutil.which(program, path=env.get("PATH")) is None:
+            raise FileNotFoundError(
+                errno.ENOENT, f"CliResponder({self.name}): program not found on PATH", program
+            )
+        return argv
+
     def _argv(self, prompt: str, system: str) -> list[str]:
         """The command line for one call: with a flag, the system text through it, empty or not,
         so the CLI never falls back to a system prompt of its own (`claude --system-prompt ""`
@@ -563,7 +585,7 @@ class CliResponder:
         import subprocess
 
         proc = subprocess.run(  # noqa: S603 — an explicit, operator-chosen agent CLI driver
-            self._argv(prompt, system),
+            self._spawnable(self._argv(prompt, system)),
             stdin=subprocess.DEVNULL,  # the prompt is an argument; `claude` waits 3 s on an open stdin, then fails
             capture_output=True,
             text=True,
@@ -599,7 +621,7 @@ class CliResponder:
             raise RuntimeError(f"CliResponder({self.name}) has no stream format")
         parser = parser_for(self._stream_format)
         proc = await _asyncio.create_subprocess_exec(
-            *self._argv(prompt, system),
+            *self._spawnable(self._argv(prompt, system)),
             stdin=_asyncio.subprocess.DEVNULL,  # see `respond`
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
@@ -661,7 +683,7 @@ class CliResponder:
         import signal as _signal
 
         proc = await _asyncio.create_subprocess_exec(
-            *self._argv(prompt, system),
+            *self._spawnable(self._argv(prompt, system)),
             stdin=_asyncio.subprocess.DEVNULL,  # see `respond`
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,

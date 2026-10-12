@@ -43,7 +43,7 @@ from ..constants import (
     is_reserved,
 )
 from ..encoding import SafeCanonical, content_hash, safe_raw, try_canonical
-from ..errors import InputTypeError
+from ..errors import InputTypeError, describe_error
 from ..record.inputs import check_input
 from ..protocols import TriggerContext
 from ..record.sidecar import DiagnosticSidecar
@@ -322,7 +322,7 @@ class AppendCycle:
             "reason": RunFailureReason.VIEW_FAILURE,
             "view": view_name,
             "seq": seq,
-            "error": repr(exc),
+            "error": describe_error(exc),
         }
         schema = f"{RUN_FINALISED}@1"
         envelope = {
@@ -358,7 +358,7 @@ class AppendCycle:
                 st.control.append(
                     _Lifecycle(
                         INPUT_BUILD_FAILED,
-                        {"route_id": r.id, "firing_key": None, "error": repr(exc)},
+                        {"route_id": r.id, "firing_key": None, "error": describe_error(exc)},
                     )
                 )
                 continue
@@ -397,7 +397,7 @@ class AppendCycle:
             try:
                 fired = t.predicate(ctx)
             except Exception as exc:  # noqa: BLE001 — design §6.3: predicate raises -> immediate quarantine
-                self._quarantine(idx, t.id, reason="exception", error=repr(exc))
+                self._quarantine(idx, t.id, reason="exception", error=describe_error(exc))
                 continue
             elapsed_us = (time.perf_counter() - t0) * 1e6
             if elapsed_us > self._budget_us:
@@ -442,7 +442,7 @@ class AppendCycle:
                 st.control.append(
                     _Lifecycle(
                         INPUT_BUILD_FAILED,
-                        {"trigger_id": t.id, "firing_key": None, "error": repr(exc)},
+                        {"trigger_id": t.id, "firing_key": None, "error": describe_error(exc)},
                     )
                 )
                 continue
@@ -459,7 +459,11 @@ class AppendCycle:
                 st.control.append(
                     _Lifecycle(
                         INPUT_BUILD_FAILED,
-                        {"trigger_id": t.id, "firing_key": firing_key, "error": repr(exc)},
+                        {
+                            "trigger_id": t.id,
+                            "firing_key": firing_key,
+                            "error": describe_error(exc),
+                        },
                     )
                 )
                 continue

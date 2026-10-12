@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from ...bundles import Bundle, resolve_extends
+from ...errors import describe_error
 from ..tool_loop.tools import Tool, suite_describe
 from . import PromptFragment, SessionWarning
 from .context_slice import extract_context_slice
@@ -340,7 +341,7 @@ def session_prompt_producer_factory(
                     seed_tokens=0,
                     driver_context_tokens=0,
                     source_name=str(name),
-                    detail=repr(exc),
+                    detail=describe_error(exc),
                 )
                 continue
             # A rewrite that leaves a source with no text writes one empty fragment, so the

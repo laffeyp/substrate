@@ -48,6 +48,7 @@ from msgspec import Struct
 from ... import api
 from ...adapters import Responder, call_responder
 from ...encoding import canonical_bytes
+from ...errors import describe_error
 from .kinds import ToolCallOrigin
 from .tools import CALCULATOR, Tool, ollama_tools, parse_tool_call, required_params, suite_describe
 
@@ -441,7 +442,7 @@ def _tool_factory(tools: dict[str, Tool]) -> _Factory:
                 output="",
                 step=step,
                 ok=False,
-                error=f"{type(exc).__name__}: {exc}",
+                error=f"{describe_error(exc)}",
             )
             return
         if len(raw) > _MAX_RESULT_BYTES:

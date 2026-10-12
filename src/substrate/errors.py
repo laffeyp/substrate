@@ -10,6 +10,19 @@ fsync, reentrancy). All carry the same kind of typed fields the log events would
 from __future__ import annotations
 
 
+def describe_error(exc: BaseException, *, _depth: int = 0) -> str:
+    """An exception as the text a record or a message carries (kernel sprint 297; design spec §6.2:
+    the detail names the place, the value and the rule). `TypeName: str(exc)`, the class alone when
+    `str` is empty, then `; caused by ...` for an explicit `__cause__`, three levels at most.
+    `repr()` is not used: for an `OSError` it keeps errno and the OS text and drops the path."""
+    text = str(exc)
+    head = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+    cause = exc.__cause__
+    if cause is not None and _depth < 2:
+        return f"{head}; caused by {describe_error(cause, _depth=_depth + 1)}"
+    return head
+
+
 class SubstrateError(Exception):
     """Base for all substrate-raised exceptions."""
 

@@ -23,6 +23,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
+from ...errors import describe_error
 from ...naming import check_path_component
 from ..tool_loop.tools import Tool
 from . import PromptFragment, SessionWarning
@@ -127,7 +128,7 @@ def skill_fragment_producer_factory(
         try:
             found = resolve_skill(name, repo_root, model_class)
         except ValueError as exc:
-            found, error = None, repr(exc)
+            found, error = None, describe_error(exc)
         else:
             error = f"no skill named {name!r}"
         if found is None:

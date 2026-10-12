@@ -17,7 +17,7 @@ from typing import Any
 from msgspec import Struct
 
 from ..constants import is_reserved
-from ..errors import SubstrateError
+from ..errors import SubstrateError, describe_error
 from ..protocols import Producer, TriggerContext, View
 from ..types import Subscription
 from .policies import TerminationPolicy
@@ -209,7 +209,7 @@ class TopologyBuilder:
             built = factory()
         except Exception as exc:  # noqa: BLE001 — any error from author code becomes a RegistrationError naming the kind
             raise RegistrationError(
-                f'producer_kind "{kind}": its factory raised when built ({exc!r}); a factory '
+                f'producer_kind "{kind}": its factory raised when built ({describe_error(exc)}); a factory '
                 "returns the Producer's start callable and must build without side effects"
             ) from exc
         raw = getattr(built, "__substrate_export_map__", None)

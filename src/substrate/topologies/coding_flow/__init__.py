@@ -36,6 +36,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from ... import api
+from ...errors import describe_error
 from ...adapters import (
     DeterministicResponder,
     ModelUsage,
@@ -97,7 +98,9 @@ def _drafter_factory(task: CodingTask, responders: list[Responder]) -> _Factory:
             # deepseek-r1 hit its token cap). The same rule run_gate follows — a crashing candidate
             # must not take the run down — applies to drafting: the slot gets a Candidate with no
             # files, the gate grades it "no artifacts", and the round completes.
-            yield Candidate(round=rnd, slot=slot, response=f"[model call failed: {exc!r}]")
+            yield Candidate(
+                round=rnd, slot=slot, response=f"[model call failed: {describe_error(exc)}]"
+            )
             return
         yield usage
         yield Candidate(round=rnd, slot=slot, response=response)

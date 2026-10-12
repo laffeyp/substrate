@@ -45,7 +45,7 @@ from ..constants import (
     is_reserved,
 )
 from ..encoding import to_canonical_builtins, try_canonical
-from ..errors import FsyncError, ReentrantAppendError
+from ..errors import FsyncError, ReentrantAppendError, describe_error
 from ..record import locking
 from ..record.record import (
     FsyncPolicy,
@@ -342,7 +342,7 @@ class Runtime:
             # exists and is still open, so the failure is not silent.
             if st is not None:
                 st.phase = RunPhase.FAILED
-                st.kernel_error = repr(exc)
+                st.kernel_error = describe_error(exc)
                 self._try_record_kernel_error(exc)
         finally:
             # Cancellation + record close + lock release ALWAYS run, even if the writer
@@ -443,7 +443,10 @@ class Runtime:
                     "schema": f"{RUN_FINALISED}@1",
                     "producer": None,
                     "t": time.time(),
-                    "payload": {"reason": RunFailureReason.KERNEL_ERROR, "error": repr(exc)},
+                    "payload": {
+                        "reason": RunFailureReason.KERNEL_ERROR,
+                        "error": describe_error(exc),
+                    },
                 }
             )
         except Exception:  # noqa: BLE001, S110 — the writer boundary: a failure in user code or the record is recorded, never a crash
@@ -507,7 +510,7 @@ class Runtime:
                         {
                             "trigger_id": INITIAL_TRIGGER_ID,
                             "firing_key": INITIAL_TRIGGER_ID,
-                            "error": repr(exc),
+                            "error": describe_error(exc),
                         },
                     )
                 )
@@ -569,7 +572,9 @@ class Runtime:
         try:
             payload = to_canonical_builtins(resume_event)
         except Exception as exc:
-            raise RegistrationError(f"resume_event is not canonical: {exc!r}") from exc
+            raise RegistrationError(
+                f"resume_event is not canonical: {describe_error(exc)}"
+            ) from exc
         self._cyc.cycle(_Lifecycle(kind, payload))  # appends with producer=null; fires triggers
 
     def _manifest(self, reg: Registration) -> dict[str, Any]:
@@ -737,7 +742,9 @@ class Runtime:
         except TimeoutError as exc:
             if wall_cap is None or wall_timer is None or not wall_timer.expired():
                 # The Producer's own code timed out: an ordinary failure, not a budget breach.
-                inbox.put_nowait(_Lifecycle(PRODUCER_FAILED, {"producer": ref, "error": repr(exc)}))
+                inbox.put_nowait(
+                    _Lifecycle(PRODUCER_FAILED, {"producer": ref, "error": describe_error(exc)})
+                )
                 return
             payload: dict[str, Any] = {
                 "producer": ref,
@@ -762,7 +769,7 @@ class Runtime:
             }
             inbox.put_nowait(_Lifecycle(PRODUCER_FAILED, payload))
         except Exception as exc:  # noqa: BLE001 — the writer boundary: a failure in user code or the record is recorded, never a crash
-            payload = {"producer": ref, "error": repr(exc)}
+            payload = {"producer": ref, "error": describe_error(exc)}
             # Composition (§20): an embedded substrate's inner-run failure surfaces as ONE
             # outer ProducerFailed carrying the inner run_id (the exception carries it).
             inner = getattr(exc, "inner_run_id", None)
@@ -885,7 +892,7 @@ class Runtime:
             try:
                 fp = self._termination.finalisation_payload(ctx)
             except Exception as exc:  # noqa: BLE001 — the writer boundary: a failure in user code or the record is recorded, never a crash
-                drop_reason = f"finalisation callback raised: {exc!r}"
+                drop_reason = f"finalisation callback raised: {describe_error(exc)}"
             if fp is not None and drop_reason is None:
                 sc = try_canonical(fp)
                 if sc.ok:
@@ -1039,7 +1046,9 @@ class Runtime:
         try:
             payload = to_canonical_builtins(event)
         except Exception as exc:
-            raise RegistrationError(f"inject_event event is not canonical: {exc!r}") from exc
+            raise RegistrationError(
+                f"inject_event event is not canonical: {describe_error(exc)}"
+            ) from exc
         st = getattr(self, "_st", None)
         if st is None:
             raise RuntimeError("inject_event called before Runtime.run/.resume; no live state")
