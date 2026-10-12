@@ -14,7 +14,7 @@ SessionChanged before that turn (§ T.3), drawn in the history beside its messag
 Every reply's word count and text go to `<out>/<model>.jsonl`, one line per turn. The texts are
 kept for later language measures. Run:
 
-    uv run python scripts/experiments/length_drift.py --sessions 8 --out process/runs/assays/length_drift_2026-10-12
+    uv run python scripts/assay_length_drift.py --sessions 8 --out process/runs/assays/length_drift_2026-10-12
 """
 
 from __future__ import annotations

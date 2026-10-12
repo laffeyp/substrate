@@ -529,6 +529,12 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### K297, K298 and the length experiment (2026-10-12)
+- **K297, errors name the value.** `repr()` of an `OSError` drops the path; 16 record sites wrote it (a resumed session read `FileNotFoundError(2, 'No such file or directory')` every turn). `substrate.errors.describe_error` (on `api`) writes `TypeName: text; caused by ...`; `CliResponder` names a missing working folder or program and its role before it spawns. Research `process/planning/RESEARCH-2026-10-12-error-messages.md` (design spec §6.2; Google's error-message course; NN/g). Kernel suite 1,522 passed.
+- **K298, guidance as a mid-session control (vocabulary v0.9 § U).** A guidance level is its bundle, which the user could already change through `PATCH`; the history line for a change between two levels now reads `guidance changed from high to low`. Research `RESEARCH-2026-10-12-controls-mid-session-r2.md`.
+- **Length experiment.** 600 turns, five arms, two cloud models (`process/runs/assays/length_drift_2026-10-12/`, `scripts/assay_length_drift.py`). Under the high level on explanation questions, word count did not separate `terse` from `normal`; round 2 (`RESEARCH-2026-10-12-length-drift-r2.md`) corrects round 1's "terse does nothing": terse removes padding, not content; the high level already removes padding; the questions demanded length. A padding measure needs the language work.
+- **Docs.** `GUIDANCE-LEVELS-COMPARED-2026-10-10.md` gains the length and tone texts.
+
 ### The SDD audit's kernel repairs (2026-10-11)
 - `Control.LENGTH`, `Control.TONE` and `PromptSource.CONTROL` replace the bare strings the K296 code retyped in `topologies/session/__init__.py`, `views.py` and `session_registry.py` (audit finding C1, `substrate-ui/process/reviews/AUDIT-2026-10-11-sdd-and-code-standards.md`). The server imports the same members.
 - `process/WORKING_AGREEMENT.md` in a new round: the driver context lookup row names `context_windows.py` (K294), and the canonical home registry gains its row. The prior copy is `process/archive/WORKING_AGREEMENT-to-2026-10-11.md`.
