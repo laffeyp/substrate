@@ -6,7 +6,7 @@ id: 301
 status: open
 phase: 1
 pass_kind: research
-roadmap: process/planning/ROADMAP-2026-10-12-changes-on-time.md
+roadmap: process/planning/ROADMAP-2026-10-12-changes-on-time-r2.md
 context_files:
   - scripts/assay_length_drift.py
   - process/planning/RESEARCH-2026-10-12-length-drift-r2.md

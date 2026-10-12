@@ -6,7 +6,7 @@ id: 300
 status: open
 phase: 1
 pass_kind: functional
-roadmap: process/planning/ROADMAP-2026-10-12-changes-on-time.md
+roadmap: process/planning/ROADMAP-2026-10-12-changes-on-time-r2.md
 postmortem: process/planning/POSTMORTEM-2026-10-12-mid-session-changes-arrive-late-r2.md
 context_files:
   - tests/test_length_tone_controls_296.py

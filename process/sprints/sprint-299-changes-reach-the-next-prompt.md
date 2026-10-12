@@ -6,7 +6,7 @@ id: 299
 status: open
 phase: 1
 pass_kind: functional
-roadmap: process/planning/ROADMAP-2026-10-12-changes-on-time.md
+roadmap: process/planning/ROADMAP-2026-10-12-changes-on-time-r2.md
 postmortem: process/planning/POSTMORTEM-2026-10-12-mid-session-changes-arrive-late-r2.md
 asked: 2026-10-12 (Architect: the first message after a change is answered under the new setting)
 context_files:
@@ -19,11 +19,14 @@ context_files:
 
 ## scope
 
-- **Vocabulary v0.10 § V.** The prompt for the message on which a `SessionChanged` is recorded carries the rewritten sources; the record's order for that turn is the message, the change(s), the rewritten fragments, the prompt.
-- **The model step stops after recording a change with rewritten text.** On step 0, when any changed field is in `_REWRITTEN_ON_CHANGE`, it yields the `SessionChanged` events and completes without composing a prompt or calling the driver.
-- **One rewrite per step.** The session-prompt rewrite covers every field changed that step (today each `SessionChanged` starts its own producer), so the model starts once.
-- **A new trigger** starts the model on that rewrite's completion, with the turn's input (as `model-on-skill-fragment` does for skills).
-- Date and driver changes, which rewrite no text, keep today's path.
+*Revised before any code, after the roadmap's round-2 pressure test.*
+
+- **Vocabulary v0.10 § V.** `SessionChanged` is written by the session-prompt producer, not the model; the prompt for the message on which a change is recorded carries the new text; the turn's record reads message, change(s), rewritten fragments, prompt, reply. Triggers `session-prompt-on-user-message-change` and `model-on-session-prompt-change` added; `session-prompt-on-session-changed` removed.
+- **One detection helper** compares the `SessionSettings` view with the turn's settings; `model-on-user-message` fires only when nothing changed.
+- **The session-prompt producer**, started with the changes, records each `SessionChanged` and writes the rewritten sources in one run (generation: the message's seq).
+- **Its completion starts the model** when the turn's first model step has not run.
+- The model step's step-0 detection block goes.
+- A skill message after a change: the change's run, then the skill fragment, then the model.
 
 ## observation contract
 
