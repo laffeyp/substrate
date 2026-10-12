@@ -206,6 +206,7 @@ class PromptSource(StrEnum):
     SKILL = "skill"  # a skill's body, loaded on request and kept for the session (§ P.2, K277)
     PARENT_CONTEXT = "parent_context"
     TOOLS_SUITE = "tools_suite"
+    CONTROL = "control"  # the Length and Tone controls' texts, at session open (§ T, K296)
     USER_MESSAGE = "user_message"
     # Phase 8 item 7 — the daemon injects InterruptRequested via
     # Runtime.inject_event on soft ESC; the interrupt_fragment_producer
@@ -227,6 +228,7 @@ SESSION_OPEN_SOURCES: Final[frozenset[PromptSource]] = frozenset(
         PromptSource.SKILL,
         PromptSource.TOOLS_SUITE,
         PromptSource.PARENT_CONTEXT,
+        PromptSource.CONTROL,
     }
 )
 
@@ -247,8 +249,57 @@ PROMPT_SOURCES: Final[frozenset[PromptSource]] = frozenset(PromptSource)
 # `PromptComposed.system`, the text sent on the driver's system channel. Claude Code sends the
 # same two in its system prompt: the output style and the environment.
 SYSTEM_SOURCES: Final[frozenset[PromptSource]] = frozenset(
-    {PromptSource.BUNDLE_STYLE, PromptSource.BASELINE}
+    {PromptSource.BUNDLE_STYLE, PromptSource.CONTROL, PromptSource.BASELINE}
 )
+
+
+# Session vocabulary v0.8 (§ T, K296): two controls a session opens with. Each position other than
+# the default writes one or two sentences, the same on every driver, as a `control` fragment on the
+# system channel after the bundle's style. The guidance level's text wins where they meet: a
+# position narrows within it and never overrides it (research r4 §10, design 1). Warm is left out:
+# warmth tuning raised agreement with wrong beliefs (research r4 §5).
+class Control(StrEnum):
+    LENGTH = "length"
+    TONE = "tone"
+
+
+class LengthPosition(StrEnum):
+    TERSE = "terse"
+    NORMAL = "normal"
+    FULL = "full"
+
+
+class TonePosition(StrEnum):
+    BLUNT = "blunt"
+    NEUTRAL = "neutral"
+    FORMAL = "formal"
+    DRY = "dry"
+
+
+LENGTH_DEFAULT: Final[LengthPosition] = LengthPosition.NORMAL
+TONE_DEFAULT: Final[TonePosition] = TonePosition.NEUTRAL
+
+LENGTH_TEXTS: Final[dict[LengthPosition, str]] = {
+    LengthPosition.TERSE: (
+        "Keep replies short: the answer and the facts it rests on. Leave out background, "
+        "restatement and offers of more."
+    ),
+    LengthPosition.FULL: (
+        "Give complete replies: the reasoning, the alternatives you weighed, and what you left "
+        "out. Complete is not padded; every sentence still carries a fact."
+    ),
+}
+TONE_TEXTS: Final[dict[TonePosition, str]] = {
+    TonePosition.BLUNT: (
+        "Be blunt: state judgements plainly and name problems directly. Do not soften "
+        "criticism, and hedge only where the evidence is uncertain."
+    ),
+    TonePosition.FORMAL: (
+        "Write in a formal register for readers who were not in this conversation: full "
+        "sentences, no slang, each term defined on first use."
+    ),
+    TonePosition.DRY: "Keep the tone dry: understated and factual, without enthusiasm or exclamation.",
+}
 
 # Session vocabulary § P.3 (UI sprint 121): with `driver_params.cache_layout`, these session-stable
 # sources also go on the system channel. Off by default; never part of the default layout.

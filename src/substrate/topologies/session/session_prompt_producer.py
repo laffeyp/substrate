@@ -29,11 +29,22 @@ from . import PromptFragment, SessionWarning
 from .context_slice import extract_context_slice
 from .environment import render_baseline
 from .roles import resolve_role_prompt_with_source
-from .vocabulary import PromptSource, SessionWarningKind
+from .vocabulary import (
+    LENGTH_DEFAULT,
+    LENGTH_TEXTS,
+    TONE_DEFAULT,
+    TONE_TEXTS,
+    Control,
+    LengthPosition,
+    PromptSource,
+    SessionWarningKind,
+    TonePosition,
+)
 
 # Precedence bands, session-vocabulary.md § I.
 ROLE_PRECEDENCE = 0
 STYLE_PRECEDENCE = 3
+CONTROL_PRECEDENCE = 3  # with the style, on the system channel; seq puts it after (§ T)
 BASELINE_PRECEDENCE = 4
 MEMORY_PRECEDENCE = 8
 MEMORY_INDEX_MAX_LINES = 200  # Claude Code's limits for its MEMORY.md (K276)
@@ -100,6 +111,26 @@ def bundle_style_fragments(bundle: str) -> list[PromptFragment]:
         )
         for position, entry in enumerate(resolve_chain(bundle))
         if entry.style
+    ]
+
+
+def control_fragments(length: str, tone: str) -> list[PromptFragment]:
+    """One fragment per control not at its default (§ T, K296), its provenance naming the control
+    and the position. An unknown position raises, and session_prompt records the failure."""
+    pairs = (
+        (Control.LENGTH, LENGTH_TEXTS.get(LengthPosition(length))),
+        (Control.TONE, TONE_TEXTS.get(TonePosition(tone))),
+    )
+    positions = {Control.LENGTH: length, Control.TONE: tone}
+    return [
+        PromptFragment(
+            source=PromptSource.CONTROL,
+            text=text,
+            precedence=CONTROL_PRECEDENCE,
+            provenance={"control": str(control), "position": positions[control]},
+        )
+        for control, text in pairs
+        if text
     ]
 
 
@@ -254,6 +285,8 @@ def session_prompt_sources(
     baseline: dict[str, Any] | None = None,
     per_turn: str = "",
     memory: bool = False,
+    length: str | None = None,
+    tone: str | None = None,
 ) -> dict[PromptSource, Source]:
     """The sources a session names, in the order the producer runs them."""
     sources: dict[PromptSource, Source] = {}
@@ -264,6 +297,10 @@ def session_prompt_sources(
     if bundle is not None:
         sources[PromptSource.BUNDLE_METHODOLOGY] = lambda: bundle_methodology_fragments(bundle)
         sources[PromptSource.BUNDLE_STYLE] = lambda: bundle_style_fragments(bundle)
+    if length is not None or tone is not None:
+        sources[PromptSource.CONTROL] = lambda: control_fragments(
+            length or LENGTH_DEFAULT, tone or TONE_DEFAULT
+        )
     if baseline:
         sources[PromptSource.BASELINE] = lambda: baseline_fragments(baseline)
     if memory:
@@ -306,6 +343,14 @@ def session_prompt_producer_factory(
                     detail=repr(exc),
                 )
                 continue
+            # A rewrite that leaves a source with no text writes one empty fragment, so the
+            # cohort's newest generation of that source is empty and the old text stops (§ T.3).
+            if only and not fragments:
+                fragments = [
+                    PromptFragment(
+                        source=str(name), text="", precedence=0, provenance={"cleared": True}
+                    )
+                ]
             for fragment in fragments:
                 if generation is not None:
                     fragment = PromptFragment(

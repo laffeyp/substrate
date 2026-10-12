@@ -120,6 +120,9 @@ class SessionStarted(Struct, frozen=True):
     # § S.9: where driver_context_tokens came from (probed, fixed, cli_settings, documented,
     # config, default); empty before v0.7.
     driver_context_source: str = ""
+    # § T (K296): the Length and Tone positions the session opened with; empty before v0.8.
+    length: str = ""
+    tone: str = ""
 
 
 class UserMessage(Struct, frozen=True):
@@ -290,6 +293,9 @@ _MAX_CONSECUTIVE_FAILS = 3
 _REWRITTEN_ON_CHANGE: dict[str, tuple[str, ...]] = {
     "bundle": ("bundle_style", "bundle_methodology", "per_turn"),
     "per_turn": ("per_turn",),
+    # § T (K296): either control changed writes the `control` source again.
+    "length": ("control",),
+    "tone": ("control",),
 }
 
 
@@ -347,6 +353,8 @@ def _session_started_factory(
     baseline: dict[str, Any] | None = None,
     model_class: str = "",
     driver_context_source: str = "",
+    length: str = "",
+    tone: str = "",
 ) -> Callable[[], Any]:
     """Sprint 240 — the SessionStarted instrument's producer body.
 
@@ -377,6 +385,8 @@ def _session_started_factory(
             driver_command=driver_command,
             model_class=model_class,
             driver_context_source=driver_context_source,
+            length=length,
+            tone=tone,
         )
 
     return lambda: _session_started
@@ -519,7 +529,14 @@ def _model_factory(
         # from what the record last said is recorded and told to the model beside the message.
         updates: list[str] = []
         if step == 0:
-            for field in ("driver", "bundle", "per_turn", "date"):
+            for field in (
+                "driver",
+                "bundle",
+                "per_turn",
+                "date",
+                "length",
+                "tone",
+            ):  # § T adds the controls
                 if field in recorded and field in current_settings:
                     old, new = recorded[field], current_settings[field]
                     if old != new:
@@ -932,6 +949,8 @@ def session_topology(
     model_class: str = "",
     mcp: bool = False,
     driver_context_source: str = "",
+    length: str | None = None,
+    tone: str | None = None,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -1065,6 +1084,12 @@ def session_topology(
     }
     if baseline and baseline.get("date"):
         current_settings["date"] = str(baseline["date"])
+    # § T (K296): compared with the record like the bundle; a session that names neither control
+    # compares neither.
+    if length is not None:
+        current_settings["length"] = length
+    if tone is not None:
+        current_settings["tone"] = tone
 
     # Sprint 240: freeze the tool_names tuple at build time so the
     # SessionStarted instrument's closure captures a snapshot even if the
@@ -1104,6 +1129,8 @@ def session_topology(
                 baseline=baseline,
                 model_class=model_class,
                 driver_context_source=driver_context_source,
+                length=length or "",
+                tone=tone or "",
             ),
             deterministic=True,
         )
@@ -1186,6 +1213,8 @@ def session_topology(
             baseline=baseline,
             per_turn=per_turn,
             memory=memory,
+            length=length,
+            tone=tone,
         )
         has_session_prompt = bool(sources) or seed_warning is not None
         if has_session_prompt:

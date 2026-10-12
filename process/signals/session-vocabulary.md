@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.8 (2026-10-11).** Sprint K296 adds section T: two controls a session opens with, Length and Tone, each a typed set of positions whose text reaches the model as a `control` fragment. Directed by the Architect, 2026-10-11 (substrate-ui OPEN-ITEMS 16). §§ A–S byte-preserved.
+
 **Status: RATIFIED — v0.7 (2026-10-11).** Sprint K291 adds section S: history compaction clears old tool outputs before it drops turns, and records a cut only when it changes. Directed by the Architect, 2026-10-11; research in `process/planning/RESEARCH-2026-10-11-compaction.md`. §§ A–R byte-preserved; where S differs from D, S governs records written from v0.7 on.
 
 **Status: RATIFIED — v0.3.1 (2026-10-09).** Sprint K261 adds section L: the model producer builds, records and sends each prompt; the composer and the per-turn chain retire. §§ A–K byte-preserved; where L differs from K, L governs.
@@ -706,7 +708,43 @@ Ollama adapters keep their probed window (`/api/show`); `deterministic` keeps 4,
 | `SessionStarted.driver_context_source` | `str` | Where `driver_context_tokens` came from: `probed`, `fixed`, `cli_settings`, `documented`, `config` or `default`. Empty before v0.7. |
 | `ModelReply.usage.context_window` | `int`, optional | The window the harness reported on this call. Absent when it reported none. |
 
+## T. v0.8 — Length and Tone (2026-10-11, sprint K296)
+
+Research: `process/planning/RESEARCH-2026-10-10-guidance-controls-r4.md` §7 (size and tone), §9 (moments), §10 (composition). No measure is built; the controls are checked by reading replies.
+
+### T.1 Controls and positions
+
+| Control | Positions | Default |
+|---|---|---|
+| `length` | `terse`, `normal`, `full` | `normal` |
+| `tone` | `blunt`, `neutral`, `formal`, `dry` | `neutral` |
+
+`Control`, `LengthPosition` and `TonePosition` in `topologies/session/vocabulary.py`. Any other position is refused when the session is created or changed. Warm is not a position: in research round 4 §5, warmth tuning raised agreement with wrong beliefs.
+
+### T.2 The texts
+
+A position other than the default writes one `PromptFragment(source="control")`, with `provenance = {control, position}`, on the system channel after the bundle's style (`control` joins `SESSION_OPEN_SOURCES` and `SYSTEM_SOURCES`). The defaults write nothing, so a session at `normal` and `neutral` reads as before v0.8. The texts are the same on every driver (`LENGTH_TEXTS`, `TONE_TEXTS`):
+
+| Position | Text |
+|---|---|
+| `terse` | Keep replies short: the answer and the facts it rests on. Leave out background, restatement and offers of more. |
+| `full` | Give complete replies: the reasoning, the alternatives you weighed, and what you left out. Complete is not padded; every sentence still carries a fact. |
+| `blunt` | Be blunt: state judgements plainly and name problems directly. Do not soften criticism, and hedge only where the evidence is uncertain. |
+| `formal` | Write in a formal register for readers who were not in this conversation: full sentences, no slang, each term defined on first use. |
+| `dry` | Keep the tone dry: understated and factual, without enthusiasm or exclamation. |
+
+Where a text meets the guidance level's own rules, the level's rules win: a position narrows within them (research r4 §10, design 1).
+
+### T.3 Recorded and changed
+
+| Field | Type | Meaning |
+|---|---|---|
+| `SessionStarted.length`, `SessionStarted.tone` | `str` | The positions the session opened with. Empty before v0.8. |
+| `SessionChanged.field` | adds `length`, `tone` | A position differs from the record at a turn's first step (§ P.4). |
+
+A change writes the `control` source again with the change's seq as its generation (§ P.4). A rewrite that leaves a source with no text writes one empty fragment of that source, `provenance = {cleared: true}`, so the cohort's newest generation is empty and the old text stops; this holds for every rewritten source, `per_turn` included.
+
 ### Ratification signature
 
 - **v0.7** — Sprint K291, 2026-10-11, by the Architect's direction of the same day. §§ A–R byte-preserved.
-
+- **v0.8** — Sprint K296, 2026-10-11, by the Architect's direction of the same day (Length and Tone rows, substrate-ui OPEN-ITEMS 16). §§ A–S byte-preserved.

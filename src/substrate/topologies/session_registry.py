@@ -152,6 +152,30 @@ class SessionManifest(Struct, frozen=True):
     # "max_tokens" (int ≥0; 0 = uncapped), "timeout" (float >0, seconds),
     # "num_ctx" (int ≥1). Unknown keys are 400 at PATCH.
     driver_params: dict[str, Any] | None = None
+    # Kernel K296 (session vocabulary § T): the Length and Tone positions. None is the default
+    # (normal, neutral). Set at creation; mutable via PATCH /api/session/<id> {length, tone}.
+    length: str | None = None
+    tone: str | None = None
+
+
+def _check_controls(length: str | None, tone: str | None) -> None:
+    """Refuse an unknown Length or Tone position (§ T): ValueError, a 400 at the daemon."""
+    from .session.vocabulary import LengthPosition, TonePosition
+
+    if length is not None:
+        try:
+            LengthPosition(length)
+        except ValueError as exc:
+            raise ValueError(
+                f"length must be one of {[p.value for p in LengthPosition]}; got {length!r}"
+            ) from exc
+    if tone is not None:
+        try:
+            TonePosition(tone)
+        except ValueError as exc:
+            raise ValueError(
+                f"tone must be one of {[p.value for p in TonePosition]}; got {tone!r}"
+            ) from exc
 
 
 class NameCollision(Exception):
@@ -434,12 +458,15 @@ class SessionRegistry:
         composite_of: str | None = None,
         created_at: float | None = None,
         driver_params: dict[str, Any] | None = None,
+        length: str | None = None,
+        tone: str | None = None,
     ) -> SessionManifest:
         """Register a new session. Atomic against by-name.json under `fcntl.flock`.
 
         If `name` is set and already in the index, raises `NameCollision` with
         the existing session_id. The caller shapes the 409 response.
         """
+        _check_controls(length, tone)
         manifest = SessionManifest(
             session_id=session_id,
             name=name,
@@ -455,6 +482,8 @@ class SessionRegistry:
             tools=tools,
             composite_of=composite_of,
             driver_params=driver_params,
+            length=length,
+            tone=tone,
         )
         # Sprint 223e race fix: bridge finds a session by_name and dispatches
         # a turn immediately after create. Under flock, the by-name.json write
@@ -672,6 +701,18 @@ class SessionRegistry:
 
             load_bundle(bundle)
         return self._update_manifest(session_id, bundle=bundle)
+
+    def set_controls(
+        self, session_id: str, *, length: str | None, tone: str | None
+    ) -> SessionManifest:
+        """Kernel K296: change the Length and Tone positions. The next turn's topology carries them;
+        the model step writes `SessionChanged` for each that differs from the record, and
+        `session_prompt` writes the `control` source again (§ T). Raises KeyError on an unknown
+        session, ValueError on an unknown position."""
+        if session_id not in self._manifests:
+            raise KeyError(f"unknown session_id {session_id!r}")
+        _check_controls(length, tone)
+        return self._update_manifest(session_id, length=length, tone=tone)
 
     def set_driver(self, session_id: str, driver: str) -> SessionManifest:
         """Change the driver for a session. In-memory catalog and manifest.json
@@ -1533,6 +1574,9 @@ def _manifest_to_dict(m: SessionManifest) -> dict[str, Any]:
         # num_ctx). None or an absent key → responder default. Dict of
         # primitives only; JSON-safe by construction.
         "driver_params": dict(m.driver_params) if m.driver_params is not None else None,
+        # Kernel K296: the Length and Tone positions; None is the default.
+        "length": m.length,
+        "tone": m.tone,
     }
 
 
@@ -1572,6 +1616,8 @@ def _manifest_from_dict(d: dict[str, Any]) -> SessionManifest:
         per_turn=str(d.get("per_turn") or ""),
         composite_of=d.get("composite_of") if d.get("composite_of") is not None else None,
         driver_params=(dict(d["driver_params"]) if d.get("driver_params") is not None else None),
+        length=str(d["length"]) if d.get("length") is not None else None,
+        tone=str(d["tone"]) if d.get("tone") is not None else None,
     )
 
 

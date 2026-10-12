@@ -529,6 +529,12 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Sprint K296 and the topology audit (2026-10-11)
+- **Topology audit** (`process/planning/AUDIT-2026-10-11-topologies.md`, commit `4ea82447`). Findings only. No session has completed a topology run (3 `run_topology` calls in 86 sessions, all failed); `list_topologies` offers 18 names, `run_topology` runs 3. The Architect moved on; the drop-or-make-real rule stays open on the release roadmap.
+- **K296, Length and Tone.** Vocabulary v0.8 § T: `Control`, `LengthPosition` (terse, normal, full), `TonePosition` (blunt, neutral, formal, dry), and a `control` prompt source on the system channel; the defaults write nothing. `SessionStarted.length` / `.tone`; a change writes `SessionChanged` and the `control` source again. `SessionManifest.length` / `.tone`, refused when unknown.
+- **A rewrite to nothing now clears.** A source rewritten after a change with no text writes one empty fragment (`provenance.cleared`), so the old text stops; before, a bundle switched to one without a style kept the old style. K274's test updated.
+- **Tests.** 1,470 passed, 12 skipped; `test_length_tone_controls_296.py` 6/6; live (opt-in) on `kimi-k2.7-code:cloud`: terse 115 words, full 288, blunt 146, formal 353. Bundled `daily` and `session` records regenerated.
+
 ### Research 2026-10-10 — language metrics, rounds 1–3 (no code)
 - **Note.** `process/planning/RESEARCH-2026-10-10-language-metrics-r3.md` is current; rounds 1 and 2 stay on disk.
 - **Scope.** Form and lookup-table measures only, on three texts: the user's (`UserMessage.text`, delegate-written messages excluded), the model's (`ModelReply.text`), and the relation per turn (length ratio, lexical echo, phrase copy, NCD, LSM, convergence).

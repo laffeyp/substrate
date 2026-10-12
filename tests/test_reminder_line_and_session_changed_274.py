@@ -157,4 +157,8 @@ def test_a_bundle_change_writes_its_sources_again(
         for e in events
         if e["kind"] == "PromptFragment" and "generation" in e["payload"]["provenance"]
     ]
-    assert {f["source"] for f in regenerated} == {"bundle_methodology", "per_turn"}
+    # K296 (§ T.3): a rewritten source with no text writes one empty fragment, so a style the
+    # old bundle had cannot outlive the change. Neither test bundle has a style.
+    assert {f["source"] for f in regenerated} == {"bundle_methodology", "per_turn", "bundle_style"}
+    cleared = [f for f in regenerated if f["source"] == "bundle_style"]
+    assert [f["text"] for f in cleared] == [""] and cleared[0]["provenance"]["cleared"] is True
