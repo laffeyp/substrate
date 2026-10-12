@@ -19,6 +19,18 @@
 
 ---
 
+### 2026-10-12 — A feature that shapes the prompt was checked everywhere but in the prompt
+
+**Context.** K274 (2026-10-10) made a mid-session change rewrite the session's prompt sources; K296, K298 and UI U161 built length, tone and guidance on it. Every card closed green. The Architect asked a deepseek session what reached it after `/length full` and got an answer that did not fit: a change announced, and no setting behind it.
+
+**What happened.** The record showed it in one read: on the message after every change, the prompt still held the old text, and the new text was written a few seqs later. All 14 changes in the user's records were late. The step that builds the prompt is the step that discovers the change; the rewrite it triggers cannot come first.
+
+**What got in the way.** Each check was true and beside the point. The tests asserted the change was recorded and that the third message's prompt had the new text; the gate asserted the manifest and the event; the live check counted words. Not one read the `PromptComposed` for the message after the change, the only place the defect lives. The vocabulary (§ P.4) said a change "writes those sources again" without saying which prompt carries it, so no contract named the thing to check.
+
+**What the kit could say.** An observation contract for anything that shapes a prompt names the exact prompt it is for and asserts on that text. A contract that says a change "is written" is complete only when it says which prompt reads it.
+
+---
+
 ### 2026-09-01 (later) — License pivot to PolyForm Noncommercial + one lesson about task-completion honesty
 
 **Findings 72-73.**

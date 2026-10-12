@@ -529,6 +529,13 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### POSTMORTEM: mid-session changes reach the model one message late (2026-10-12)
+- **What.** After `/length full` or `/tone blunt`, the reply to the next message was still written under the old setting; the model was told of the change in the history but its system text was unchanged. Only the message after that got the new text. `process/planning/POSTMORTEM-2026-10-12-mid-session-changes-arrive-late.md`.
+- **Scope.** All 14 `SessionChanged` in the user's records that were followed by a rewrite and a prompt: 14 late. Fields: bundle (guidance) 4, per_turn 3, length 3, date 2, tone 1, driver 1. Since K274 (`10fec6f7`, 2026-10-10). Settings chosen at open are delivered from the first message.
+- **Cause.** The model step finds the change on its first step, records `SessionChanged`, then builds the prompt from the instructions it was started with; the recorded change is what starts the rewrite, so the new text lands after the prompt. The K274, K296 and K298 tests and the U161 gate checked the record and a later message's prompt, never the prompt for the message after the change.
+- **Also wrong as reported.** U161 and K298 were called done; the transcript's "it applies from the next message" is false; the length experiment's switch arms are one turn off (`RESEARCH-2026-10-12-length-drift-r2.md`).
+- **Fix.** `ROADMAP-2026-10-12-changes-on-time.md`: the model waits for the rewrite, as it waits for a skill's text.
+
 ### K297, K298 and the length experiment (2026-10-12)
 - **K297, errors name the value.** `repr()` of an `OSError` drops the path; 16 record sites wrote it (a resumed session read `FileNotFoundError(2, 'No such file or directory')` every turn). `substrate.errors.describe_error` (on `api`) writes `TypeName: text; caused by ...`; `CliResponder` names a missing working folder or program and its role before it spawns. Research `process/planning/RESEARCH-2026-10-12-error-messages.md` (design spec §6.2; Google's error-message course; NN/g). Kernel suite 1,522 passed.
 - **K298, guidance as a mid-session control (vocabulary v0.9 § U).** A guidance level is its bundle, which the user could already change through `PATCH`; the history line for a change between two levels now reads `guidance changed from high to low`. Research `RESEARCH-2026-10-12-controls-mid-session-r2.md`.
