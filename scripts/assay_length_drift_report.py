@@ -3,7 +3,7 @@
 """Tables for `length_drift.py`'s output: words per turn by arm, and each switched arm against the
 arm that never changed. Run:
 
-    uv run python scripts/experiments/length_drift_report.py process/experiments/2026-10-12-length-drift
+    uv run python scripts/experiments/length_drift_report.py process/runs/assays/length_drift_2026-10-12
 """
 
 from __future__ import annotations
