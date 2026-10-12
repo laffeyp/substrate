@@ -144,6 +144,7 @@ GROUPS: dict[str, list[str]] = {
         "ReplayError",
         "RecordIncompleteError",
         "RecordGapError",
+        "describe_error",
     ],
 }
 

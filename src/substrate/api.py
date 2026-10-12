@@ -52,6 +52,7 @@ from .errors import (
     SequenceOutOfRange,
     SubstrateError,
     UnsupportedPlatformError,
+    describe_error,
 )
 from .home import substrate_home
 from .kernel.composition import EmbeddedRunFailed, embedded_substrate
@@ -203,6 +204,8 @@ __all__ = [
     # the public exception hierarchy (design §6.3) — so an api-only consumer (the CLI is
     # the standing proof) handles errors BY TYPE, not by string-matching class names.
     "SubstrateError",
+    # an exception as the text a record or a message carries (K297; design §6.2)
+    "describe_error",
     "BusLockedError",
     "RegistrationError",
     "UnsupportedPlatformError",

@@ -1041,3 +1041,10 @@ The read path found a hole in the seq sequence — a sealed segment lost (delete
 mid-frame, or corrupted) so the yielded stream is non-contiguous. Per technical §3.5/§3.6 a gap
 proves data loss and the reader MUST report it rather than silently fold it away.
 
+### `describe_error(exc: 'BaseException', *, _depth: 'int' = 0) -> 'str'`
+
+An exception as the text a record or a message carries (kernel sprint 297; design spec §6.2:
+the detail names the place, the value and the rule). `TypeName: str(exc)`, the class alone when
+`str` is empty, then `; caused by ...` for an explicit `__cause__`, three levels at most.
+`repr()` is not used: for an `OSError` it keeps errno and the OS text and drops the path.
+
