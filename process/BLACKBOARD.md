@@ -529,6 +529,11 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### The SDD audit's kernel repairs (2026-10-11)
+- `Control.LENGTH`, `Control.TONE` and `PromptSource.CONTROL` replace the bare strings the K296 code retyped in `topologies/session/__init__.py`, `views.py` and `session_registry.py` (audit finding C1, `substrate-ui/process/reviews/AUDIT-2026-10-11-sdd-and-code-standards.md`). The server imports the same members.
+- `process/WORKING_AGREEMENT.md` in a new round: the driver context lookup row names `context_windows.py` (K294), and the canonical home registry gains its row. The prior copy is `process/archive/WORKING_AGREEMENT-to-2026-10-11.md`.
+- Kernel suite 1,470 passed after the change.
+
 ### Sprint K296 and the topology audit (2026-10-11)
 - **Topology audit** (`process/planning/AUDIT-2026-10-11-topologies.md`, commit `4ea82447`). Findings only. No session has completed a topology run (3 `run_topology` calls in 86 sessions, all failed); `list_topologies` offers 18 names, `run_topology` runs 3. The Architect moved on; the drop-or-make-real rule stays open on the release roadmap.
 - **K296, Length and Tone.** Vocabulary v0.8 § T: `Control`, `LengthPosition` (terse, normal, full), `TonePosition` (blunt, neutral, formal, dry), and a `control` prompt source on the system channel; the defaults write nothing. `SessionStarted.length` / `.tone`; a change writes `SessionChanged` and the `control` source again. `SessionManifest.length` / `.tone`, refused when unknown.

@@ -1551,6 +1551,8 @@ def _next_turn_index_from_record(record_root: Path) -> int:
 
 
 def _manifest_to_dict(m: SessionManifest) -> dict[str, Any]:
+    from .session.vocabulary import Control  # local: the session package imports this module
+
     return {
         "session_id": m.session_id,
         "name": m.name,
@@ -1575,8 +1577,8 @@ def _manifest_to_dict(m: SessionManifest) -> dict[str, Any]:
         # primitives only; JSON-safe by construction.
         "driver_params": dict(m.driver_params) if m.driver_params is not None else None,
         # Kernel K296: the Length and Tone positions; None is the default.
-        "length": m.length,
-        "tone": m.tone,
+        Control.LENGTH: m.length,
+        Control.TONE: m.tone,
     }
 
 
@@ -1586,6 +1588,8 @@ _VALID_STATUS: frozenset[str] = frozenset(
 
 
 def _manifest_from_dict(d: dict[str, Any]) -> SessionManifest:
+    from .session.vocabulary import Control  # local: the session package imports this module
+
     status_raw = str(d["status"])
     if status_raw not in _VALID_STATUS:
         raise ValueError(
@@ -1616,8 +1620,8 @@ def _manifest_from_dict(d: dict[str, Any]) -> SessionManifest:
         per_turn=str(d.get("per_turn") or ""),
         composite_of=d.get("composite_of") if d.get("composite_of") is not None else None,
         driver_params=(dict(d["driver_params"]) if d.get("driver_params") is not None else None),
-        length=str(d["length"]) if d.get("length") is not None else None,
-        tone=str(d["tone"]) if d.get("tone") is not None else None,
+        length=str(d[Control.LENGTH]) if d.get(Control.LENGTH) is not None else None,
+        tone=str(d[Control.TONE]) if d.get(Control.TONE) is not None else None,
     )
 
 

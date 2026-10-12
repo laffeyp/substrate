@@ -33,6 +33,8 @@ from ..tool_loop.background import TaskStatus
 from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from .vocabulary import (
+    Control,
+    PromptSource,
     COMPACTION_REASON_WINDOW_EXCEEDED,
     COMPACTION_ROLLING_WINDOW,
     COMPACTION_TOOL_OUTPUT_CLEARED,
@@ -294,8 +296,8 @@ _REWRITTEN_ON_CHANGE: dict[str, tuple[str, ...]] = {
     "bundle": ("bundle_style", "bundle_methodology", "per_turn"),
     "per_turn": ("per_turn",),
     # § T (K296): either control changed writes the `control` source again.
-    "length": ("control",),
-    "tone": ("control",),
+    Control.LENGTH: (PromptSource.CONTROL,),
+    Control.TONE: (PromptSource.CONTROL,),
 }
 
 
@@ -534,8 +536,8 @@ def _model_factory(
                 "bundle",
                 "per_turn",
                 "date",
-                "length",
-                "tone",
+                Control.LENGTH,
+                Control.TONE,
             ):  # § T adds the controls
                 if field in recorded and field in current_settings:
                     old, new = recorded[field], current_settings[field]
@@ -1087,9 +1089,9 @@ def session_topology(
     # § T (K296): compared with the record like the bundle; a session that names neither control
     # compares neither.
     if length is not None:
-        current_settings["length"] = length
+        current_settings[Control.LENGTH] = length
     if tone is not None:
-        current_settings["tone"] = tone
+        current_settings[Control.TONE] = tone
 
     # Sprint 240: freeze the tool_names tuple at build time so the
     # SessionStarted instrument's closure captures a snapshot even if the

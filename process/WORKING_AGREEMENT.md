@@ -1,5 +1,7 @@
 # process/WORKING_AGREEMENT.md — Substrate
 
+*Current as of 2026-10-11; the version it replaces is kept at `process/archive/WORKING_AGREEMENT-to-2026-10-11.md`.*
+
 *Project-specific overrides and additions on top of `sdd-kit-2/AGENTS.md`. The Agent reads AGENTS.md first (the methodology) then this file (the project specifics). This file augments; it never overrides AGENTS.md hard rules. When the two conflict, AGENTS.md wins.*
 
 ---
@@ -92,7 +94,7 @@ Superseded drafts under `docs/specs/product_spec/`, `docs/specs/technical_spec/`
 | Session workspace (Mode 1) | `~/.substrate/sessions/<session_id>/workspace/` | daemon piece B — sprint 213 |
 | Session worktree (Mode 2) | `~/.substrate/sessions/wt/<repo>-<session_id>/` on branch `substrate/<session_id>` | `_session_worktree` at `server.py:173-193` (existing) |
 | Delegate child dir | `<parent_workspace>/delegate-runs/d<depth>-c<N>/` | `_unique_child_root` at `delegate.py:174` (existing) |
-| Session registry (in-memory) | daemon module `session_registry.py` (lives in substrate-ui) | daemon piece C — sprint 211 |
+| Session registry (in-memory) | `substrate/src/substrate/topologies/session_registry.py` | daemon piece C — sprint 211; in the kernel since UI sprint 099 |
 | Bundle | `~/.substrate/bundles/<name>/` | user (runtime resolution — sprint 226) |
 | Bundle assembler | `substrate/src/substrate/bundles.py` | piece H — sprint 226 |
 | Application registry (in-memory) | daemon module `topologies/applications/registry.py` | piece E — sprint 222 |
@@ -108,10 +110,13 @@ Superseded drafts under `docs/specs/product_spec/`, `docs/specs/technical_spec/`
 | Session `model_failures` View (filters `substrate.ProducerFailed` where `producer.kind == "model"`) | `substrate/src/substrate/topologies/session/views.py` | sprint 205 |
 | Session role prompts (`default.md` and role variants) | `substrate/src/substrate/topologies/session/prompts/<role>.md` | piece A — sprint 205 (default.md); sprint 209 (reviewer / planner / tester / explainer) |
 | Session transcript renderer (`render_transcript`, `RenderedTranscript`, `TranscriptCompacted` Struct — the ONE Python home for the wire name) | `substrate/src/substrate/topologies/session/transcript.py` | sprint 207 |
-| Driver context lookup (`resolve_driver_context_tokens`, 60-s TTL cache, CLI-config fallback at 100 000 default, `DeterministicResponder` at 4096 constant) | `substrate/src/substrate/topologies/session/transcript.py` | sprint 208 |
+| Driver context lookup (`resolve_driver_context`, `resolve_driver_context_tokens`; Ollama `/api/show`, `deterministic` at 4,096) | `substrate/src/substrate/topologies/session/transcript.py` | sprint 208; the CLI chain moved out in K294 |
+| A CLI driver's context window, in order: live report, the CLI's settings, the maker's documented window, Substrate's config, 100,000 (vocabulary § S.9) | `substrate/src/substrate/topologies/session/context_windows.py` | K294 (2026-10-11) |
+| History compaction: clearing old tool output before dropping turns (`plan_history`, `HistoryPlan`) | `substrate/src/substrate/topologies/session/transcript.py`; vocabulary § S | K290–K293 (2026-10-11) |
+| The Length and Tone controls: positions, texts, defaults (`Control`, `LengthPosition`, `TonePosition`, `LENGTH_TEXTS`, `TONE_TEXTS`); their fragments (`control_fragments`) | `substrate/src/substrate/topologies/session/vocabulary.py`; `session_prompt_producer.py`; vocabulary § T | K296 (2026-10-11). substrate-ui reads the positions through its generated `web/vm/controls.gen.ts`. |
 | Driver introspection API (`OllamaResponder.context_tokens()`, typed `ContextTokensUnknown` and `DriverIntrospectionUnavailable` errors) | `substrate/src/substrate/adapters/models.py` | sprint 208 |
 | Session `session_warning` producer + seed-alone-exceeds guard (registered on `session_topology`, binds `initial("session_warning", ...)` only when `_est_tokens(seed) + _est_tokens(per_turn) > driver_context_tokens * 0.6`) | `substrate/src/substrate/topologies/session/__init__.py` | sprint 208 |
-| SessionRegistry (in-memory name index + per-session `asyncio.Lock` map + boot scan) | `substrate-ui/session_registry.py` | sprint 211 |
+| SessionRegistry (in-memory name index + per-session `asyncio.Lock` map + boot scan) | `substrate/src/substrate/topologies/session_registry.py` | sprint 211; moved into the kernel in UI sprint 099 (2026-10-01); `substrate-ui/session_registry.py` is gone |
 | Session name → session_id index (persistent, `fcntl.flock`-atomic writes via `.by-name.lock` sibling; atomic-write via tempfile+rename) | `~/.substrate/sessions/by-name.json` | sprint 211 |
 | Session manifest (per-session hint the boot scan reads to rebuild the in-memory catalog; `SessionManifest` msgspec Struct per TECH-SPEC §5; status one of `running`/`parked`/`interrupted`/`ended`) | `~/.substrate/sessions/<session_id>/manifest.json` | sprint 211 |
 
@@ -211,7 +216,7 @@ Every claim in TECH-SPEC-2026-08-25-round6 about where a daily-driver entity liv
 - **Validator-extras posture:** **strict.** Payload fields not declared in the schema raise at emit time (emission becomes `substrate.ProducerEmittedInvalidEvent` with reason `non_canonical_value`/`schema_violation`). Rationale: matches the substrate's own product principle 4 — bus-boundary validation is *mandatory and non-configurable*; a documentation-only posture would contradict the product the project ships.
 - **View-payload-universal convention:** the substrate has no `view` *category* in the UI sense — Views are runtime projections, not rendered scenes. The dual contract's "view-side counterpart" maps instead to **the run record on disk**: every behavior tag's effect must be reconstructable from the persisted log (replay Level 1/2). The dual-contract audit (BOOTSTRAP Step 9) pairs each behavior tag with a record-observable assertion (a sequenced event + a `view_at`/`decisions_between` reconstruction), not a screen element. Documented in the rationale doc.
 - **Reserved namespace:** kernel/control-plane kinds use the `substrate.` prefix (F-OBS-5); Producer-declared kinds MUST NOT collide. The vocabulary JSON marks each tag's namespace.
-- **Vocabulary location:** `process/signals/0.2.json` (active locked vocabulary; `process/signals/0.1.json` retained as the v0.1 audit trail, no deletions). Rationale docs: `process/signals/0.2-rationale.md` (+ founding `process/signals/0.1-rationale.md`). Open/ratified proposals: `process/signals/proposals.json`.
+- **Vocabulary location:** `process/signals/current.json` → `0.3.json` (the kernel's lifecycle kinds; `0.1.json` and `0.2.json` kept as audit trail). The session topology's own vocabulary is `process/signals/session-vocabulary.md`, v0.8 as of 2026-10-11. Rationale docs: `process/signals/0.2-rationale.md` (+ founding `process/signals/0.1-rationale.md`). Open/ratified proposals: `process/signals/proposals.json`.
 
 ---
 
