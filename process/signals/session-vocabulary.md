@@ -744,7 +744,28 @@ Where a text meets the guidance level's own rules, the level's rules win: a posi
 
 A change writes the `control` source again with the change's seq as its generation (§ P.4). A rewrite that leaves a source with no text writes one empty fragment of that source, `provenance = {cleared: true}`, so the cohort's newest generation is empty and the old text stops; this holds for every rewritten source, `per_turn` included.
 
+## U. v0.9 — guidance changed mid-session (2026-10-12, sprint K298)
+
+Research: `process/planning/RESEARCH-2026-10-12-controls-mid-session-r2.md`.
+
+### U.1 Guidance is a third control
+
+A guidance level changes mid-session as its bundle does: the session's bundle becomes `guidance_bundle(level)` (§ R.1), recorded as `SessionChanged {field: "bundle"}`, and the bundle's sources are written again (§ P.4). `auto` is the model's default level, `guidance_level(classify(driver))` (§ R.2), resolved when the change is made, as at open. No new field: the level is the bundle.
+
+### U.2 The line in the history
+
+A `SessionChanged` is drawn in the history at its place (§ P.4), so the model reads a change beside the turns it governs as well as in the system text. A change between two level bundles names the levels:
+
+| Change | Line |
+|---|---|
+| `bundle`, both level bundles | `Environment update: guidance changed from high to low.` |
+| `bundle`, any other | `Environment update: bundle changed from <old> to <new>.` (unchanged) |
+| `length`, `tone` | `Environment update: tone changed from neutral to blunt.` (unchanged) |
+
+A bundle name that `LEGACY_BUNDLE_NAMES` resolves to a level bundle names that level.
+
 ### Ratification signature
 
 - **v0.7** — Sprint K291, 2026-10-11, by the Architect's direction of the same day. §§ A–R byte-preserved.
 - **v0.8** — Sprint K296, 2026-10-11, by the Architect's direction of the same day (Length and Tone rows, substrate-ui OPEN-ITEMS 16). §§ A–S byte-preserved.
+- **v0.9** — Sprint K298, 2026-10-12, decided by the Architect ("let's make it happen", after research round 2), recorded by the Agent. §§ A–T byte-preserved.

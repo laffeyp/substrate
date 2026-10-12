@@ -27,7 +27,9 @@ from ...adapters import (
     DriverIntrospectionUnavailable,
     Responder,
 )
+from ...bundles import LEGACY_BUNDLE_NAMES
 from ..tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
+from .model_class import LEVEL_BUNDLES
 from .vocabulary import (
     BACKGROUND_TASK_ENDED,
     DRIVER_SLASH_SOURCE,
@@ -213,7 +215,19 @@ def session_changed_line(field: str, old: str, new: str) -> str:
     both."""
     if field == "per_turn":
         return "Environment update: the reminder line beside each message changed."
+    if field == "bundle":
+        # § U.2 (K298): a guidance level is its bundle; a change between two levels names them.
+        old_level, new_level = _LEVEL_OF.get(_canonical(old)), _LEVEL_OF.get(_canonical(new))
+        if old_level and new_level:
+            return f"Environment update: guidance changed from {old_level} to {new_level}."
     return f"Environment update: {field} changed from {old or '(none)'} to {new or '(none)'}."
+
+
+_LEVEL_OF: dict[str, str] = {bundle: str(level) for level, bundle in LEVEL_BUNDLES.items()}
+
+
+def _canonical(bundle: str) -> str:
+    return LEGACY_BUNDLE_NAMES.get(bundle, bundle)
 
 
 def result_lines(kind: str, payload: Mapping[str, Any], tool: str, seq: int) -> tuple[str, str]:
