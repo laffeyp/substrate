@@ -401,6 +401,11 @@ def kill_process_group(proc: subprocess.Popen[Any]) -> None:
         pass
 
 
+# K295: how much of a foreground command's output `bash` returns; a cut is always marked.
+_BASH_STDOUT_BYTES = 8000
+_BASH_STDERR_CHARS = 2000
+
+
 def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
     """Bash tool: `bash(cmd, timeout_s?, run_in_background?)` (UI sprints 101, 103).
 
@@ -510,7 +515,16 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
             _emit_bash_progress(ctx, chunk=pending, offset=emitted, eof=True)
         except Exception:  # noqa: BLE001, S110 — see above
             pass
-    stdout_text, _ = read_since(out_path, 0, 8000)
+    stdout_text, _ = read_since(out_path, 0, _BASH_STDOUT_BYTES)
+    stdout_size = out_path.stat().st_size if out_path.exists() else 0
+    if stdout_size > _BASH_STDOUT_BYTES:
+        # K295: the model must know it saw part of the output (it once read 222 lines of 4,000 and
+        # answered 222).
+        stdout_text += (
+            f"\n[bash: stdout cut to its first {_BASH_STDOUT_BYTES:,} of {stdout_size:,} bytes; "
+            f"the whole output is in {out_path}. Read it with read_file, or narrow the command "
+            "with head, tail or grep]"
+        )
     stderr_full = err_path.read_text(encoding="utf-8", errors="replace")
     result: dict[str, Any] = {"exit": proc.returncode, "stdout": stdout_text}
     if timed_out:
@@ -533,7 +547,12 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
             f"\n[bash: the shell exited but processes it started are still running, now background "
             f"task {task_id}. Read them with bash_output, stop them with bash_stop]"
         )
-    result["stderr"] = stderr_full[-2000:]
+    if len(stderr_full) > _BASH_STDERR_CHARS:
+        stderr_full = (
+            f"[bash: stderr cut to its last {_BASH_STDERR_CHARS:,} of {len(stderr_full):,} "
+            f"characters; the whole of it is in {err_path}]\n" + stderr_full[-_BASH_STDERR_CHARS:]
+        )
+    result["stderr"] = stderr_full
     return result
 
 
