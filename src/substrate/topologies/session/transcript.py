@@ -396,17 +396,18 @@ def plan_history(
     """§ S.1, S.2: clear old tool outputs first, then drop whole turns.
 
     `turns` is each turn's `(from_seq, cost, savings)`, `savings` the `(seq, tokens)` that clearing
-    each tool result saves. The current turn's newest `keep_whole` results never clear. The boundary starts at
+    each tool result saves. The current turn's newest `keep_whole` results clear last, and its latest
+    result never does. The boundary starts at
     `prev_cleared` (the record's last cut) and moves forward only while the history passes the
     budget, until it fits within half the budget, so the prompt's start holds still between passes.
     Whole turns drop, oldest first, only once every clearable result is cleared. Pure: every input
     comes from the record."""
     budget = int(driver_context_tokens * driver_headroom_frac) - head_tokens
     # § S.7: a finished turn ended with the model's reply, so all its outputs can clear; the
-    # current turn (the last) keeps its newest `keep_whole` whole.
+    # current turn (the last) keeps its newest `keep_whole` whole. § S.8: under pressure that
+    # protected set shrinks to the latest result alone before any whole turn drops.
     earlier = [s for _f, _c, savings in turns[:-1] for s in savings]
     current = sorted(turns[-1][2]) if turns else []
-    clearable = sorted(earlier + current[: max(len(current) - keep_whole, 0)])
 
     def turn_costs(c: int | None) -> list[int]:
         return [
@@ -418,7 +419,10 @@ def plan_history(
         return int(sum(turn_costs(c)[keep_from:]) * scale)
 
     cleared = prev_cleared
-    if total(cleared) > budget:
+    for keep in range(max(keep_whole, 1), 0, -1):
+        if total(cleared) <= budget:
+            break
+        clearable = sorted(earlier + current[: max(len(current) - keep, 0)])
         for seq, _t in clearable:
             if cleared is not None and seq <= cleared:
                 continue

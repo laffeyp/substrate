@@ -75,7 +75,7 @@ def test_whole_turns_drop_only_after_every_clearable_output_is_cleared() -> None
     plan = plan_history(turns, 0, 10_000, 0.6, None)
     outputs = sorted(s for _a, _c, sav in turns for s, _t in sav)
     assert plan.keep_from > 0
-    assert plan.cleared_through == outputs[-4]  # everything but the newest 3
+    assert plan.cleared_through == outputs[-2]  # § S.8: everything but the latest result
 
 
 def test_the_codex_case_keeps_every_turn() -> None:
@@ -179,3 +179,12 @@ def test_a_session_clears_tool_output_and_keeps_every_request(tmp_path: Path) ->
         )
         history_block = expected[expected.index("[transcript:") :]
         assert history_block in pc["payload"]["text"]  # the head carries the tool-suite fragment
+
+
+def test_under_pressure_the_current_turn_keeps_only_its_latest_result() -> None:
+    """§ S.8: a finished turn's request outranks the current turn's older outputs."""
+    turns = [_turn(10, 300, 0, 0), _turn(20, 100, 3, 1_500)]  # budget 3,000 - 440 head
+    plan = plan_history(turns, 440, 5_000, 0.6, None)
+    latest = max(s for s, _t in turns[-1][2])
+    assert plan.keep_from == 0  # the earlier turn stays
+    assert plan.cleared_through is not None and plan.cleared_through < latest

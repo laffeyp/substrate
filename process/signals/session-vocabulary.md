@@ -685,6 +685,10 @@ The characters ÷ 4 estimate is multiplied by the driver's measured ratio: the l
 
 S.1 kept the newest 3 tool results of the whole history whole. Replanning the codex session `s_b8dab6b0cfd443cdba9bc8b3` showed the flaw: its last turn's three file reads cost about 57,000 estimated tokens, the whole budget, so every earlier turn dropped. As built from K292: the newest 3 tool results **of the current turn** render whole. A finished turn ended with the model's reply, and all its outputs may clear. Invariant 9 reads the same with that set.
 
+### S.8 Under pressure the current turn keeps only its latest result (K293, 2026-10-11; amends S.1 and S.7)
+
+A live run on `kimi-k2.7-code:cloud` showed the gap: mid-turn, the current turn's protected results alone passed the budget, so nothing could clear and the earlier turn dropped, the user's request with it. As built from K293: when the history still passes the budget with every other output cleared, the current turn's protected set shrinks one result at a time, oldest first, down to its latest result. Whole turns drop only after that. The latest result never clears: the model's next step reads it.
+
 ### Ratification signature
 
 - **v0.7** — Sprint K291, 2026-10-11, by the Architect's direction of the same day. §§ A–R byte-preserved.

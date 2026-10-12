@@ -27,3 +27,10 @@ asked: 2026-10-11 (Architect)
 - **Full suites, once.** Kernel: 1,496 passed, 9 skipped (opt-in tiers). UI unit specs: 32 passed. UI Python: 244 passed, 5 skipped.
 - **Not in the installed app yet.** The app picks this up at the next build and install.
 
+- **Every driver family, live** (2026-10-11, after the Architect asked why only codex was shown). The live test now runs claude, codex, cursor-agent and `kimi-k2.7-code:cloud` (Substrate's own `bash` tool), at windows sized so one turn's reads force a cut. All four: the read's output cleared, no turn dropped, the answer `PELICAN-42`. Cuts (estimated tokens before → after): claude 2,836 → 145; codex 2,830 → 142; cursor-agent 3,066 → 375; kimi 7,669 → 4,137, mid-turn. 47.1 s.
+- **Each harness caps very large outputs at its own end.** On a 144,000-character `cat`: Claude Code saved the output to a file and returned a 2,377-character notice; cursor-agent's stream reported the output empty; Substrate's `bash` returned 8,261 characters. So the test uses mid-size reads.
+- **§ S.8, found by the kimi run.** Mid-turn, the current turn's protected results alone passed the budget, so the earlier turn dropped with its request. Now the protected set shrinks to the latest result before any turn drops. `plan_history` and a unit test; the drop test now expects everything but the latest result cleared.
+- **Found on the way, not compaction:** Substrate's `bash` cuts stdout at 8,000 bytes with no marker (`tools.py:513`); kimi read 222 lines of a 4,000-line file and answered 222. Added to the release roadmap, step 3.
+- **Kimi's measured scale was 1.7–2.6:** Ollama counts the native tool schemas sent beside the prompt, which the text estimate leaves out. The scale budgets for them.
+- Session-area tests after § S.8: 366 passed, 11 skipped.
+
