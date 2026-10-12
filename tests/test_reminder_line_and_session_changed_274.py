@@ -3,9 +3,9 @@
 """K274: the reminder line, and SessionChanged (session vocabulary § P.2, § P.4).
 
 The reminder line (`per_turn`) is written once and sits right after the current message on every
-step. When the session's driver, bundle, reminder line or date differ from the record, the turn's
-first model step records a SessionChanged and tells the model beside the message; a changed bundle
-or reminder line is written again, and later steps read the new text.
+step. When the session's driver, bundle, reminder line or date differ from the record, a
+SessionChanged is recorded and told to the model beside the message; a changed bundle or reminder
+line is written again, and from K299 (§ V) that message's prompt reads the new text.
 """
 
 from __future__ import annotations
@@ -145,8 +145,10 @@ def test_a_bundle_change_writes_its_sources_again(
         {"field": "bundle", "old": "b1", "new": "b2"},
         {"field": "per_turn", "old": "B1-REMINDER", "new": "B2-REMINDER"},
     ]
-    # The step that sees the change still reads b1's text; it says so beside the message.
-    assert "B1-METHOD" in driver.prompts[1]
+    # K299 (§ V): the message on which the change is recorded reads b2's text, and the change
+    # line beside it. (K274 had this step still read b1's text, a message late: postmortem
+    # 2026-10-12.)
+    assert "B2-METHOD" in driver.prompts[1] and "B1-METHOD" not in driver.prompts[1]
     assert "Environment update: bundle changed from b1 to b2." in driver.prompts[1]
     # The next turn reads b2's text only.
     third = driver.prompts[2]

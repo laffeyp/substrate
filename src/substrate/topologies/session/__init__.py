@@ -41,7 +41,6 @@ from .vocabulary import (
     END_ON_EXIT_SENTINEL,
     CACHE_LAYOUT_SOURCES,
     INTERRUPT_REQUESTED,
-    SESSION_CHANGED,
     SKILL_SLASH_PREFIX,
     DRIVER_SLASH_SOURCE,
     SYSTEM_SOURCES,
@@ -65,7 +64,10 @@ from .vocabulary import (
     TRIGGER_ID_END_ON_EXIT,
     TRIGGER_ID_END_ON_END_REQUEST,
     TRIGGER_ID_FIRST_MESSAGE_ON_SESSION_PROMPT,
-    TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED,
+    TRIGGER_ID_MODEL_ON_SESSION_PROMPT_CHANGE,
+    TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE,
+    TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE,
+    SESSION_CHANGE_FIELDS,
     TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
     TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
     TRIGGER_ID_MODEL_ON_USER_MESSAGE,
@@ -413,7 +415,6 @@ def _first_message_factory(user_message: "UserMessage") -> Callable[[], Any]:
 def _model_factory(
     *,
     driver: Responder,
-    current_settings: dict[str, str],
     script: list[tuple[str, list[Any]]] | None,
     system_sources: frozenset[str] | None = None,
     seed: str,
@@ -471,7 +472,6 @@ def _model_factory(
         final = bool(inp.get("final", False)) if hasattr(inp, "get") else False
         turn_index = int(inp.get("turn_index", 0)) if hasattr(inp, "get") else 0
         fragments = list(inp.get("fragments", [])) if hasattr(inp, "get") else []
-        recorded = dict(inp.get("settings") or {}) if hasattr(inp, "get") else {}
         driver_text = inp.get("driver_command") if hasattr(inp, "get") else None
         if driver_text:
             # UI sprint 123 (§ P.11): the operator's `//` line goes to the driver as written, with
@@ -527,23 +527,8 @@ def _model_factory(
                 yield ended
                 notices.append(background_notice(ended))
 
-        # K274 (§ P.4): on a turn's first step, anything the session now runs with that differs
-        # from what the record last said is recorded and told to the model beside the message.
-        updates: list[str] = []
-        if step == 0:
-            for field in (
-                "driver",
-                "bundle",
-                "per_turn",
-                "date",
-                Control.LENGTH,
-                Control.TONE,
-            ):  # § T adds the controls
-                if field in recorded and field in current_settings:
-                    old, new = recorded[field], current_settings[field]
-                    if old != new:
-                        yield SessionChanged(field=field, old=old, new=new)
-                        updates.append(session_changed_line(field, old, new))
+        # K299 (§ V): a change is recorded, and its text written, by session_prompt before this
+        # step starts; the history draws its line beside the message.
 
         trailing_fails = 0
         for r in reversed(results):
@@ -561,7 +546,7 @@ def _model_factory(
             seed=seed,
             fragments=fragments,
             notices=notices,
-            after_message=updates,
+            after_message=[],
             system_sources=system_sources,
             cleared_through=cleared_through,
         )
@@ -982,16 +967,36 @@ def session_topology(
         return max(n - 1, 0)
 
     def _skill_of(event: Any) -> str | None:
-        """The skill a UserMessage asks for: `slash_source` "skill:<name>", else None."""
-        source = str((getattr(event, "payload", None) or {}).get("slash_source") or "")
+        """The skill a UserMessage asks for: `slash_source` "skill:<name>", else None. Takes the
+        event or its payload."""
+        payload = event if isinstance(event, dict) else (getattr(event, "payload", None) or {})
+        source = str(payload.get("slash_source") or "")
         return source[len(SKILL_SLASH_PREFIX) :] if source.startswith(SKILL_SLASH_PREFIX) else None
 
     def _driver_command_of(event: Any) -> dict[str, str]:
-        """`{"driver_command": text}` for a `//` turn (§ P.11), else nothing."""
-        payload = getattr(event, "payload", None) or {}
+        """`{"driver_command": text}` for a `//` turn (§ P.11), else nothing. Takes the
+        UserMessage event, or its payload (K299: the model can start after a change run)."""
+        payload = event if isinstance(event, dict) else (getattr(event, "payload", None) or {})
         if payload.get("slash_source") == DRIVER_SLASH_SOURCE:
             return {"driver_command": str(payload.get("text", ""))}
         return {}
+
+    def _pending_changes(ctx: Any) -> list[dict[str, str]]:
+        """K299 (§ V): each setting the turn runs with (`current_settings`) that differs from what
+        the record last said (the session_settings view), in SESSION_CHANGE_FIELDS order. A field
+        the record never held is not compared."""
+        recorded = ctx.views["session_settings"].value()
+        return [
+            {"field": str(f), "old": recorded[f], "new": current_settings[f]}
+            for f in SESSION_CHANGE_FIELDS
+            if f in recorded and f in current_settings and recorded[f] != current_settings[f]
+        ]
+
+    def _turn_message(ctx: Any) -> dict[str, Any]:
+        """The payload of the turn's UserMessage (K299: read when the model starts after a
+        change run, which is not the message itself)."""
+        messages = ctx.views["user_messages"].value()
+        return dict(messages[-1]) if messages else {}
 
     def _producer_kind_from_ref(ctx: Any) -> str | None:
         payload = getattr(ctx.event, "payload", None) or {}
@@ -1074,7 +1079,7 @@ def session_topology(
         frozenset(SYSTEM_SOURCES | CACHE_LAYOUT_SOURCES) if cache_layout else None
     )
 
-    # K274: what the session runs with now; the model step compares it with the record.
+    # K274, K299: what the session runs with now; _pending_changes compares it with the record.
     try:
         resolved_per_turn = resolve_per_turn(per_turn, bundle)[0]
     except Exception:  # noqa: BLE001 — a bad bundle is reported by session_prompt, not here
@@ -1144,14 +1149,12 @@ def session_topology(
                 TranscriptCompacted,
                 BackgroundTaskEnded,
                 PromptComposed,
-                SessionChanged,
                 HarnessToolCall,
                 HarnessToolResult,
             ],
             schema_version=1,
             factory=_model_factory(
                 driver=driver,
-                current_settings=current_settings,
                 system_sources=system_sources,
                 script=script,
                 seed=seed,
@@ -1186,6 +1189,7 @@ def session_topology(
         )
         b.view("results", api.KindBuffer(TOOL_RESULT))
         b.view("user_turns", api.KindCount(USER_MESSAGE))
+        b.view("user_messages", api.KindBuffer(USER_MESSAGE))
         b.view("returned_turns", api.KindCount(RETURNED))
         # FragmentCohort: the session-open fragments (one slot per source) and any turn-scoped
         # fragment (an interrupt directive, cleared on the next PromptComposed). The model
@@ -1218,11 +1222,12 @@ def session_topology(
             length=length,
             tone=tone,
         )
-        has_session_prompt = bool(sources) or seed_warning is not None
+        # K299: always present, even with no sources, because it records every mid-session change.
+        has_session_prompt = True
         if has_session_prompt:
             b.producer_kind(
                 PRODUCER_KIND_SESSION_PROMPT,
-                schemas=[PromptFragment, SessionWarning],
+                schemas=[PromptFragment, SessionWarning, SessionChanged],
                 schema_version=1,
                 factory=session_prompt_producer_factory(
                     session_id=session_id, sources=sources, seed_warning=seed_warning
@@ -1230,15 +1235,23 @@ def session_topology(
                 deterministic=True,
             )
             b.initial(PRODUCER_KIND_SESSION_PROMPT, input={})
-            # K274 (§ P.4): a changed bundle or reminder line writes those sources again; the
-            # fragments carry the change's seq, and the cohort keeps each source's newest.
+            # K299 (§ V): a message that arrives while a setting differs from the record starts this
+            # producer to record each change and write the text it changes (the message's seq is the
+            # generation); the model, or a skill's fragment, starts on its completion.
             b.trigger(
-                TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED,
-                subscription=api.Subscription(kinds=frozenset({SESSION_CHANGED})),
-                predicate=lambda ctx: ctx.event.payload.get("field") in _REWRITTEN_ON_CHANGE,
+                TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE,
+                subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
+                predicate=lambda ctx: bool(_pending_changes(ctx)),
                 starts=PRODUCER_KIND_SESSION_PROMPT,
                 input_builder=lambda ctx: {
-                    "only": list(_REWRITTEN_ON_CHANGE[str(ctx.event.payload.get("field"))]),
+                    "changes": _pending_changes(ctx),
+                    "only": sorted(
+                        {
+                            str(source)
+                            for c in _pending_changes(ctx)
+                            for source in _REWRITTEN_ON_CHANGE.get(c["field"], ())
+                        }
+                    ),
                     "generation": int(ctx.event.seq),
                 },
                 policy=api.PerEvent(),
@@ -1301,9 +1314,50 @@ def session_topology(
         b.trigger(
             TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
             subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
-            predicate=lambda ctx: _skill_of(ctx.event) is not None,
+            # K299: after a change, the skill waits for the change run (skill-fragment-on-...).
+            predicate=lambda ctx: _skill_of(ctx.event) is not None and not _pending_changes(ctx),
             starts=PRODUCER_KIND_SKILL_FRAGMENT,
             input_builder=lambda ctx: {"name": _skill_of(ctx.event)},
+            policy=api.PerEvent(),
+        )
+        # K299 (§ V): a change run's completion starts the turn's next step: the skill's fragment
+        # for a `/dellm` message, else the model. Only while the turn is open and before its
+        # first model step: a change run is the only session_prompt run on a resumed record.
+        b.trigger(
+            TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE,
+            subscription=api.Subscription(
+                kinds=frozenset({api.PRODUCER_COMPLETED, api.PRODUCER_FAILED})
+            ),
+            predicate=lambda ctx: (
+                _producer_kind_from_ref(ctx) == PRODUCER_KIND_SESSION_PROMPT
+                and int(ctx.views["user_turns"].value()) > 0
+                and _turn_open(ctx)
+                and _skill_of(_turn_message(ctx)) is not None
+            ),
+            starts=PRODUCER_KIND_SKILL_FRAGMENT,
+            input_builder=lambda ctx: {"name": _skill_of(_turn_message(ctx))},
+            policy=api.PerEvent(),
+        )
+        b.trigger(
+            TRIGGER_ID_MODEL_ON_SESSION_PROMPT_CHANGE,
+            subscription=api.Subscription(
+                kinds=frozenset({api.PRODUCER_COMPLETED, api.PRODUCER_FAILED})
+            ),
+            predicate=lambda ctx: (
+                _producer_kind_from_ref(ctx) == PRODUCER_KIND_SESSION_PROMPT
+                and int(ctx.views["user_turns"].value()) > 0
+                and _turn_open(ctx)
+                and _skill_of(_turn_message(ctx)) is None
+            ),
+            starts=PRODUCER_KIND_MODEL,
+            input_builder=lambda ctx: {
+                "step": 0,
+                "results": [],
+                "final": False,
+                "turn_index": _turn_index(ctx),
+                **_driver_command_of(_turn_message(ctx)),
+                **_prompt_input(ctx),
+            },
             policy=api.PerEvent(),
         )
         b.trigger(
@@ -1318,7 +1372,6 @@ def session_topology(
                 "results": [],
                 "final": False,
                 "turn_index": _turn_index(ctx),
-                "settings": ctx.views["session_settings"].value(),
                 **_prompt_input(ctx),
             },
             policy=api.PerEvent(),
@@ -1415,15 +1468,15 @@ def session_topology(
         b.trigger(
             TRIGGER_ID_MODEL_ON_USER_MESSAGE,
             subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
-            # A `/dellm` message waits for its skill (model-on-skill-fragment).
-            predicate=lambda ctx: _skill_of(ctx.event) is None,
+            # A `/dellm` message waits for its skill (model-on-skill-fragment); a message that
+            # follows a change waits for the change run (model-on-session-prompt-change, K299).
+            predicate=lambda ctx: _skill_of(ctx.event) is None and not _pending_changes(ctx),
             starts=PRODUCER_KIND_MODEL,
             input_builder=lambda ctx: {
                 "step": 0,
                 "results": [],
                 "final": False,
                 "turn_index": _turn_index(ctx),
-                "settings": ctx.views["session_settings"].value(),
                 **_driver_command_of(ctx.event),
                 **_prompt_input(ctx),
             },
@@ -1535,7 +1588,6 @@ from .transcript import (  # noqa: E402
     plan_history,
     resolve_driver_context,
     resolve_driver_context_tokens,
-    session_changed_line,
 )
 from .views import (  # noqa: E402
     FragmentCohort,

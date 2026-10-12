@@ -764,8 +764,36 @@ A `SessionChanged` is drawn in the history at its place (§ P.4), so the model r
 
 A bundle name that `LEGACY_BUNDLE_NAMES` resolves to a level bundle names that level.
 
+## V. v0.10 — a change reaches the prompt for its message (2026-10-12, sprint K299)
+
+Postmortem: `process/planning/POSTMORTEM-2026-10-12-mid-session-changes-arrive-late-r2.md`. Roadmap: `process/planning/ROADMAP-2026-10-12-changes-on-time-r2.md`. Amends § P.4 and § T.3.
+
+### V.1 Which prompt carries a change
+
+The prompt for the message on which a `SessionChanged` is recorded carries the new text. Before v0.10 the model step recorded the change and built that prompt from the old text; the new text reached the next message (§ P.4 named no prompt).
+
+### V.2 Who records a change
+
+`session_prompt` records `SessionChanged`, not `model`. A message that arrives while any setting in `SESSION_CHANGE_FIELDS` (driver, bundle, per_turn, date, length, tone) differs from the `session_settings` view starts `session_prompt` with the changes; that one run records each change in that order, then writes the sources the changes rewrite (`_REWRITTEN_ON_CHANGE`: bundle → bundle_style, bundle_methodology, per_turn; per_turn → per_turn; length and tone → control), each fragment's generation the message's seq. A driver or date change writes no text. `session_prompt` is registered in every session; with no source, its first run writes nothing.
+
+### V.3 Triggers
+
+| Trigger | Fires on | Starts |
+|---|---|---|
+| `session-prompt-on-user-message-change` (added) | a UserMessage while a setting differs | `session_prompt` with the changes |
+| `model-on-session-prompt-change` (added) | `session_prompt` ending while the turn is open, the message naming no skill | `model` |
+| `skill-fragment-on-session-prompt-change` (added) | the same, the message naming a skill | `skill_fragment` |
+| `session-prompt-on-session-changed` (removed) | | |
+
+`model-on-user-message` and `skill-fragment-on-user-message` fire only when no setting differs.
+
+### V.4 The turn's record
+
+On the message on which a change is made: UserMessage, SessionChanged (one per field), the rewritten PromptFragments, PromptComposed, the reply. The history draws each change's line beside the message (§ P.4).
+
 ### Ratification signature
 
 - **v0.7** — Sprint K291, 2026-10-11, by the Architect's direction of the same day. §§ A–R byte-preserved.
 - **v0.8** — Sprint K296, 2026-10-11, by the Architect's direction of the same day (Length and Tone rows, substrate-ui OPEN-ITEMS 16). §§ A–S byte-preserved.
 - **v0.9** — Sprint K298, 2026-10-12, decided by the Architect ("let's make it happen", after research round 2), recorded by the Agent. §§ A–T byte-preserved.
+- **v0.10** — Sprint K299, 2026-10-12, decided by the Architect ("let's go", after roadmap round 2), recorded by the Agent. §§ A–U byte-preserved.

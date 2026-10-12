@@ -66,14 +66,20 @@ def test_the_session_registers_nine_producer_kinds(tmp_path: Path) -> None:
         PRODUCER_KIND_FIRST_MESSAGE,
         "skill_fragment",
     }
-    # Two triggers listen to a producer's end: the first message waits for the session prompt,
-    # and a `/dellm` turn's model waits for its skill (K277).
+    # Four triggers listen to a producer's end: the first message waits for the session prompt,
+    # a `/dellm` turn's model waits for its skill (K277), and after a mid-session change the
+    # model, or the skill, waits for the change run (K299, § V).
     on_lifecycle = [
         t.id
         for t in reg.triggers
         if api.PRODUCER_COMPLETED in (t.subscription.kinds or frozenset())
     ]
-    assert sorted(on_lifecycle) == ["first-message-on-session-prompt", "model-on-skill-fragment"]
+    assert sorted(on_lifecycle) == [
+        "first-message-on-session-prompt",
+        "model-on-session-prompt-change",
+        "model-on-skill-fragment",
+        "skill-fragment-on-session-prompt-change",
+    ]
 
 
 def test_session_open_writes_thirteen_envelopes_and_keeps_each_source(tmp_path: Path) -> None:
@@ -120,7 +126,10 @@ def test_a_large_seed_warns_from_the_session_prompt_before_the_first_message(
     assert domain[1]["payload"]["kind"] == "seed_alone_exceeds"
 
 
-def test_a_session_with_no_prompt_source_has_no_session_prompt(tmp_path: Path) -> None:
+def test_a_session_with_no_prompt_source_still_has_session_prompt(tmp_path: Path) -> None:
+    """K263 left session_prompt out when nothing would be written; K299 (§ V) keeps it in every
+    session, because it records every mid-session change. With no source its first run writes
+    nothing, and the first message waits for it."""
     topo = session_topology(
         driver=DeterministicResponder(seed=0),
         driver_name="deterministic",
@@ -132,8 +141,8 @@ def test_a_session_with_no_prompt_source_has_no_session_prompt(tmp_path: Path) -
         first_turn_user_message=_um("hello"),
     )
     reg = _registration(topo)
-    assert PRODUCER_KIND_SESSION_PROMPT not in reg.producer_kinds
-    assert [i.kind for i in reg.initials] == [PRODUCER_KIND_FIRST_MESSAGE]
+    assert PRODUCER_KIND_SESSION_PROMPT in reg.producer_kinds
+    assert [i.kind for i in reg.initials] == [PRODUCER_KIND_SESSION_PROMPT]
 
 
 def test_a_resume_writes_no_second_first_message(tmp_path: Path) -> None:

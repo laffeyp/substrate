@@ -141,6 +141,13 @@ def test_session_trigger_ids_frozenset_covers_all() -> None:
     four triggers and compose-on-interrupt-tool-result, and added model-on-user-message and
     first-message-on-session-prompt. K263 removed warn-on-fragment-error: session_prompt records a
     failed source itself. K274 added session-prompt-on-session-changed; K277 added
-    skill-fragment-on-user-message and model-on-skill-fragment."""
-    assert len(SESSION_TRIGGER_IDS) == 16
-    assert "session-prompt-on-session-changed" in SESSION_TRIGGER_IDS
+    skill-fragment-on-user-message and model-on-skill-fragment. K299 replaced
+    session-prompt-on-session-changed with session-prompt-on-user-message-change,
+    model-on-session-prompt-change and skill-fragment-on-session-prompt-change (§ V)."""
+    assert len(SESSION_TRIGGER_IDS) == 18
+    assert "session-prompt-on-session-changed" not in SESSION_TRIGGER_IDS
+    assert {
+        "session-prompt-on-user-message-change",
+        "model-on-session-prompt-change",
+        "skill-fragment-on-session-prompt-change",
+    } <= SESSION_TRIGGER_IDS

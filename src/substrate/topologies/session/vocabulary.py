@@ -396,8 +396,26 @@ TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED: Final[str] = "driver-stepper-on-returned"
 TRIGGER_ID_MODEL_ON_USER_MESSAGE: Final[str] = "model-on-user-message"
 # K261: starts first_message once session_prompt has ended (K263: one producer to wait for).
 TRIGGER_ID_FIRST_MESSAGE_ON_SESSION_PROMPT: Final[str] = "first-message-on-session-prompt"
-# K274: a SessionChanged of the bundle or per_turn writes those sources again (§ P.4).
-TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED: Final[str] = "session-prompt-on-session-changed"
+# K299 (§ V): a UserMessage arriving while a setting differs from the record starts session_prompt,
+# which records the change and writes the text it changes; the model (or, for a `/dellm` message,
+# skill_fragment) starts when that run ends, so the message's prompt reads the new text. Replaces
+# K274's session-prompt-on-session-changed, which wrote the text after the prompt was built.
+TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE: Final[str] = (
+    "session-prompt-on-user-message-change"
+)
+TRIGGER_ID_MODEL_ON_SESSION_PROMPT_CHANGE: Final[str] = "model-on-session-prompt-change"
+TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE: Final[str] = (
+    "skill-fragment-on-session-prompt-change"
+)
+# K274, K296, K299: the settings a turn compares with the record, in the order changes are recorded.
+SESSION_CHANGE_FIELDS: Final[tuple[str, ...]] = (
+    "driver",
+    "bundle",
+    "per_turn",
+    "date",
+    Control.LENGTH,
+    Control.TONE,
+)
 # K277: a UserMessage sent with `/dellm` (slash_source "skill:<name>") starts skill_fragment, and the
 # model starts when skill_fragment ends, so the turn's first step reads the skill (§ P.10).
 TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE: Final[str] = "skill-fragment-on-user-message"
@@ -422,7 +440,9 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_DRIVER_STEPPER_ON_RETURNED,
         TRIGGER_ID_MODEL_ON_USER_MESSAGE,
         TRIGGER_ID_FIRST_MESSAGE_ON_SESSION_PROMPT,
-        TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED,
+        TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE,
+        TRIGGER_ID_MODEL_ON_SESSION_PROMPT_CHANGE,
+        TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE,
         TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
         TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
     }
@@ -462,7 +482,10 @@ __all__ = [
     "DRIVER_SLASH_SOURCE",
     "PRODUCER_KIND_SKILL_FRAGMENT",
     "CACHE_LAYOUT_SOURCES",
-    "TRIGGER_ID_SESSION_PROMPT_ON_SESSION_CHANGED",
+    "TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE",
+    "TRIGGER_ID_MODEL_ON_SESSION_PROMPT_CHANGE",
+    "TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE",
+    "SESSION_CHANGE_FIELDS",
     "SESSION_CHANGED",
     "HARNESS_TOOL_CALL",
     "HARNESS_TOOL_RESULT",

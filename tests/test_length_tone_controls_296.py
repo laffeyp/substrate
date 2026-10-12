@@ -119,8 +119,10 @@ def test_a_change_is_recorded_and_the_new_text_replaces_the_old(tmp_path: Path) 
     events = _events(root)
     changes = [e["payload"] for e in events if e["kind"] == "SessionChanged"]
     assert changes == [{"field": "tone", "old": "blunt", "new": "formal"}]
-    last_system = [e["payload"]["system"] for e in events if e["kind"] == "PromptComposed"][-1]
-    assert FORMAL in last_system and TERSE in last_system and BLUNT not in last_system
+    systems = [e["payload"]["system"] for e in events if e["kind"] == "PromptComposed"]
+    # K299 (§ V): the message on which the change is recorded (SECOND) reads the new text.
+    assert FORMAL in systems[1] and TERSE in systems[1] and BLUNT not in systems[1]
+    assert FORMAL in systems[-1] and TERSE in systems[-1] and BLUNT not in systems[-1]
 
 
 def test_a_change_back_to_the_defaults_clears_the_text(tmp_path: Path) -> None:

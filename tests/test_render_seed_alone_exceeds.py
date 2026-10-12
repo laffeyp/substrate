@@ -49,10 +49,12 @@ def _open(
     return b.build()
 
 
-def test_small_seed_does_not_arm_the_initial() -> None:
+def test_small_seed_still_arms_the_initial() -> None:
+    """K299 (§ V): session_prompt runs in every session, since it records mid-session changes;
+    a small seed no longer leaves it out (the warning itself is the seed-size tests' subject)."""
     reg = _open(seed="you are a companion", driver_context_tokens=32768)
     kinds = {i.kind for i in reg.initials}
-    assert PRODUCER_KIND_SESSION_PROMPT not in kinds
+    assert PRODUCER_KIND_SESSION_PROMPT in kinds
 
 
 def test_seed_exceeding_headroom_arms_the_initial() -> None:

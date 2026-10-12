@@ -26,7 +26,7 @@ from typing import Any
 from ...bundles import Bundle, resolve_extends
 from ...errors import describe_error
 from ..tool_loop.tools import Tool, suite_describe
-from . import PromptFragment, SessionWarning
+from . import PromptFragment, SessionChanged, SessionWarning
 from .context_slice import extract_context_slice
 from .environment import render_baseline
 from .roles import resolve_role_prompt_with_source
@@ -322,15 +322,25 @@ def session_prompt_producer_factory(
     """The producer body. `seed_warning` is built at topology build time, when the seed's size
     is known."""
 
-    async def _session_prompt(inp: Any) -> AsyncIterator[PromptFragment | SessionWarning]:
-        # A run after a SessionChanged (K274) writes only the changed sources, and marks each
-        # fragment with the change's seq so the cohort keeps the newest generation.
-        only = set(inp.get("only") or ()) if hasattr(inp, "get") else set()
+    async def _session_prompt(
+        inp: Any,
+    ) -> AsyncIterator[PromptFragment | SessionWarning | SessionChanged]:
+        # K299 (§ V): a change run records each change, then writes the sources those changes
+        # rewrite (`only`, which may be empty: a date or driver change writes no text), each
+        # fragment marked with the message's seq so the cohort keeps the newest generation. The
+        # model starts on this run's completion, so the message's prompt reads the new text.
+        change_run = hasattr(inp, "get") and inp.get("changes") is not None
+        changes = list(inp.get("changes") or ()) if change_run else []
+        only = set(inp.get("only") or ()) if change_run else set()
         generation = inp.get("generation") if hasattr(inp, "get") else None
-        if seed_warning is not None and not only:
+        for change in changes:
+            yield SessionChanged(
+                field=str(change["field"]), old=str(change["old"]), new=str(change["new"])
+            )
+        if seed_warning is not None and not change_run:
             yield seed_warning
         for name, source in sources.items():
-            if only and str(name) not in only:
+            if change_run and str(name) not in only:
                 continue
             try:
                 fragments = source()
@@ -346,7 +356,7 @@ def session_prompt_producer_factory(
                 continue
             # A rewrite that leaves a source with no text writes one empty fragment, so the
             # cohort's newest generation of that source is empty and the old text stops (§ T.3).
-            if only and not fragments:
+            if change_run and not fragments:
                 fragments = [
                     PromptFragment(
                         source=str(name), text="", precedence=0, provenance={"cleared": True}
