@@ -529,6 +529,11 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### K299–K301 and U167: changes reach the next message (2026-10-12)
+- **K299** (vocabulary v0.10 § V): a trigger predicate finds a change; `session_prompt` records it and writes its text; its completion starts the model (or a `/dellm` message's skill). **K300**: 7 tests on the prompt for the message after a change, red on the old kernel. Kernel suite 1,532. Postmortem round 3: K274's test asserted the delay.
+- **U167**: `controls_mid_session` reads the prompt after `/tone blunt` and `/guidance low`; red on the old kernel, green on `6d2d5114` (its first version passed on an empty check). Live on deepseek-v4-pro: the terse text reached the next message's prompt. Installed app runs kernel `6d2d5114`.
+- **K301**: the length experiment on the fixed kernel (`RESEARCH-2026-10-12-length-drift-r3.md`): glm does not move; kimi shortens 7–18%; no drift back visible.
+
 ### POSTMORTEM: mid-session changes reach the model one message late (2026-10-12)
 - **What.** After `/length full` or `/tone blunt`, the reply to the next message was still written under the old setting; the model was told of the change in the history but its system text was unchanged. Only the message after that got the new text. `process/planning/POSTMORTEM-2026-10-12-mid-session-changes-arrive-late.md`.
 - **Scope** (postmortem round 2). Every change of a field whose text a change rewrites: 11 of 11 late (bundle/guidance 4, per_turn 3, length 3, tone 1), since K274 (`10fec6f7`, 2026-10-10). Round 1 counted 14 of 14; three were date and driver changes, which rewrite no text and whose history line arrives on time. Settings chosen at open are delivered from the first message.
