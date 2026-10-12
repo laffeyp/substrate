@@ -16,7 +16,6 @@ own counts for each call are on `ModelReply.usage` (K262).
 from __future__ import annotations
 
 import time
-import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -54,7 +53,6 @@ from .vocabulary import (
 )
 
 _CONTEXT_CACHE_TTL_SECONDS = 60.0
-_CLI_CONTEXT_DEFAULT_TOKENS = 100_000
 _DETERMINISTIC_CONTEXT_TOKENS = 4096
 
 # One process-wide cache keyed by (driver_class, model_tag). Ollama's /api/show
@@ -116,53 +114,38 @@ class TranscriptCompacted(Struct, frozen=True):
     token_scale: float = 1.0
 
 
-def _cli_context_from_config(driver_name: str, config_path: Path | None = None) -> int:
-    """Read `[driver.<driver_name>].context_tokens` from ~/.substrate/config.toml.
-
-    Missing file or missing key falls back to `_CLI_CONTEXT_DEFAULT_TOKENS` (100 000);
-    the fallback is documented as user-settable in the tech spec. `config_path` is
-    injectable for tests.
-    """
-    from substrate.api import substrate_home
-
-    path = config_path or (substrate_home() / "config.toml")
-    if not path.exists():
-        return _CLI_CONTEXT_DEFAULT_TOKENS
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return _CLI_CONTEXT_DEFAULT_TOKENS
-    driver_table = data.get("driver", {})
-    entry = driver_table.get(driver_name, {}) if isinstance(driver_table, dict) else {}
-    if not isinstance(entry, dict):
-        return _CLI_CONTEXT_DEFAULT_TOKENS
-    value = entry.get("context_tokens")
-    return value if isinstance(value, int) and value > 0 else _CLI_CONTEXT_DEFAULT_TOKENS
-
-
-def resolve_driver_context_tokens(
+def resolve_driver_context(
     driver_name: str,
     responder: Responder,
     *,
     config_path: Path | None = None,
     now: float | None = None,
-) -> int:
-    """Return the driver's context window in tokens, by driver family.
+) -> tuple[int, str]:
+    """The driver's context window in tokens, and where it came from (§ S.9).
 
-    | Driver class                         | Source                                   |
-    |--------------------------------------|------------------------------------------|
-    | Adapter with `context_tokens()`      | live call, cached 60 s per (class, tag)  |
-    | `DeterministicResponder`             | 4096 constant                            |
-    | Any CLI-shaped adapter               | `[driver.<name>].context_tokens` in config, default 100 000 |
+    | Driver class                         | Source                                                |
+    |--------------------------------------|-------------------------------------------------------|
+    | Adapter with `context_tokens()`      | live call, cached 60 s per (class, tag): `probed`     |
+    | `DeterministicResponder`             | 4096 constant: `fixed`                                |
+    | Any CLI-shaped adapter               | `context_windows.resolve_cli_context`: the CLI's own   |
+    |                                      | settings, the documented window, the config, 100,000  |
 
-    The dispatch reads `hasattr(responder, "context_tokens")` — every custom
-    `[[responder]]` in `~/.substrate/config.toml` that exposes the same method
-    inherits the same path. On live-call failure, falls back to the config table
-    with a `driver_name` key. `now` is injectable for tests.
+    A CLI's live window, reported on a call, overrides this from the next step (`TurnHistory`).
+    On a failed live probe, an adapter falls back to the CLI chain. `now` is injectable for tests.
     """
+    from substrate.api import substrate_home
+
+    from .context_windows import (
+        CONTEXT_SOURCE_FIXED,
+        CONTEXT_SOURCE_PROBED,
+        resolve_cli_context,
+    )
+
+    config = config_path or (substrate_home() / "config.toml")
+    command = tuple(str(a) for a in getattr(responder, "command", ()) or ())
     responder_class = type(responder).__name__
     if responder_class == "DeterministicResponder":
-        return _DETERMINISTIC_CONTEXT_TOKENS
+        return _DETERMINISTIC_CONTEXT_TOKENS, CONTEXT_SOURCE_FIXED
     live_probe = getattr(responder, "context_tokens", None)
     if callable(live_probe):
         model_tag = getattr(responder, "_model", driver_name) or driver_name
@@ -172,14 +155,25 @@ def resolve_driver_context_tokens(
         if cached is not None:
             expires_at, value = cached
             if clock < expires_at:
-                return value
+                return value, CONTEXT_SOURCE_PROBED
         try:
             value = int(live_probe())
         except (ContextTokensUnknown, DriverIntrospectionUnavailable):
-            return _cli_context_from_config(driver_name, config_path=config_path)
+            return resolve_cli_context(driver_name, command, config_path=config)
         _context_cache[cache_key] = (clock + _CONTEXT_CACHE_TTL_SECONDS, value)
-        return value
-    return _cli_context_from_config(driver_name, config_path=config_path)
+        return value, CONTEXT_SOURCE_PROBED
+    return resolve_cli_context(driver_name, command, config_path=config)
+
+
+def resolve_driver_context_tokens(
+    driver_name: str,
+    responder: Responder,
+    *,
+    config_path: Path | None = None,
+    now: float | None = None,
+) -> int:
+    """`resolve_driver_context`'s window alone."""
+    return resolve_driver_context(driver_name, responder, config_path=config_path, now=now)[0]
 
 
 def _est_tokens(text: str) -> int:

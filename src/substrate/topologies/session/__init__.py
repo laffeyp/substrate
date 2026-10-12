@@ -117,6 +117,9 @@ class SessionStarted(Struct, frozen=True):
     driver_command: tuple[str, ...] = ()
     # Session vocabulary § P.7 (K278): harness_agent | large | small; empty before v0.4.
     model_class: str = ""
+    # § S.9: where driver_context_tokens came from (probed, fixed, cli_settings, documented,
+    # config, default); empty before v0.7.
+    driver_context_source: str = ""
 
 
 class UserMessage(Struct, frozen=True):
@@ -343,6 +346,7 @@ def _session_started_factory(
     driver_command: tuple[str, ...] = (),
     baseline: dict[str, Any] | None = None,
     model_class: str = "",
+    driver_context_source: str = "",
 ) -> Callable[[], Any]:
     """Sprint 240 — the SessionStarted instrument's producer body.
 
@@ -372,6 +376,7 @@ def _session_started_factory(
             parent_seq_at_call=parent_seq_at_call,
             driver_command=driver_command,
             model_class=model_class,
+            driver_context_source=driver_context_source,
         )
 
     return lambda: _session_started
@@ -610,6 +615,7 @@ def _model_factory(
                 )
             return
         beside_call = ""  # what the model said beside a native tool call
+        reported_window: int | None = None  # § S.9: a harness's own report of its window
         if wrap_up_reason is None and tool_mode == ToolMode.NATIVE:
             metered = getattr(driver, "achat_tools_metered", None)
             if callable(metered):
@@ -647,6 +653,7 @@ def _model_factory(
                 ):
                     yield harness_event
                 reply_text, usage = box["text"], box["usage"]
+                reported_window = box.get("context_window")
             else:
                 reply_text, usage = await call_responder_metered(driver, prompt, system=system_text)
             if wrap_up_reason is None and tool_mode == ToolMode.TEXT:
@@ -658,7 +665,7 @@ def _model_factory(
             yield ModelReply(
                 text=beside_call.strip(),
                 stop_reason=StopReason.TOOL_USE,
-                usage=_usage_of(usage),
+                usage=_usage_of(usage, reported_window),
                 turn_index=turn_index,
                 step=step,
             )
@@ -668,7 +675,7 @@ def _model_factory(
         yield ModelReply(
             text=str(chosen),
             stop_reason=stop,
-            usage=_usage_of(usage),
+            usage=_usage_of(usage, reported_window),
             turn_index=turn_index,
             step=step,
         )
@@ -855,6 +862,7 @@ async def _harness_stream(
         )
     out["text"] = reply
     out["usage"] = usage
+    out["context_window"] = counts.context_window if counts is not None else None
 
 
 def _system_kw(system_text: str) -> dict[str, str]:
@@ -863,15 +871,19 @@ def _system_kw(system_text: str) -> dict[str, str]:
     return {"system": system_text} if system_text else {}
 
 
-def _usage_of(usage: ModelUsage) -> dict[str, Any]:
-    """ModelReply.usage: the call's ModelUsage as a plain dict."""
-    return {
+def _usage_of(usage: ModelUsage, context_window: int | None = None) -> dict[str, Any]:
+    """ModelReply.usage: the call's ModelUsage as a plain dict, plus the model's context window
+    when the harness reported it (§ S.9; absent otherwise, so earlier records read the same)."""
+    out: dict[str, Any] = {
         "model": usage.model,
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,
         "wall_ms": usage.wall_ms,
         "estimated": usage.estimated,
     }
+    if context_window:
+        out["context_window"] = int(context_window)
+    return out
 
 
 def _own_record() -> Path:
@@ -919,6 +931,7 @@ def session_topology(
     memory: bool = False,
     model_class: str = "",
     mcp: bool = False,
+    driver_context_source: str = "",
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -983,7 +996,7 @@ def session_topology(
         plan = plan_history(
             [(a, cost, savings) for a, _b, cost, savings in turns],
             head_tokens,
-            driver_context_tokens,
+            state.window or driver_context_tokens,  # § S.9: the harness's live report wins
             driver_headroom_frac,
             state.cleared_through,
             scale,
@@ -1090,6 +1103,7 @@ def session_topology(
                 driver_command=tuple(str(a) for a in getattr(driver, "command", ())),
                 baseline=baseline,
                 model_class=model_class,
+                driver_context_source=driver_context_source,
             ),
             deterministic=True,
         )
@@ -1488,6 +1502,7 @@ from .transcript import (  # noqa: E402
     compose_model_prompt,
     head_block,
     plan_history,
+    resolve_driver_context,
     resolve_driver_context_tokens,
     session_changed_line,
 )
@@ -1518,6 +1533,7 @@ __all__ = [
     "ToolResult",
     "TranscriptCompacted",
     "UserMessage",
+    "resolve_driver_context",
     "resolve_driver_context_tokens",
     "session_topology",
 ]

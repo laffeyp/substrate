@@ -40,6 +40,9 @@ class StreamToolResult:
 class StreamUsage:
     prompt_tokens: int
     completion_tokens: int
+    # The model's context window, when the harness reports it (Claude Code's
+    # `modelUsage.<model>.contextWindow`); session vocabulary § S.9.
+    context_window: int | None = None
 
 
 @dataclass(frozen=True)
@@ -143,7 +146,13 @@ class ClaudeStreamParser(_Parser):
                 int(usage.get(k) or 0)
                 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
             )
-            items.append(StreamUsage(prompt, int(usage.get("output_tokens") or 0)))
+            windows = [
+                int(m.get("contextWindow") or 0)
+                for m in (event.get("modelUsage") or {}).values()
+                if isinstance(m, dict)
+            ]
+            window = max(windows) if windows and max(windows) > 0 else None
+            items.append(StreamUsage(prompt, int(usage.get("output_tokens") or 0), window))
         return items
 
 

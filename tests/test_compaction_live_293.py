@@ -112,11 +112,19 @@ def test_a_heavy_turn_does_not_erase_earlier_requests(tmp_path: Path, name: str)
             session_id="s293",
             workspace_path=str(work),
             first_turn_user_message=um if i == 0 else None,
+            # Claude Code reports its 1M window live (§ S.9), which overrides `window`; a small
+            # headroom keeps its budget at the 1,800 tokens the other CLIs get from 3,000 x 0.6.
+            driver_headroom_frac=0.0018 if name == "claude" else 0.6,
         )
         rt = api.Runtime(root, persistent=True)
         asyncio.run(rt.run(topo, name="session") if i == 0 else rt.resume(topo, resume_event=um))
 
     envs = list(api.read_record(root, resolve_blobs=True))
+    if name == "claude":
+        windows = [
+            e["payload"]["usage"].get("context_window") for e in envs if e["kind"] == "ModelReply"
+        ]
+        assert windows and all(w == 1_000_000 for w in windows), windows  # § S.9, live
     cuts = [e["payload"] for e in envs if e["kind"] == "TranscriptCompacted"]
     assert cuts and all(c.get("dropped_seq_range") is None for c in cuts), cuts
     last_prompt = [e["payload"]["text"] for e in envs if e["kind"] == "PromptComposed"][-1]

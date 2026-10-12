@@ -15,11 +15,10 @@ from pathlib import Path
 import pytest
 
 from substrate.adapters import CliResponder
-from substrate.topologies.session.transcript import (
-    _CLI_CONTEXT_DEFAULT_TOKENS,
-    _context_cache,
-    resolve_driver_context_tokens,
+from substrate.topologies.session.context_windows import (
+    DEFAULT_CLI_CONTEXT_TOKENS as _CLI_CONTEXT_DEFAULT_TOKENS,
 )
+from substrate.topologies.session.transcript import _context_cache, resolve_driver_context_tokens
 
 
 @pytest.fixture(autouse=True)

@@ -45,6 +45,7 @@ class HistoryState(NamedTuple):
     cleared_through: int | None
     dropped: tuple[int, int] | None
     scale: float
+    window: int | None  # § S.9: the context window the harness last reported, if any
 
 
 class TurnHistory:
@@ -69,6 +70,7 @@ class TurnHistory:
         self._dropped: tuple[int, int] | None = None
         self._last_estimate = 0
         self._scale = 1.0
+        self._window: int | None = None
 
     def update(self, event: Event) -> None:
         from .transcript import measured_scale, output_savings, turn_cost
@@ -85,6 +87,8 @@ class TurnHistory:
             self._dropped = (int(dropped[0]), int(dropped[1])) if dropped else None
         elif event.kind == MODEL_REPLY:
             usage = payload.get("usage")
+            if isinstance(usage, dict) and isinstance(usage.get("context_window"), int):
+                self._window = int(usage["context_window"])
             if isinstance(usage, dict) and not usage.get("estimated", True):
                 self._scale = measured_scale(
                     int(usage.get("prompt_tokens") or 0), self._last_estimate
@@ -107,6 +111,7 @@ class TurnHistory:
             cleared_through=self._cleared,
             dropped=self._dropped,
             scale=self._scale,
+            window=self._window,
         )
 
 

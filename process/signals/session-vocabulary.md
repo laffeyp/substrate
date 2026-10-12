@@ -689,6 +689,23 @@ S.1 kept the newest 3 tool results of the whole history whole. Replanning the co
 
 A live run on `kimi-k2.7-code:cloud` showed the gap: mid-turn, the current turn's protected results alone passed the budget, so nothing could clear and the earlier turn dropped, the user's request with it. As built from K293: when the history still passes the budget with every other output cleared, the current turn's protected set shrinks one result at a time, oldest first, down to its latest result. Whole turns drop only after that. The latest result never clears: the model's next step reads it.
 
+### S.9 The driver's context window (K294, 2026-10-11)
+
+Every CLI driver used to get 100,000 tokens whatever its model. The window now resolves in order (`topologies/session/context_windows.py`):
+
+1. **Live.** A harness that reports its window on a call (Claude Code's `modelUsage.<model>.contextWindow`) has it recorded on `ModelReply.usage.context_window`; `TurnHistory` keeps the latest, and later steps budget on it.
+2. **The CLI's own settings.** Codex's `model_context_window` in `$CODEX_HOME/config.toml` (default `~/.codex`).
+3. **Documented.** The input limit its maker documents for the model the session names with `--model` or `-m` (or Codex's configured `model`), from a table in which every entry names its source page. Where a page states a maximum input below the context window, the input limit is used.
+4. **Substrate's config.** `[driver.<name>].context_tokens` in `~/.substrate/config.toml`.
+5. **Default.** 100,000.
+
+Ollama adapters keep their probed window (`/api/show`); `deterministic` keeps 4,096.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `SessionStarted.driver_context_source` | `str` | Where `driver_context_tokens` came from: `probed`, `fixed`, `cli_settings`, `documented`, `config` or `default`. Empty before v0.7. |
+| `ModelReply.usage.context_window` | `int`, optional | The window the harness reported on this call. Absent when it reported none. |
+
 ### Ratification signature
 
 - **v0.7** — Sprint K291, 2026-10-11, by the Architect's direction of the same day. §§ A–R byte-preserved.
