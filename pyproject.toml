@@ -51,6 +51,7 @@ dev = [
   # wheel installs a top-level `tests` package that shadows this repo's; the comparison script
   # runs it with `uv run --with textstat==0.7.13`.
   "lexicalrichness", "nolds", "powerlaw", "cmudict",
+  "river",                          # sprint 305: Page-Hinkley reference
 ]
 openai-compat = ["httpx"]           # optional extra; kernel imports none of these
 # The SWE-bench confirmatory + host + agent scripts hard-import `datasets` (HuggingFace, to
