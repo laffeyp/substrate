@@ -20,7 +20,7 @@ from substrate.language.lexicon import (
     provenance,
     word_runs,
 )
-from substrate.language.text import PREPROCESSING, Parsed, parse, words
+from substrate.language.text import PREPROCESSING, Parsed, TokenKind, parse, words
 
 LIBRARY_VERSION: Final = "0.1.0"
 
@@ -111,7 +111,7 @@ def profile(
     p = params or Params()
     doc = parsed or parse(text)
     ws = words(doc)
-    lengths = [sum(1 for t in s if t.kind == "word") for s in doc.sentences]
+    lengths = [sum(1 for t in s if t.kind is TokenKind.WORD) for s in doc.sentences]
     runs = word_runs(doc.units)
     n = len(ws)
 
@@ -119,11 +119,7 @@ def profile(
     freq = Counter(ws)
     counts["contractions"] = sum(c for w, c in freq.items() if is_contraction(w))
     edge = p.padding_edge_sentences
-    sentence_runs = word_runs(doc.sentences)
-    first, last = (
-        word_runs(doc.sentences[:edge]),
-        word_runs(doc.sentences[-edge:]) if sentence_runs else [],
-    )
+    first, last = word_runs(doc.sentences[:edge]), word_runs(doc.sentences[-edge:])
     opening, closing = _padding_index().count(first), _padding_index().count(last)
     for name in OPENING:
         counts[f"{name}_opening"] = opening[name]

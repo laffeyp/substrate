@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import zlib
 from collections.abc import Mapping, Sequence
+from functools import cache
 
 from substrate.language.lexicon import Matcher, load, word_runs
 from substrate.language.measures import ZLIB_LEVEL, ngrams
@@ -20,8 +21,15 @@ def length_ratio(user: Parsed, reply: Parsed) -> float | None:
     return len(words(reply)) / u if u else None
 
 
+@cache
 def _function_words() -> Matcher:
     return load("liwc2007").matcher("function_words")
+
+
+@cache
+def _lsm_matchers() -> dict[str, Matcher]:
+    lex = load("liwc2007")
+    return {c: lex.matcher(c) for c in lex.lsm}
 
 
 def content_types(parsed: Parsed) -> set[str]:
@@ -80,16 +88,14 @@ def ncd(x: str, y: str, level: int = ZLIB_LEVEL) -> float | None:
 
 def category_percentages(parsed: Parsed) -> dict[str, float] | None:
     """Each LSM category's matches as a percentage of all word tokens (LIWC's p)."""
-    lex = load("liwc2007")
     total = len(words(parsed))
     if total == 0:
         return None
     runs = word_runs(parsed.units)
-    out: dict[str, float] = {}
-    for cat in lex.lsm:
-        m = lex.matcher(cat)
-        out[cat] = 100 * sum(len(m.matches(r)) for r in runs) / total
-    return out
+    return {
+        cat: 100 * sum(len(m.matches(r)) for r in runs) / total
+        for cat, m in _lsm_matchers().items()
+    }
 
 
 def lsm(user: Parsed, reply: Parsed) -> dict[str, float | None]:
@@ -106,11 +112,12 @@ def profile_difference(
     user: Mapping[str, float | None], reply: Mapping[str, float | None]
 ) -> dict[str, float]:
     """The model's value minus the user's, for every measure both have."""
-    return {
-        k: reply[k] - user[k]  # type: ignore[operator]
-        for k in user.keys() & reply.keys()
-        if user[k] is not None and reply[k] is not None
-    }
+    out: dict[str, float] = {}
+    for k in user.keys() & reply.keys():
+        u, r = user[k], reply[k]
+        if u is not None and r is not None:
+            out[k] = r - u
+    return out
 
 
 def lagged_correlation(

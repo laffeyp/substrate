@@ -187,7 +187,7 @@ forbidden_modules = [
   "substrate.conformance", "substrate.constants", "substrate.encoding", "substrate.errors",
   "substrate.home", "substrate.kernel", "substrate.naming", "substrate.projections",
   "substrate.protocols", "substrate.record", "substrate.reference", "substrate.testing",
-  "substrate.topologies", "substrate.types",
+  "substrate.topologies", "substrate.types", "substrate.language",
 ]
 
 [[tool.importlinter.contracts]]
@@ -207,5 +207,5 @@ layers = [
   "substrate.kernel | substrate.naming | substrate.home",
   "substrate.record",
   "substrate.encoding | substrate.protocols | substrate.errors",
-  "substrate.constants | substrate.types",
+  "substrate.constants | substrate.types | substrate.language",
 ]

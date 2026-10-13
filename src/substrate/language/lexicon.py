@@ -75,7 +75,8 @@ class Matcher:
             options.sort(key=len, reverse=True)
         self.stem_lengths = sorted({len(s) for s in self.stems})
 
-    def _single(self, word: str) -> bool:
+    def single(self, word: str) -> bool:
+        """Whether one token matches a one-token term."""
         if word in self.exact:
             return True
         return any(word[:n] in self.stems for n in self.stem_lengths if len(word) >= n)
@@ -90,7 +91,7 @@ class Matcher:
                 if tuple(run[i : i + len(phrase)]) == phrase:
                     hit = len(phrase)
                     break
-            if not hit and self._single(run[i]):
+            if not hit and self.single(run[i]):
                 hit = 1
             if hit:
                 out.append((i, hit))
@@ -146,7 +147,7 @@ class LexiconIndex:
     def _single_hits(self, word: str) -> tuple[int, ...]:
         hits = self._singles.get(word)
         if hits is None:
-            hits = tuple(i for i, m in enumerate(self.matchers) if m._single(word))
+            hits = tuple(i for i, m in enumerate(self.matchers) if m.single(word))
             self._singles[word] = hits
         return hits
 

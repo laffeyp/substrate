@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import statistics
 import time
@@ -22,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from substrate.language import measures as m
-from substrate.language import parse, profile, words
+from substrate.language import TokenKind, parse, profile, words
 from substrate.language import relation as rel
 from substrate.language.lexicon import Matcher, load, word_runs
 from substrate.language.profile import Params
@@ -199,7 +200,7 @@ def test_dfa_agrees_with_nolds() -> None:
         acc += rng.gauss(0, 1)
         walk.append(acc)
     lengths = [
-        float(sum(1 for t in s if t.kind == "word"))
+        float(sum(1 for t in s if t.kind is TokenKind.WORD))
         for text in REPLIES
         for s in parse(text).sentences
     ]
@@ -241,6 +242,10 @@ def test_every_reply_profiles() -> None:
         assert len(word_runs(parse(text).units)) >= 1
 
 
+@pytest.mark.skipif(
+    os.environ.get("SUBSTRATE_PERF_GATE") != "1",
+    reason="wall-clock bound; opt in with SUBSTRATE_PERF_GATE=1 on a quiet box, as tests/test_perf.py",
+)
 def test_a_1500_token_reply_measures_in_under_5_ms() -> None:
     text = ""
     for reply in REPLIES:

@@ -37,3 +37,19 @@ New tests; kernel suite; ruff, mypy --strict, lint-imports.
 - **Tests** `tests/test_language_measures_304.py`, 85: 62 fixtures; every entry of every lexicon tokenizes to itself; each measure by hand; the four reference cross-checks; the profile's provenance; all 600 replies profile; the 5 ms bound. Breaking MTLD's `≤` or DFA's detrending each fails a reference test. Two of my first test cases were wrong and were replaced: a random-text burstiness bound I had chosen, and a guess that LIWC does not list "nobody" as an impersonal pronoun.
 - **Dependencies.** lexicalrichness, nolds, powerlaw and cmudict added to `dev` for the tests; the library imports none of them. textstat stays out: its wheel installs a top-level `tests` package that broke `import tests._sandbox` in 8 test modules; the comparison script runs it with `uv run --with textstat==0.7.13`.
 - **Checks.** ruff, mypy --strict (145 files), lint-imports (2 kept). Kernel suite: 1,639 passed, 13 skipped, 1 failed: `test_realmodel_tool_comprehension::test_inspect_record_summary_read_back_by_model`. llama3.2:1b called `inspect_record` on the parent folder of the path in the prompt (it dropped `/seeded`), got the tool's "no record" error, and answered without a second call; the same in two runs. BLACKBOARD F-5 lists this file's 1B-model tests; K304 changes no session or tool code.
+
+## pressure test (2026-10-13)
+
+SDD and engineering-practice pass over K302–K304, fixed in the same commit:
+
+- `substrate.language` was outside both import contracts; it is now in the bottom layer (it imports only the standard library) and in the CLI's forbidden list.
+- `t.kind == "word"` in `profile.py` and the test retyped `TokenKind.WORD`; the parser's block kinds were bare strings (`"para"`, `"item"`, `"quote"`), now `_Block`.
+- `LexiconIndex` called `Matcher._single`; the method is public (`single`).
+- `profile_difference` hid a `None` arithmetic case behind `type: ignore`; it now checks both values.
+- `category_percentages` and `lexical_echo` rebuilt their LIWC matchers on every call; they are cached.
+- The 5 ms test asserted wall-clock time in the default suite; it now opts in with `SUBSTRATE_PERF_GATE=1`, as `tests/test_perf.py` does. It passes when opted in.
+
+Two points stand as recorded facts:
+
+- K304's hand and reference tests were written beside the code, not before it; K302's fixtures, written before any code, were the tokenizer's red. The mutation runs (MTLD's `≤`, DFA's detrending) show the reference tests fail on a wrong measure.
+- The measure names in a profile (`mattr`, `rate_hedges_hyland`, …) are plain dict keys. They become vocabulary in build card B2, when `LanguageProfile` is defined; until then nothing outside the library reads them.

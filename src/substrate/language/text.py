@@ -17,6 +17,15 @@ from typing import Final
 PREPROCESSING: Final = "substrate-text-1"
 
 
+class _Block(StrEnum):
+    """The prose block a line belongs to while parsing (B5, B6, B8)."""
+
+    NONE = ""
+    PARAGRAPH = "paragraph"
+    ITEM = "item"
+    QUOTE = "quote"
+
+
 class TokenKind(StrEnum):
     WORD = "word"
     CODE = "code"
@@ -288,24 +297,24 @@ def parse(text: str) -> Parsed:
 
     lines = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
     block: list[str] = []
-    kind = ""  # "", "para", "item", "quote"
+    kind = _Block.NONE
     fence: tuple[str, int] | None = None
 
     def flush() -> None:
         nonlocal block, kind
         if block:
             flush_prose(block)
-        block, kind = [], ""
+        block, kind = [], _Block.NONE
 
-    def start(new_kind: str, first: str) -> None:
+    def start(new_kind: _Block, first: str) -> None:
         nonlocal block, kind
         flush()
         block, kind = [first], new_kind
-        if new_kind == "para":
+        if new_kind is _Block.PARAGRAPH:
             counts.paragraphs += 1
-        elif new_kind == "item":
+        elif new_kind is _Block.ITEM:
             counts.list_items += 1
-        elif new_kind == "quote":
+        elif new_kind is _Block.QUOTE:
             counts.block_quotes += 1
 
     for line in lines:
@@ -343,19 +352,19 @@ def parse(text: str) -> Parsed:
             continue
         m = _ITEM.match(line)
         if m:  # B5
-            start("item", m.group(1))
+            start(_Block.ITEM, m.group(1))
             continue
         m = _QUOTE.match(line)
         if m:  # B6
-            if kind == "quote":
+            if kind is _Block.QUOTE:
                 block.append(m.group(1))
             else:
-                start("quote", m.group(1))
+                start(_Block.QUOTE, m.group(1))
             continue
-        if kind in ("para", "item", "quote"):  # B8: continuation
+        if kind is not _Block.NONE:  # B8: continuation
             block.append(line)
         else:
-            start("para", line)
+            start(_Block.PARAGRAPH, line)
     flush()
     return Parsed(tuple(tokens), tuple(sentences), tuple(units), counts)
 
