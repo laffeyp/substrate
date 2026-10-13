@@ -52,6 +52,7 @@ def test_the_registered_triggers_are_the_declared_ones(tmp_path: Path) -> None:
         first_turn_user_message=UserMessage(
             text="hi", turn_index=0, assembled_prompt="", slash_source="chat"
         ),
+        language=True,  # v0.11 (§ W.4): registers language-on-reply and return-on-language
     )
     ids = set(_trigger_ids(session)) | set(_trigger_ids(ci_session_topology()))
     # The SessionStarted instrument's trigger is the kernel's, named after its producer.

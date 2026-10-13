@@ -12,8 +12,10 @@ Both directions run together. `delta` and `lambda` are in standard deviations of
 `warmup` values, as CUSUM designs state k and h (Montgomery, Introduction to Statistical Quality
 Control): the detector holds those values, takes their sample standard deviation, then runs the
 test over every value from the first, so one setting means the same for sentence length and for a
-hedge rate. No test is made before `warmup` values. After an alarm the detector starts again,
-warm-up included. There is no forgetting factor (river's `alpha`); Hinkley's test has none.
+hedge rate. No test is made before `warmup` values, and the warm-up goes on until its values
+vary: a constant warm-up has no spread to measure a change in, and a rate that stayed 0 for twenty
+replies would otherwise turn its first non-zero value into a test value of 10^13. After an alarm
+the detector starts again, warm-up included. There is no forgetting factor (river's `alpha`); Hinkley's test has none.
 """
 
 from __future__ import annotations
@@ -101,7 +103,10 @@ class PageHinkley:
             self._buffer.append(x)
             if len(self._buffer) < self.params.warmup:
                 return None
-            self._scale = warmup_scale(self._buffer, self.params.warmup)
+            sd = _sample_sd(self._buffer)
+            if sd == 0:
+                return None  # the warm-up goes on until its values vary
+            self._scale = sd
             stats = (0.0, 0.0)
             for v in self._buffer:
                 stats = self._step(v / self._scale)
@@ -125,18 +130,27 @@ def detect(series: list[float], params: DriftParams) -> list[Alarm]:
     return [a for i, x in enumerate(series) if (a := ph.update(x, i)) is not None]
 
 
-def warmup_scale(series: list[float], warmup: int) -> float:
-    """The sample standard deviation of the first `warmup` values, the detector's unit."""
-    head = series[:warmup]
-    mean = sum(head) / len(head)
-    sd = math.sqrt(sum((v - mean) ** 2 for v in head) / (len(head) - 1))
-    # A constant warm-up has no spread to measure against; any later change then alarms.
-    return sd if sd > 0 else 1e-12
+def _sample_sd(values: list[float]) -> float:
+    mean = sum(values) / len(values)
+    return math.sqrt(sum((v - mean) ** 2 for v in values) / (len(values) - 1))
+
+
+def warmup_scale(series: list[float], warmup: int) -> float | None:
+    """The detector's unit: the sample standard deviation of the first `warmup` values, or of the
+    first values after them that vary; None when the series never varies."""
+    for n in range(warmup, len(series) + 1):
+        sd = _sample_sd(series[:n])
+        if sd > 0:
+            return sd
+    return None
 
 
 def trajectory(series: list[float], params: DriftParams) -> list[tuple[float, float]]:
     """The up and down test values after each value, with no reset; entries before the warm-up
     ends are the values the test would have had, though none is tested."""
     ph = PageHinkley(params)
-    ph._scale = warmup_scale(series, params.warmup)
-    return [ph._step(x / ph._scale) for x in series]
+    scale = warmup_scale(series, params.warmup)
+    if scale is None:
+        return [(0.0, 0.0)] * len(series)
+    ph._scale = scale
+    return [ph._step(x / scale) for x in series]

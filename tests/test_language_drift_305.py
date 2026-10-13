@@ -27,6 +27,7 @@ def _river_first_alarm(series: list[float], p: DriftParams, sign: int) -> int | 
     from river.drift import PageHinkley as RiverPH
 
     scale = warmup_scale(series, p.warmup)
+    assert scale is not None
     ref = RiverPH(
         min_instances=p.warmup, delta=p.delta, threshold=p.threshold, alpha=1.0, mode="up"
     )
@@ -95,3 +96,13 @@ def test_defaults_on_known_series() -> None:
 def test_a_warm_up_under_two_values_is_refused() -> None:
     with pytest.raises(ValueError, match="warmup must be at least 2, got 1"):
         PageHinkley(DriftParams(0.1, 1.0, 1))
+
+
+def test_a_constant_warm_up_waits_for_the_values_to_vary() -> None:
+    # Twenty zeros, then a rate that turns on: the warm-up runs on until it has spread, so the
+    # first non-zero value is not a test value of 10^13.
+    series = [0.0] * 20 + [5.0, 0.0, 6.0, 0.0] + [30.0] * 20
+    alarms = detect(series, DEFAULT_DRIFT)
+    assert all(a.statistic < 1000 for a in alarms)
+    assert warmup_scale([0.0] * 30, 20) is None
+    assert detect([0.0] * 30, DEFAULT_DRIFT) == []

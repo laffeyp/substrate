@@ -21,6 +21,11 @@ from typing import Any
 from substrate.language.text import Parsed, Token, TokenKind
 
 
+# Lexicons read by name in more than one module.
+LIWC2007 = "liwc2007"
+CONTRACTIONS = "contractions"
+
+
 @dataclass(frozen=True, slots=True)
 class Lexicon:
     name: str
@@ -122,7 +127,7 @@ def word_runs(units: Iterable[Sequence[Token]]) -> list[list[str]]:
 
 @cache
 def _contraction_forms() -> tuple[frozenset[str], tuple[str, ...]]:
-    lex = load("contractions")
+    lex = load(CONTRACTIONS)
     return frozenset(lex.lists["words"]), lex.lists["suffixes"]
 
 

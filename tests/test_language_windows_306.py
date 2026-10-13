@@ -31,7 +31,7 @@ def _text_of(at_least: int) -> str:
 
 
 def test_one_reply_reports_none_for_the_long_window_measures() -> None:
-    out = profile(REPLIES[0])["measures"]
+    out = profile(REPLIES[0]).measures
     assert out["words"] < m.MIN_WORDS_HEAPS
     for key in ("entropy", "zipf_alpha", "zipf_s", "heaps_beta", "dfa_alpha"):
         assert out[key] is None, key
@@ -39,9 +39,9 @@ def test_one_reply_reports_none_for_the_long_window_measures() -> None:
 
 
 def test_each_measure_appears_at_its_minimum() -> None:
-    heaps = profile(_text_of(m.MIN_WORDS_HEAPS))["measures"]
+    heaps = profile(_text_of(m.MIN_WORDS_HEAPS)).measures
     assert heaps["heaps_beta"] is not None and heaps["entropy"] is None
-    long = profile(_text_of(m.MIN_WORDS_ENTROPY))["measures"]
+    long = profile(_text_of(m.MIN_WORDS_ENTROPY)).measures
     assert long["entropy"] is not None and long["zipf_alpha"] is not None
 
 
@@ -52,10 +52,10 @@ def test_lsm_needs_its_minimum_on_both_sides() -> None:
 
 
 def test_the_profile_names_the_minimums_it_applied() -> None:
-    assert profile("One short reply.")["minimums"] == m.MINIMUMS
+    assert profile("One short reply.").instrument.minimums == m.MINIMUMS
     assert m.MINIMUMS["entropy_words"] == m.MIN_WORDS_ENTROPY == 3200
 
 
 def test_burstiness_counts_only_words_with_twenty_occurrences() -> None:
     text = " ".join(["x"] * 19 + [f"o{i}" for i in range(50)])
-    assert profile(text)["measures"]["burstiness_words"] == 0.0
+    assert profile(text).measures["burstiness_words"] == 0.0

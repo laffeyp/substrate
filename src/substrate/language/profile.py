@@ -15,6 +15,8 @@ from typing import Any, Final
 
 from substrate.language import measures as m
 from substrate.language.lexicon import (
+    CONTRACTIONS,
+    LIWC2007,
     LexiconIndex,
     Matcher,
     is_contraction,
@@ -24,7 +26,7 @@ from substrate.language.lexicon import (
 )
 from substrate.language.text import PREPROCESSING, Parsed, TokenKind, parse, words
 
-LIBRARY_VERSION: Final = "0.2.0"
+LIBRARY_VERSION: Final = "0.2.1"
 
 # Lexicon rates: measure name -> (lexicon, lists it unions).
 RATES: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
@@ -84,10 +86,51 @@ class Params:
     padding_edge_sentences: int = 2
 
 
+@dataclass(frozen=True, slots=True)
+class Instrument:
+    """What a value was measured with, beside the library and preprocessing versions."""
+
+    params: dict[str, Any]
+    minimums: dict[str, int]
+    lexicons: dict[str, str]
+    compressor: str
+
+    @property
+    def sha256(self) -> str:
+        """SHA-256 of the canonical JSON of the parameters, window minimums, lexicon versions and
+        compressor: one string that names the instrument (session vocabulary § W.2)."""
+        text = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class Profile:
+    """Every one-text measure of a text, and what it was measured with."""
+
+    library: str
+    preprocessing: str
+    instrument: Instrument
+    measures: dict[str, float | None]
+    partials: dict[str, Any]  # the counts that merge across windows
+
+    @property
+    def instrument_sha256(self) -> str:
+        return self.instrument.sha256
+
+    def provenance(self) -> dict[str, Any]:
+        """The fields a stored line names (research round 5, "What every stored value names")."""
+        return {
+            "library": self.library,
+            "preprocessing": self.preprocessing,
+            "instrument_sha256": self.instrument_sha256,
+            **asdict(self.instrument),
+        }
+
+
 @cache
 def _matchers() -> dict[str, Matcher]:
     out = {name: load(lex).matcher(*keys) for name, (lex, keys) in RATES.items()}
-    liwc = load("liwc2007")
+    liwc = load(LIWC2007)
     out.update({f"liwc_{c}": liwc.matcher(c) for c in LIWC_CATEGORIES})
     return out
 
@@ -103,12 +146,10 @@ def _padding_index() -> LexiconIndex:
 
 
 def lexicon_names() -> list[str]:
-    return sorted({lex for lex, _ in RATES.values()} | {"liwc2007", "contractions"})
+    return sorted({lex for lex, _ in RATES.values()} | {LIWC2007, CONTRACTIONS})
 
 
-def profile(
-    text: str, params: Params | None = None, parsed: Parsed | None = None
-) -> dict[str, Any]:
+def profile(text: str, params: Params | None = None, parsed: Parsed | None = None) -> Profile:
     """All one-text measures of `text`, plus the partial counts that merge across windows."""
     p = params or Params()
     doc = parsed or parse(text)
@@ -119,7 +160,7 @@ def profile(
 
     counts: dict[str, int] = _index().count(runs)
     freq = Counter(ws)
-    counts["contractions"] = sum(c for w, c in freq.items() if is_contraction(w))
+    counts[CONTRACTIONS] = sum(c for w, c in freq.items() if is_contraction(w))
     edge = p.padding_edge_sentences
     first, last = word_runs(doc.sentences[:edge]), word_runs(doc.sentences[-edge:])
     opening, closing = _padding_index().count(first), _padding_index().count(last)
@@ -157,32 +198,21 @@ def profile(
         **m.readability(ws, len(doc.sentences)),
         **{f"rate_{k}": (1000 * v / n if n else None) for k, v in counts.items()},
     }
-    instrument = {
-        "params": asdict(p),
-        "minimums": dict(m.MINIMUMS),
-        "lexicons": provenance(lexicon_names()),
-        "compressor": f"zlib {zlib.ZLIB_VERSION}",
-    }
-    return {
-        "library": LIBRARY_VERSION,
-        "instrument_sha256": instrument_sha256(instrument),
-        "preprocessing": PREPROCESSING,
-        "params": asdict(p),
-        "minimums": dict(m.MINIMUMS),
-        "lexicons": provenance(lexicon_names()),
-        "compressor": f"zlib {zlib.ZLIB_VERSION}",
-        "measures": out,
-        "partials": {
+    instrument = Instrument(
+        params=asdict(p),
+        minimums=dict(m.MINIMUMS),
+        lexicons=provenance(lexicon_names()),
+        compressor=f"zlib {zlib.ZLIB_VERSION}",
+    )
+    return Profile(
+        library=LIBRARY_VERSION,
+        preprocessing=PREPROCESSING,
+        instrument=instrument,
+        measures=out,
+        partials={
             "freq": dict(freq),
             "sentence_lengths": lengths,
             "lexicon": counts,
             "format": asdict(doc.format),
         },
-    }
-
-
-def instrument_sha256(instrument: dict[str, Any]) -> str:
-    """SHA-256 of the canonical JSON of the parameters, window minimums, lexicon versions and
-    compressor: one string that names the instrument a value was measured with (§ W.2)."""
-    text = json.dumps(instrument, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    )

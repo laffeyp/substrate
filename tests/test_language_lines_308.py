@@ -19,6 +19,7 @@ from click.testing import CliRunner
 from substrate import api, app
 from substrate.cli import main
 from substrate.language import profile
+from substrate.language.profile import LIBRARY_VERSION
 from substrate.topologies.session import UserMessage, session_topology
 from substrate.topologies.session.language_lines import Pairing, Stream
 
@@ -113,7 +114,7 @@ def test_values_by_hand(tmp_path: Path) -> None:
     assert final0["values"]["length_ratio"] == 11 / 6
     assert final0["values"]["lsm"] is None  # far under 1,600 words a side
     assert model0["stop_reason"] == "end_turn" and model0["step"] == 0
-    assert model0["values"]["text"] == profile(REPLIES[0])["measures"]
+    assert model0["values"]["text"] == profile(REPLIES[0]).measures
 
 
 def test_a_length_change_shows_on_the_lines_after_it(tmp_path: Path) -> None:
@@ -139,7 +140,7 @@ def test_a_delegate_message_is_its_own_stream_and_stays_out_of_the_user_window(
 
 def test_every_line_names_its_provenance_and_keys(tmp_path: Path) -> None:
     for line in _lines(_record(tmp_path)):
-        assert line["preprocessing"] == "substrate-text-1" and line["library"] == "0.2.0"
+        assert line["preprocessing"] == "substrate-text-1" and line["library"] == LIBRARY_VERSION
         assert line["minimums"]["lsm_words"] == 1600 and "liwc2007" in line["lexicons"]
         assert line["session_id"] == "s_308" and line["topology"] == "session"
         assert line["guidance_sha256"] is None or len(line["guidance_sha256"]) == 64

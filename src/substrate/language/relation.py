@@ -10,7 +10,7 @@ import zlib
 from collections.abc import Mapping, Sequence
 from functools import cache
 
-from substrate.language.lexicon import Matcher, load, word_runs
+from substrate.language.lexicon import LIWC2007, Matcher, load, word_runs
 from substrate.language.measures import MIN_WORDS_LSM, ZLIB_LEVEL, ngrams
 from substrate.language.text import Parsed, words
 
@@ -23,12 +23,12 @@ def length_ratio(user: Parsed, reply: Parsed) -> float | None:
 
 @cache
 def _function_words() -> Matcher:
-    return load("liwc2007").matcher("function_words")
+    return load(LIWC2007).matcher("function_words")
 
 
 @cache
 def _lsm_matchers() -> dict[str, Matcher]:
-    lex = load("liwc2007")
+    lex = load(LIWC2007)
     return {c: lex.matcher(c) for c in lex.lsm}
 
 

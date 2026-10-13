@@ -157,7 +157,7 @@ def test_padding_is_counted_where_it_sits() -> None:
     text = (
         "Great question. The port is 8080. It is set in the config. Let me know if you need more."
     )
-    measures = profile(text)["partials"]["lexicon"]
+    measures = profile(text).partials["lexicon"]
     assert measures["padding_restatement_opening"] == 1
     assert measures["padding_offer_of_more_closing"] == 1
     assert measures["padding_restatement"] == 1
@@ -226,19 +226,23 @@ def test_syllable_table_equals_cmudict() -> None:
 
 def test_profile_names_what_it_was_computed_with() -> None:
     out = profile("A short reply. It says two things.")
-    assert out["preprocessing"] == "substrate-text-1"
-    assert out["library"] and out["compressor"].startswith("zlib ")
-    assert out["params"]["mattr_window"] == Params().mattr_window
-    assert set(out["lexicons"]) >= {"liwc2007", "hedges_hyland_2005", "kobak_style_2024_rare"}
-    assert out["measures"]["words"] == 7 and out["measures"]["sentences"] == 2
-    assert out["measures"]["mattr"] is None  # shorter than the window
+    assert out.preprocessing == "substrate-text-1"
+    assert out.library and out.instrument.compressor.startswith("zlib ")
+    assert out.instrument.params["mattr_window"] == Params().mattr_window
+    assert set(out.instrument.lexicons) >= {
+        "liwc2007",
+        "hedges_hyland_2005",
+        "kobak_style_2024_rare",
+    }
+    assert out.measures["words"] == 7 and out.measures["sentences"] == 2
+    assert out.measures["mattr"] is None  # shorter than the window
 
 
 def test_every_reply_profiles() -> None:
     for text in REPLIES:
         out = profile(text)
-        assert out["measures"]["words"] == len(words(parse(text)))
-        assert sum(out["partials"]["freq"].values()) == out["measures"]["words"]
+        assert out.measures["words"] == len(words(parse(text)))
+        assert sum(out.partials["freq"].values()) == out.measures["words"]
         assert len(word_runs(parse(text).units)) >= 1
 
 

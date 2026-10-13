@@ -7,7 +7,7 @@ from __future__ import annotations
 import msgspec
 
 from substrate.language import drift, profile
-from substrate.language.profile import Params
+from substrate.language.profile import LIBRARY_VERSION, Params
 from substrate.topologies.session import LanguageDrift, LanguageProfile
 from substrate.topologies.session import vocabulary as v
 
@@ -43,14 +43,14 @@ def test_the_kinds_producer_and_triggers_are_in_the_vocabulary() -> None:
 
 
 def test_the_events_round_trip() -> None:
-    measures = profile("The port is 8080. It is set in the config.")["measures"]
+    measures = profile("The port is 8080. It is set in the config.").measures
     lp = LanguageProfile(
         stream=v.LanguageStream.MODEL,
         turn_index=0,
         source_seq=12,
         step=0,
         pairing=None,
-        library="0.2.0",
+        library=LIBRARY_VERSION,
         preprocessing="substrate-text-1",
         instrument_sha256="0" * 64,
         measures=measures,
@@ -72,14 +72,14 @@ def test_the_events_round_trip() -> None:
 
 
 def test_the_instrument_digest_moves_with_a_parameter_and_only_then() -> None:
-    a = profile("One text.")["instrument_sha256"]
-    assert a == profile("A different text, longer.")["instrument_sha256"]
-    assert a != profile("One text.", Params(mattr_window=50))["instrument_sha256"]
+    a = profile("One text.").instrument_sha256
+    assert a == profile("A different text, longer.").instrument_sha256
+    assert a != profile("One text.", Params(mattr_window=50)).instrument_sha256
     assert len(a) == 64
 
 
 def test_the_watched_measures_are_profile_measures() -> None:
-    names = set(profile("Some text here.")["measures"])
+    names = set(profile("Some text here.").measures)
     assert drift.WATCHED and set(drift.WATCHED) <= names
 
 
@@ -93,4 +93,4 @@ def test_command_lines_carry_the_same_instrument_digest() -> None:
         / "src/substrate/topologies/daily/records/ci_mode.record"
     )
     lines = list(app.language_lines(record))
-    assert lines and {x["instrument_sha256"] for x in lines} == {profile("")["instrument_sha256"]}
+    assert lines and {x["instrument_sha256"] for x in lines} == {profile("").instrument_sha256}

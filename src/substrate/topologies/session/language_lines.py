@@ -38,21 +38,6 @@ from .vocabulary import (
 WINDOW_WORDS = MIN_WORDS_ENTROPY
 
 
-def _provenance(p: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        k: p[k]
-        for k in (
-            "library",
-            "preprocessing",
-            "instrument_sha256",
-            "params",
-            "minimums",
-            "lexicons",
-            "compressor",
-        )
-    }
-
-
 class _Window:
     """One stream's latest texts, back to WINDOW_WORDS words."""
 
@@ -97,37 +82,23 @@ def language_lines(record: Path | Iterable[Mapping[str, Any]]) -> Iterator[dict[
         }
 
     def relation_lines(turn: dict[str, Any]) -> Iterator[dict[str, Any]]:
-        replies: list[Mapping[str, Any]] = turn["replies"]
-        if not replies:
+        if not turn["replies"]:
             return
-        # Replies recorded before ModelReply carried stop_reason have none; the last reply is final.
-        finals = [
-            r for r in replies if r.get("stop_reason") in (StopReason.END_TURN, StopReason.WRAP_UP)
-        ]
-        user = parse(turn["text"])
-        for pairing, reply_text in (
-            (Pairing.FINAL, (finals or replies)[-1]["text"]),
-            (Pairing.TURN, "\n\n".join(r["text"] for r in replies)),
+        window_lsm = rel.lsm(
+            parse(windows[Stream.USER].joined()),
+            parse(windows[Stream.MODEL].joined()),
+            MIN_WORDS_LSM,
+        )
+        for pairing, reply_text in turn_pairings(
+            [(str(r["text"]), r.get("stop_reason")) for r in turn["replies"]]
         ):
-            reply = parse(reply_text)
             values: dict[str, Any] = {
-                "length_ratio": rel.length_ratio(user, reply),
-                "lexical_echo": rel.lexical_echo(user, reply),
-                **{f"phrase_copy_{k}": v for k, v in rel.phrase_copy(user, reply).items()},
-                "ncd": rel.ncd(turn["text"], reply_text),
-                **rel.lsm(user, reply),
-                **{
-                    f"window_{k}": v
-                    for k, v in rel.lsm(
-                        parse(windows[Stream.USER].joined()),
-                        parse(windows[Stream.MODEL].joined()),
-                        MIN_WORDS_LSM,
-                    ).items()
-                },
+                **relation_values(turn["text"], reply_text),
+                **{f"window_{k}": v for k, v in window_lsm.items()},
             }
             yield {
                 **turn["base"],
-                **_provenance(profile("")),
+                **profile("").provenance(),
                 "turn": turn["turn"],
                 "pairing": str(pairing),
                 "values": values,
@@ -158,8 +129,8 @@ def language_lines(record: Path | Iterable[Mapping[str, Any]]) -> Iterator[dict[
             text_profile, system_profile = profile(p["text"]), profile(system)
             yield {
                 **base(e, Stream.COMPOSED),
-                **_provenance(text_profile),
-                "values": {"text": text_profile["measures"], "system": system_profile["measures"]},
+                **text_profile.provenance(),
+                "values": {"text": text_profile.measures, "system": system_profile.measures},
             }
         elif kind == USER_MESSAGE:
             delegate = p.get("slash_source") == DELEGATE_SLASH_SOURCE
@@ -193,14 +164,38 @@ def language_lines(record: Path | Iterable[Mapping[str, Any]]) -> Iterator[dict[
         yield from relation_lines(turns[pending])
 
 
+def turn_pairings(replies: list[tuple[str, str | None]]) -> list[tuple[Pairing, str]]:
+    """The two reply texts a turn's relation is measured against (§ W.1), from the turn's replies
+    as (text, stop reason): the final reply, and all the replies joined in order. The final reply
+    is the last whose stop reason is `end_turn` or `wrap_up`; replies recorded before ModelReply
+    carried a stop reason have none, and then the last reply is final."""
+    finals = [text for text, stop in replies if stop in (StopReason.END_TURN, StopReason.WRAP_UP)]
+    return [
+        (Pairing.FINAL, (finals or [text for text, _ in replies])[-1]),
+        (Pairing.TURN, "\n\n".join(text for text, _ in replies)),
+    ]
+
+
+def relation_values(user_text: str, reply_text: str) -> dict[str, Any]:
+    """The relation measures of one user text and one reply text (research round 5)."""
+    user, reply = parse(user_text), parse(reply_text)
+    return {
+        "length_ratio": rel.length_ratio(user, reply),
+        "lexical_echo": rel.lexical_echo(user, reply),
+        **{f"phrase_copy_{k}": v for k, v in rel.phrase_copy(user, reply).items()},
+        "ncd": rel.ncd(user_text, reply_text),
+        **rel.lsm(user, reply),
+    }
+
+
 def _text_line(
     e: Mapping[str, Any], head: dict[str, Any], text: str, window: _Window | None
 ) -> dict[str, Any]:
     own = profile(text)
-    values: dict[str, Any] = {"text": own["measures"]}
+    values: dict[str, Any] = {"text": own.measures}
     if window is not None:
-        values["window"] = {**profile(window.joined())["measures"], **window.size()}
-    return {**head, **_provenance(own), "values": values, "partials": own["partials"]}
+        values["window"] = {**profile(window.joined()).measures, **window.size()}
+    return {**head, **own.provenance(), "values": values, "partials": own.partials}
 
 
 def line_json(line: Mapping[str, Any]) -> str:
