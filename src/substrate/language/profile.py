@@ -159,6 +159,7 @@ def profile(
         "library": LIBRARY_VERSION,
         "preprocessing": PREPROCESSING,
         "params": asdict(p),
+        "minimums": dict(m.MINIMUMS),
         "lexicons": provenance(lexicon_names()),
         "compressor": f"zlib {zlib.ZLIB_VERSION}",
         "measures": out,

@@ -28,3 +28,10 @@ The window table with every minimum sourced, defined or measured, and the script
 - **Applied.** `measures.MIN_*` hold the values; `profile` reports MTLD, entropy, Zipf, Heaps and DFA as None below them, `relation.lsm` returns None when either text is under 1,600 words, and the burstiness default moved from 5 to 20 occurrences. Library 0.1.0 → 0.2.0, since stored values change; `measures.md` stays as the 0.1.0 record.
 - **The rule they set** (`docs/language/windows-r2.md`): each measure runs over a trailing window of one stream at least as long as its minimum, across session boundaries when needed; values are compared at equal window lengths, with the length stored beside them.
 - **Tests** `tests/test_language_windows_306.py`, 4: one reply reports None for the long-window measures and a compression ratio; each measure appears at its minimum; LSM needs its minimum on both sides; a word with 19 occurrences gives no burstiness. The K304 by-hand LSM case now passes `min_words=0`. 117 language tests pass, 1 skipped (the opt-in timing bound); ruff, mypy --strict clean.
+
+## pressure test (2026-10-13)
+
+- **Red checked.** The four K306 tests, run against the code before K306 (`c5f955d3`) with the constants written in, fail on behaviour: entropy 7.08 where None is due, LSM 0.73 on a short text, burstiness counted at 19 occurrences.
+- **Fixed: the profile did not name its minimums,** though they decide whether a value is a number or None. `measures.MINIMUMS` now goes into every profile beside `params`; a test checks it.
+- **Where the minimums apply.** `profile` applies them to the one-text measures; `relation.lsm` applies its own, since no relation profile exists yet. Build card B1 puts both behind one call.
+- K305 has no retyped direction strings (`Direction` throughout); its defaults and K306's minimums each have one home (`DEFAULT_DRIFT`, `measures.MIN_*`).

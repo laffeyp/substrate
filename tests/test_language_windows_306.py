@@ -51,6 +51,11 @@ def test_lsm_needs_its_minimum_on_both_sides() -> None:
     assert rel.lsm(long, long)["lsm"] is not None
 
 
+def test_the_profile_names_the_minimums_it_applied() -> None:
+    assert profile("One short reply.")["minimums"] == m.MINIMUMS
+    assert m.MINIMUMS["entropy_words"] == m.MIN_WORDS_ENTROPY == 3200
+
+
 def test_burstiness_counts_only_words_with_twenty_occurrences() -> None:
     text = " ".join(["x"] * 19 + [f"o{i}" for i in range(50)])
     assert profile(text)["measures"]["burstiness_words"] == 0.0

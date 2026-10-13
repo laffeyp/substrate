@@ -34,6 +34,15 @@ MIN_WORDS_HEAPS = 800
 MIN_WORDS_LSM = 1600
 MIN_SENTENCES_DFA = 400
 MIN_OCCURRENCES_BURSTINESS = 20
+MINIMUMS = {
+    "mtld_words": MIN_WORDS_MTLD,
+    "entropy_words": MIN_WORDS_ENTROPY,
+    "zipf_words": MIN_WORDS_ZIPF,
+    "heaps_words": MIN_WORDS_HEAPS,
+    "lsm_words": MIN_WORDS_LSM,
+    "dfa_sentences": MIN_SENTENCES_DFA,
+    "burstiness_occurrences": MIN_OCCURRENCES_BURSTINESS,
+}
 
 
 # ---- size and rhythm ------------------------------------------------------------------------
