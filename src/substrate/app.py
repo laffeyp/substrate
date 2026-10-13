@@ -20,6 +20,7 @@ from .topologies import bundled
 from .topologies.instruments.grader import score_grades
 from .topologies.instruments.scoring import select_scoring_rule
 from .topologies.session.language_lines import language_lines, line_json
+from .topologies.session.language_view import language_view
 from .topologies.session.vocabulary import MODEL_REPLY
 from .topologies.session_registry import (
     FreshSessionRequiresUserMessage,
@@ -55,6 +56,7 @@ __all__ = [
     "bundled",
     "daemon_client",
     "language_lines",
+    "language_view",
     "line_json",
     "manifest_from_dict",
     "parse_template_header",

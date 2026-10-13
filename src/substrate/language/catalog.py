@@ -50,6 +50,9 @@ class Measure:
     low: float  # the typical display range; a value past it draws to the edge
     high: float
     explanation: str  # two sentences at most
+    # A count that grows with the text (words, sentences): a window's value is divided by the
+    # texts in the window to read as a per-text average beside each text's own.
+    count: bool = False
 
 
 PER_K: Final = "per 1,000 words"
@@ -65,7 +68,8 @@ def _m(
     explanation: str,
     group: Group = Group.OTHER,
 ) -> Measure:
-    return Measure(name, short, unit, family, group, low, high, explanation)
+    count = name in ("tokens", "words", "sentences", "paragraphs")
+    return Measure(name, short, unit, family, group, low, high, explanation, count)
 
 
 _F, _G = Family, Group

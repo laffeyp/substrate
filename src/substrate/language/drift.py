@@ -135,14 +135,20 @@ def _sample_sd(values: list[float]) -> float:
     return math.sqrt(sum((v - mean) ** 2 for v in values) / (len(values) - 1))
 
 
-def warmup_scale(series: list[float], warmup: int) -> float | None:
-    """The detector's unit: the sample standard deviation of the first `warmup` values, or of the
-    first values after them that vary; None when the series never varies."""
+def warmup_span(series: list[float], warmup: int) -> int | None:
+    """How many values the detector's warm-up takes on this series: `warmup`, or more until the
+    values vary; None when they never do."""
     for n in range(warmup, len(series) + 1):
-        sd = _sample_sd(series[:n])
-        if sd > 0:
-            return sd
+        if _sample_sd(series[:n]) > 0:
+            return n
     return None
+
+
+def warmup_scale(series: list[float], warmup: int) -> float | None:
+    """The detector's unit: the sample standard deviation of the warm-up values (`warmup_span`);
+    None when the series never varies."""
+    n = warmup_span(series, warmup)
+    return None if n is None else _sample_sd(series[:n])
 
 
 def trajectory(series: list[float], params: DriftParams) -> list[tuple[float, float]]:
