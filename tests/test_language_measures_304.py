@@ -134,7 +134,7 @@ def test_relation_by_hand() -> None:
     )
     assert copy["shared"] == 1.0 and copy["longest_run"] == 4.0
     same = parse("I think we should ship it now, because it is ready.")
-    assert rel.lsm(same, same)["lsm"] == pytest.approx(1.0)
+    assert rel.lsm(same, same, min_words=0)["lsm"] == pytest.approx(1.0)
     x = "a sentence about compression distance " * 20
     cx = len(zlib.compress(x.encode(), 9))
     assert rel.ncd(x, x) == pytest.approx((len(zlib.compress((x + x).encode(), 9)) - cx) / cx)

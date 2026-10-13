@@ -22,7 +22,7 @@ from substrate.language.lexicon import (
 )
 from substrate.language.text import PREPROCESSING, Parsed, TokenKind, parse, words
 
-LIBRARY_VERSION: Final = "0.1.0"
+LIBRARY_VERSION: Final = "0.2.0"
 
 # Lexicon rates: measure name -> (lexicon, lists it unions).
 RATES: Final[dict[str, tuple[str, tuple[str, ...]]]] = {
@@ -77,7 +77,7 @@ class Params:
     heaps_points: int = 20
     heaps_start: int = 10
     ngram: int = 3
-    burst_min_occurrences: int = 5
+    burst_min_occurrences: int = m.MIN_OCCURRENCES_BURSTINESS
     zlib_level: int = m.ZLIB_LEVEL
     padding_edge_sentences: int = 2
 
@@ -134,15 +134,23 @@ def profile(
         **{f"sentence_length_{k}": v for k, v in m.rhythm(lengths).items()},
         "ttr": m.ttr(ws),
         "mattr": m.mattr(ws, p.mattr_window),
-        "mtld": m.mtld(ws, p.mtld_threshold),
+        "mtld": m.mtld(ws, p.mtld_threshold) if n >= m.MIN_WORDS_MTLD else None,
         "hdd": m.hdd(ws, p.hdd_draws),
-        **{f"zipf_{k}": v for k, v in m.zipf(ws, p.zipf_xmin).items()},
-        **{f"heaps_{k}": v for k, v in m.heaps(ws, p.heaps_points, p.heaps_start).items()},
-        "entropy": m.entropy(ws),
+        **{
+            f"zipf_{k}": (v if n >= m.MIN_WORDS_ZIPF else None)
+            for k, v in m.zipf(ws, p.zipf_xmin).items()
+        },
+        **{
+            f"heaps_{k}": (v if n >= m.MIN_WORDS_HEAPS else None)
+            for k, v in m.heaps(ws, p.heaps_points, p.heaps_start).items()
+        },
+        "entropy": m.entropy(ws) if n >= m.MIN_WORDS_ENTROPY else None,
         "compression_ratio": m.compression_ratio(text, p.zlib_level),
         "repeated_ngram_rate": m.repeated_ngram_rate(runs, p.ngram),
         **{f"burstiness_{k}": v for k, v in m.burstiness(ws, p.burst_min_occurrences).items()},
-        "dfa_alpha": m.dfa([float(x) for x in lengths]),
+        "dfa_alpha": (
+            m.dfa([float(x) for x in lengths]) if len(lengths) >= m.MIN_SENTENCES_DFA else None
+        ),
         **{f"format_{k}": v for k, v in m.format_rates(doc.format, n).items()},
         **m.readability(ws, len(doc.sentences)),
         **{f"rate_{k}": (1000 * v / n if n else None) for k, v in counts.items()},

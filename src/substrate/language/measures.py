@@ -23,6 +23,18 @@ from substrate.language.text import FormatCounts
 
 ZLIB_LEVEL = 9
 
+# The shortest window each measure is reported for (sprint 306, docs/language/windows.md): words,
+# except DFA (sentences) and burstiness (occurrences of each word counted). MTLD's 100 words is
+# Koizumi & In'nami (2012); the rest were measured. Compression ratio has no minimum: it falls with
+# length up to 6,400 words, so its values are compared only at equal lengths.
+MIN_WORDS_MTLD = 100
+MIN_WORDS_ENTROPY = 3200
+MIN_WORDS_ZIPF = 3200
+MIN_WORDS_HEAPS = 800
+MIN_WORDS_LSM = 1600
+MIN_SENTENCES_DFA = 400
+MIN_OCCURRENCES_BURSTINESS = 20
+
 
 # ---- size and rhythm ------------------------------------------------------------------------
 
