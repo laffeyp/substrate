@@ -101,8 +101,8 @@ def category_percentages(parsed: Parsed) -> dict[str, float] | None:
 def lsm(user: Parsed, reply: Parsed, min_words: int = MIN_WORDS_LSM) -> dict[str, float | None]:
     """Language style matching (Ireland et al. 2011): per category
     1 - |p1 - p2| / (p1 + p2 + 0.0001), and their mean over the nine categories. None when either
-    text has fewer than `min_words` words: below 1,600, two texts by one writer score too low and
-    too far apart to read (docs/language/windows.md)."""
+    text has fewer than `min_words` words; the caller widens the window to reach it
+    (docs/language/windows-r2.md)."""
     if min(len(words(user)), len(words(reply))) < min_words:
         return {"lsm": None}
     pu, pr = category_percentages(user), category_percentages(reply)
