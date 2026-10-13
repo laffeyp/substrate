@@ -13,7 +13,6 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Iterator, Mapping
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +23,8 @@ from ...language import relation as rel
 from ...language.measures import MIN_WORDS_ENTROPY, MIN_WORDS_LSM
 from .vocabulary import (
     DELEGATE_SLASH_SOURCE,
+    LanguagePairing as Pairing,
+    LanguageStream as Stream,
     MODEL_REPLY,
     PROMPT_COMPOSED,
     SESSION_CHANGE_FIELDS,
@@ -37,23 +38,18 @@ from .vocabulary import (
 WINDOW_WORDS = MIN_WORDS_ENTROPY
 
 
-class Stream(StrEnum):
-    USER = "user"
-    DELEGATE = "delegate"
-    MODEL = "model"
-    RELATION = "relation"
-    COMPOSED = "composed"
-
-
-class Pairing(StrEnum):
-    FINAL = "final"  # the user's text with the turn's final reply
-    TURN = "turn"  # the user's text with all the turn's replies, joined in order
-
-
 def _provenance(p: Mapping[str, Any]) -> dict[str, Any]:
     return {
         k: p[k]
-        for k in ("library", "preprocessing", "params", "minimums", "lexicons", "compressor")
+        for k in (
+            "library",
+            "preprocessing",
+            "instrument_sha256",
+            "params",
+            "minimums",
+            "lexicons",
+            "compressor",
+        )
     }
 
 

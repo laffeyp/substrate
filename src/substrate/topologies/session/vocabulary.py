@@ -104,6 +104,9 @@ COMPACTION_REASON_WINDOW_EXCEEDED: Final[str] = "driver_window_exceeded"
 # v0.3 (session-vocabulary.md § K, sprint K259, 2026-10-09). `Returned` ends a turn; `Park` ends a
 # turn on records written before v0.3. Readers accept both (§ K.3).
 RETURNED = "Returned"
+# v0.11 (§ W, sprint K309): language measured live.
+LANGUAGE_PROFILE = "LanguageProfile"
+LANGUAGE_DRIFT = "LanguageDrift"
 TURN_END_KINDS: Final[frozenset[str]] = frozenset({RETURNED, PARK})
 # Kinds a session record written before v0.3 carries and v0.3 no longer writes (§ K.3); a reader
 # of session records accepts them.
@@ -120,6 +123,23 @@ class StopReason(StrEnum):
     END_TURN = "end_turn"
     TOOL_USE = "tool_use"
     WRAP_UP = "wrap_up"
+
+
+class LanguageStream(StrEnum):
+    """LanguageProfile.stream (§ W.2), and the stream of a `substrate language` line."""
+
+    USER = "user"
+    DELEGATE = "delegate"  # a UserMessage a parent model wrote (slash_source "delegate")
+    MODEL = "model"
+    RELATION = "relation"
+    COMPOSED = "composed"  # `substrate language` only: not measured live (§ W.1)
+
+
+class LanguagePairing(StrEnum):
+    """A relation's pairing (§ W.2): the user's text with the final reply, or with all replies."""
+
+    FINAL = "final"
+    TURN = "turn"
 
 
 class ToolMode(StrEnum):
@@ -179,6 +199,8 @@ SESSION_KINDS: frozenset[str] = frozenset(
         SESSION_CHANGED,
         HARNESS_TOOL_CALL,
         HARNESS_TOOL_RESULT,
+        LANGUAGE_PROFILE,
+        LANGUAGE_DRIFT,
     }
 )
 
@@ -356,6 +378,8 @@ PRODUCER_KIND_SKILL_FRAGMENT: Final[str] = "skill_fragment"
 # Also declared by the CI wrapper (ci.py); listed here so the frozenset
 # below covers every kind a session-shape topology can emit.
 PRODUCER_KIND_DRIVER_STEPPER: Final[str] = "driver_stepper"
+# v0.11 (§ W.3): measures a turn's texts between its final reply and Returned.
+PRODUCER_KIND_LANGUAGE: Final[str] = "language"
 
 SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
     {
@@ -369,6 +393,7 @@ SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
         PRODUCER_KIND_INTERRUPT_FRAGMENT,
         PRODUCER_KIND_SKILL_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
+        PRODUCER_KIND_LANGUAGE,
     }
 )
 
@@ -383,6 +408,9 @@ TRIGGER_ID_MODEL_WRAP_UP_ON_TOOL_RESULT: Final[str] = "model-wrap-up-on-tool-res
 TRIGGER_ID_RETURN_ON_REPLY: Final[str] = "return-on-reply"
 TRIGGER_ID_RETURN_ON_MODEL_ERROR: Final[str] = "return-on-model-error"
 TRIGGER_ID_RETURN_ON_INTERRUPT: Final[str] = "return-on-interrupt"
+# v0.11 (§ W.4): with `language` on, the final reply starts the measurement and its end starts return.
+TRIGGER_ID_LANGUAGE_ON_REPLY: Final[str] = "language-on-reply"
+TRIGGER_ID_RETURN_ON_LANGUAGE: Final[str] = "return-on-language"
 TRIGGER_ID_END_ON_EXIT: Final[str] = "end-on-exit"
 TRIGGER_ID_END_ON_TURN_CAP: Final[str] = "end-on-turn-cap"
 TRIGGER_ID_END_ON_END_REQUEST: Final[str] = "end-on-end-request"
@@ -435,6 +463,8 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_RETURN_ON_REPLY,
         TRIGGER_ID_RETURN_ON_MODEL_ERROR,
         TRIGGER_ID_RETURN_ON_INTERRUPT,
+        TRIGGER_ID_LANGUAGE_ON_REPLY,
+        TRIGGER_ID_RETURN_ON_LANGUAGE,
         TRIGGER_ID_END_ON_EXIT,
         TRIGGER_ID_END_ON_TURN_CAP,
         TRIGGER_ID_END_ON_END_REQUEST,
@@ -494,6 +524,13 @@ __all__ = [
     "HARNESS_TOOL_RESULT",
     "ToolMode",
     "RETURNED",
+    "LanguagePairing",
+    "LanguageStream",
+    "TRIGGER_ID_RETURN_ON_LANGUAGE",
+    "TRIGGER_ID_LANGUAGE_ON_REPLY",
+    "PRODUCER_KIND_LANGUAGE",
+    "LANGUAGE_DRIFT",
+    "LANGUAGE_PROFILE",
     "ReturnReason",
     "SESSION_ENDED",
     "SESSION_END_REQUESTED",

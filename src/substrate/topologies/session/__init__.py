@@ -32,8 +32,11 @@ from ..tool_loop import _tool_factory as _tool_loop_tool_factory
 from ..tool_loop.background import TaskStatus
 from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
+from ...language.drift import Direction
 from .vocabulary import (
     Control,
+    LanguagePairing,
+    LanguageStream,
     PromptSource,
     COMPACTION_REASON_WINDOW_EXCEEDED,
     COMPACTION_ROLLING_WINDOW,
@@ -282,6 +285,33 @@ class PromptComposed(Struct, frozen=True):
     # Session vocabulary v0.4 (§ P.3): the text sent on the driver's system channel. `system`
     # and `text` together are what the driver read. Records before v0.4 have none.
     system: str = ""
+
+
+# Session vocabulary v0.11 (§ W.2, K309): one text's measures, or one turn's relation, recorded by the
+# `language` producer between a turn's final reply and Returned.
+class LanguageProfile(Struct, frozen=True):
+    stream: LanguageStream
+    turn_index: int
+    source_seq: int  # the measured UserMessage or ModelReply; for a relation, the final reply
+    step: int | None  # the reply's step (stream "model" only)
+    pairing: LanguagePairing | None  # stream "relation" only
+    library: str
+    preprocessing: str
+    instrument_sha256: str  # parameters, window minimums, lexicon versions and compressor
+    measures: dict[str, float | None]
+
+
+# § W.2: a change the Page-Hinkley detector found on the newest value of one stream's series.
+class LanguageDrift(Struct, frozen=True):
+    stream: LanguageStream
+    measure: str  # one of substrate.language.drift.WATCHED
+    direction: Direction
+    statistic: float  # in warm-up standard deviations
+    source_seq: int  # the text whose value raised it
+    series_length: int
+    delta: float
+    threshold: float
+    warmup: int
 
 
 # The core producer bodies. The model producer reads the just-appended UserMessage /
@@ -1598,6 +1628,8 @@ from .views import (  # noqa: E402
 
 __all__ = [
     "BackgroundTaskEnded",
+    "LanguageDrift",
+    "LanguageProfile",
     "FinalAnswer",
     "ModelReply",
     "Park",

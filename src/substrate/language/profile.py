@@ -5,6 +5,8 @@ was computed under (round 4: a stored value names everything needed to recompute
 
 from __future__ import annotations
 
+import hashlib
+import json
 import zlib
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -155,8 +157,15 @@ def profile(
         **m.readability(ws, len(doc.sentences)),
         **{f"rate_{k}": (1000 * v / n if n else None) for k, v in counts.items()},
     }
+    instrument = {
+        "params": asdict(p),
+        "minimums": dict(m.MINIMUMS),
+        "lexicons": provenance(lexicon_names()),
+        "compressor": f"zlib {zlib.ZLIB_VERSION}",
+    }
     return {
         "library": LIBRARY_VERSION,
+        "instrument_sha256": instrument_sha256(instrument),
         "preprocessing": PREPROCESSING,
         "params": asdict(p),
         "minimums": dict(m.MINIMUMS),
@@ -170,3 +179,10 @@ def profile(
             "format": asdict(doc.format),
         },
     }
+
+
+def instrument_sha256(instrument: dict[str, Any]) -> str:
+    """SHA-256 of the canonical JSON of the parameters, window minimums, lexicon versions and
+    compressor: one string that names the instrument a value was measured with (§ W.2)."""
+    text = json.dumps(instrument, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()

@@ -40,6 +40,26 @@ class DriftParams:
 DEFAULT_DRIFT = DriftParams(delta=0.25, threshold=10.0, warmup=20)
 
 
+# The measures the live detector watches (§ W.2), one per thing a setting is meant to move:
+# length (words, sentence length, padding), tone (hedges, boosters, contractions, positive emotion,
+# exclamation marks) and guidance (Kobak's style words, em-dashes, bold, list items).
+WATCHED: tuple[str, ...] = (
+    "words",
+    "sentence_length_mean",
+    "rate_padding_restatement_opening",
+    "rate_padding_offer_of_more_closing",
+    "rate_hedges_hyland",
+    "rate_boosters_hyland",
+    "rate_contractions",
+    "rate_liwc_positive_emotion",
+    "format_exclamations",
+    "rate_kobak_style",
+    "format_em_dashes",
+    "format_bold_spans",
+    "format_list_items",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class Alarm:
     index: int  # position in the series of the value that raised it
