@@ -1,0 +1,89 @@
+[lexicon]
+name = "padding"
+version = 1
+preprocessing = "substrate-text-1"
+kind = "phrase-categories"
+description = "Phrases that add words without adding facts: restating the question, background before the answer, closing summaries, offers of more."
+source = "Built by Substrate. The four categories are the ones Substrate's terse length text removes ('Leave out background, restatement and offers of more', topologies/session/vocabulary.py LENGTH_TEXTS) and the dellm skill's 'formulaic scaffolding' (skills/dellm/SKILL.md); Wikipedia's 'Signs of AI writing' was read as a catalogue of examples; no text is copied from it"
+licence = "Substrate (this repository), PolyForm-Noncommercial-1.0.0"
+construction = "Fixed phrases chosen by Substrate, in substrate-text-1 token form ('TL;DR' -> 'tl dr')."
+notes = "Position decides meaning for some phrases: 'overall' opening a closing paragraph pads, 'overall' inside a sentence may not. Sprint 304 defines where each category is counted."
+
+[categories]
+restatement = [
+  "you asked",
+  "you're asking",
+  "you are asking",
+  "you want to know",
+  "your question",
+  "the question is",
+  "to answer your question",
+  "great question",
+  "good question",
+  "that's a great question",
+  "that's a good question",
+  "as you mentioned",
+  "as you said",
+  "as you noted",
+  "if i understand correctly",
+  "so you're saying",
+]
+background = [
+  "it's important to",
+  "it is important to",
+  "it's worth noting",
+  "it is worth noting",
+  "it's worth mentioning",
+  "worth noting that",
+  "before we dive",
+  "let's dive",
+  "let's start with",
+  "let's take a look",
+  "let's break this down",
+  "let's break it down",
+  "to understand",
+  "in order to understand",
+  "to give some context",
+  "for context",
+  "some background",
+  "a bit of background",
+  "at a high level",
+]
+closing_summary = [
+  "in summary",
+  "in conclusion",
+  "to summarize",
+  "to sum up",
+  "in short",
+  "overall",
+  "the bottom line",
+  "bottom line",
+  "tl dr",
+  "to recap",
+  "in a nutshell",
+  "all in all",
+  "the key takeaway",
+  "key takeaways",
+  "the takeaway",
+]
+offer_of_more = [
+  "let me know if",
+  "let me know",
+  "feel free to",
+  "i hope this helps",
+  "hope this helps",
+  "if you have any",
+  "if you'd like",
+  "if you would like",
+  "would you like me to",
+  "do you want me to",
+  "want me to",
+  "happy to help",
+  "i'm happy to",
+  "i'd be happy to",
+  "i can also",
+  "don't hesitate to",
+  "just let me know",
+  "if you need anything else",
+  "anything else",
+]

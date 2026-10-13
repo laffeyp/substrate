@@ -1,0 +1,52 @@
+[lexicon]
+name = "informal"
+version = 1
+preprocessing = "substrate-text-1"
+kind = "terms"
+description = "Informal words and spellings the formal tone ('no slang') rules out."
+source = "Built by Substrate"
+licence = "Substrate (this repository), PolyForm-Noncommercial-1.0.0"
+construction = "Colloquial spellings ('gonna', 'kinda'), interjections and response words ('yeah', 'nope', 'hey'), chat abbreviations ('btw', 'tbh') and informal nouns ('stuff', 'guys'), chosen by Substrate."
+notes = "'kinda' is also in hedges.toml. 'ok' and 'okay' are also used in quoted program output; inline code is one token, so only prose counts."
+
+[entries]
+terms = [
+  "gonna",
+  "wanna",
+  "gotta",
+  "kinda",
+  "sorta",
+  "dunno",
+  "lemme",
+  "gimme",
+  "yeah",
+  "yep",
+  "yup",
+  "nope",
+  "nah",
+  "ok",
+  "okay",
+  "cool",
+  "awesome",
+  "stuff",
+  "guys",
+  "lol",
+  "btw",
+  "imo",
+  "imho",
+  "tbh",
+  "fyi",
+  "afaik",
+  "hey",
+  "yo",
+  "dude",
+  "folks",
+  "kidding",
+  "huh",
+  "oops",
+  "whoa",
+  "ya",
+  "em",
+  "cuz",
+  "alright",
+]

@@ -1,0 +1,37 @@
+[lexicon]
+name = "contractions"
+version = 1
+preprocessing = "substrate-text-1"
+kind = "contractions"
+description = "English contractions, the formality marker the formal tone removes."
+source = "Built by Substrate from standard English contraction forms"
+licence = "Substrate (this repository), PolyForm-Noncommercial-1.0.0"
+construction = "A token is a contraction when it ends in one of the suffixes, or is one of the listed words. 'Xs' with an apostrophe is not a suffix because it is also the possessive ('model's'); the listed words cover 's after pronouns and question words, where it is a verb."
+notes = "The suffix rule counts 'o'clock' as no contraction and 'won't', 'can't' and 'ain't' as contractions."
+
+[entries]
+suffixes = [
+  "n't",
+  "'re",
+  "'ve",
+  "'ll",
+  "'d",
+  "'m",
+]
+words = [
+  "it's",
+  "that's",
+  "there's",
+  "here's",
+  "what's",
+  "who's",
+  "where's",
+  "when's",
+  "why's",
+  "how's",
+  "he's",
+  "she's",
+  "let's",
+  "y'all",
+  "ma'am",
+]

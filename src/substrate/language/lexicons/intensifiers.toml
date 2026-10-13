@@ -1,0 +1,54 @@
+[lexicon]
+name = "intensifiers"
+version = 1
+preprocessing = "substrate-text-1"
+kind = "terms"
+description = "Degree words that scale up what they modify."
+source = "Built by Substrate after the category 'amplifiers' (maximizers and boosters) in Quirk, Greenbaum, Leech & Svartvik (1985), A Comprehensive Grammar of the English Language, §8.104-8.111"
+licence = "Substrate (this repository), PolyForm-Noncommercial-1.0.0"
+construction = "Degree adverbs and fixed phrases chosen by Substrate. 'so' and 'really' are left out: 'so' is mostly a conjunction, and 'really' is in hedges.toml."
+notes = "'completely' and 'totally' are in hedges.toml (Ulinski & Hirschberg list them as propositional hedges) and are not repeated here; 'truly' is also in boosters.toml."
+
+[entries]
+terms = [
+  "very",
+  "extremely",
+  "highly",
+  "incredibly",
+  "remarkably",
+  "exceptionally",
+  "exceedingly",
+  "enormously",
+  "tremendously",
+  "immensely",
+  "hugely",
+  "massively",
+  "vastly",
+  "profoundly",
+  "deeply",
+  "intensely",
+  "utterly",
+  "entirely",
+  "fully",
+  "thoroughly",
+  "wholly",
+  "absolutely",
+  "perfectly",
+  "especially",
+  "particularly",
+  "significantly",
+  "substantially",
+  "considerably",
+  "greatly",
+  "strongly",
+  "truly",
+  "super",
+  "insanely",
+  "seriously",
+  "terribly",
+  "awfully",
+  "so much",
+  "way more",
+  "by far",
+  "far more",
+]

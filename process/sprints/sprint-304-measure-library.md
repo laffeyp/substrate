@@ -19,7 +19,7 @@ context_files:
 
 ## observation contract
 
-- The tokenizer reproduces every K302 fixture.
+- The tokenizer reproduces every K302 fixture, and tokenizes every K303 lexicon entry to itself.
 - Each measure equals a hand-computed value on a small text, and agrees with its reference implementation on the fixture set within a stated tolerance, or the difference is traced (for example, to a tokenizer difference K302 recorded).
 - A table: measure, source, reference implementation, agreement found.
 - One 1,500-token text measures in under 5 ms.

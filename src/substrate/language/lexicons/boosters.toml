@@ -1,0 +1,50 @@
+[lexicon]
+name = "boosters"
+version = 1
+preprocessing = "substrate-text-1"
+kind = "terms"
+description = "Words and fixed phrases whose ordinary sense asserts certainty or the truth of a claim."
+source = "Built by Substrate after the category 'boosters' in Hyland (2005), Metadiscourse, Continuum; Hyland's own list is not reproduced"
+licence = "Substrate (this repository), PolyForm-Noncommercial-1.0.0"
+construction = "Adverbs, adjectives, modals and fixed phrases of certainty, chosen by Substrate. Verbs of knowing and showing ('know', 'show', 'prove', 'find') are left out: they assert certainty only in some uses, and 'know' and 'find' are in hedges.toml."
+notes = "'always', 'never' and 'must' boost in claims and not in instructions; counts include both."
+
+[entries]
+terms = [
+  "certainly",
+  "clearly",
+  "obviously",
+  "definitely",
+  "undoubtedly",
+  "undeniably",
+  "indisputably",
+  "unquestionably",
+  "surely",
+  "indeed",
+  "truly",
+  "of course",
+  "no doubt",
+  "without doubt",
+  "without a doubt",
+  "beyond doubt",
+  "in fact",
+  "as a matter of fact",
+  "evidently",
+  "plainly",
+  "doubtless",
+  "there is no question",
+  "make no mistake",
+  "always",
+  "never",
+  "must",
+  "certain",
+  "clear",
+  "obvious",
+  "definite",
+  "undeniable",
+  "indisputable",
+  "evident",
+  "conclusively",
+  "decidedly",
+  "without question",
+]
