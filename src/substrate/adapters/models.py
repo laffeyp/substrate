@@ -193,6 +193,7 @@ class OllamaResponder:
         timeout: float | None = None,
         max_retries: int = 3,
         system: str | None = None,
+        format: dict[str, object] | str | None = None,
     ) -> None:
         self._endpoint = f"{ollama_base_url(base_url)}/api/chat"
         self._model = model
@@ -217,6 +218,9 @@ class OllamaResponder:
         self._timeout = timeout
         self._max_retries = max_retries
         self._system = system
+        # Ollama's structured outputs: a JSON schema (or "json") sent as /api/chat `format` holds the
+        # reply to that shape, as the Claude CLI's --json-schema does. None sends no `format`.
+        self._format = format
 
     # Session vocabulary v0.4 (§ P.3): this responder has a system channel, so callers pass the
     # system text as `system=` rather than prefixing it to the prompt.
@@ -242,6 +246,8 @@ class OllamaResponder:
         }
         if tools:  # native function-tool calling (Ollama /api/chat `tools`)
             payload["tools"] = tools
+        if self._format is not None:
+            payload["format"] = self._format
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"

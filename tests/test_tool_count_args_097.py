@@ -126,3 +126,13 @@ async def test_run_name_is_recorded_and_list_records_filters_on_it(tmp_path: Pat
     assert "name" not in read_first_envelope(sessions / "s_b" / "record")["payload"]  # byte-stable
     out = make_list_records(sessions).run([{"topology": "game_of_life"}])
     assert [r["session_id"] for r in out["records"]] == ["s_a"]
+
+
+def test_ollama_format_holds_the_reply_to_a_schema() -> None:
+    """A JSON schema passed as `format` rides the /api/chat payload; without one, no `format` key is sent."""
+    from substrate.adapters.models import OllamaResponder
+
+    schema = {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}
+    assert OllamaResponder("m", format=schema)._request("hi")[1]["format"] == schema
+    assert OllamaResponder("m", format="json")._request("hi")[1]["format"] == "json"
+    assert "format" not in OllamaResponder("m")._request("hi")[1]
