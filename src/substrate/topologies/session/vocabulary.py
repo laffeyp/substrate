@@ -424,6 +424,8 @@ SKILL_SLASH_PREFIX: Final[str] = "skill:"
 # UI sprint 123 (§ P.11): a UserMessage the operator sent with `//`. The model step passes its text
 # to the driver as written, and the history leaves the turn out.
 DRIVER_SLASH_SOURCE: Final[str] = "driver"
+# A sub-session's opening message, written by the parent model through the `delegate` tool.
+DELEGATE_SLASH_SOURCE: Final[str] = "delegate"
 
 SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -480,6 +482,7 @@ __all__ = [
     "TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT",
     "SKILL_SLASH_PREFIX",
     "DRIVER_SLASH_SOURCE",
+    "DELEGATE_SLASH_SOURCE",
     "PRODUCER_KIND_SKILL_FRAGMENT",
     "CACHE_LAYOUT_SOURCES",
     "TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE",

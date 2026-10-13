@@ -56,7 +56,7 @@ from ...adapters import (
 )
 from ...errors import describe_error
 from ..session.context_slice import extract_context_slice
-from ..session.vocabulary import turn_replies
+from ..session.vocabulary import DELEGATE_SLASH_SOURCE, turn_replies
 from ..session_registry import SessionEndedMidTurn, SessionRegistry
 from .kinds import FINAL_ANSWER
 from .tools import _TOOL_CANCEL_HOOKS, Tool, full_suite, on_tool_cancel
@@ -406,7 +406,7 @@ def _run_fanout(
             text=task,
             turn_index=0,
             assembled_prompt="",
-            slash_source="delegate",
+            slash_source=DELEGATE_SLASH_SOURCE,
         )
         if parent_cancel_hooks is not None:
             # interrupting the parent's turn interrupts this child's turn (UI sprint 102)
@@ -697,7 +697,7 @@ def make_delegate(
                     text=task,
                     turn_index=next_turn_index,
                     assembled_prompt="",
-                    slash_source="delegate",
+                    slash_source=DELEGATE_SLASH_SOURCE,
                 )
 
             # interrupting the parent's turn interrupts the standing session's turn (UI sprint 102)

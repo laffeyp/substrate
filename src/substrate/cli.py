@@ -534,6 +534,30 @@ def narrate(root: str, lifecycle: bool, summary: bool) -> None:
 
 
 @main.command()
+@click.argument("root", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--out",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="write the lines to this file instead of standard output",
+)
+def language(root: str, out: str | None) -> None:
+    """Measure the language of a session record: one JSON line per user message, model reply,
+    turn relation and composed prompt (docs/language/). Read-only: the record is not changed."""
+    lines = (app.line_json(line) for line in app.language_lines(Path(root)))
+    if out is None:
+        for text in lines:
+            click.echo(text)
+        return
+    count = 0
+    with Path(out).open("w", encoding="utf-8") as f:
+        for text in lines:
+            f.write(text + "\n")
+            count += 1
+    _err.print(f"{count} lines -> {out}")
+
+
+@main.command()
 @click.argument("root", type=click.Path(exists=True))
 @click.option("--level", type=click.Choice(["1", "2", "3a", "3b"]), default="1")
 @click.option("--diff", "diff_root", type=click.Path(exists=True), default=None)
