@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any, Final
 
+from ...language.drift import Direction
 from ..tool_loop.kinds import FINAL_ANSWER
 
 # Sprint 070 (2026-09-02): closed-set string values as StrEnum. Each class
@@ -323,6 +324,30 @@ TONE_TEXTS: Final[dict[TonePosition, str]] = {
     TonePosition.DRY: "Keep the tone dry: understated and factual, without enthusiasm or exclamation.",
 }
 
+# K312: the measures each length and tone text names a direction for, read from the texts above (the
+# language page states a setting's intent only where its text states one). Normal and neutral write
+# no text and state none.
+LANGUAGE_INTENTS: Final[dict[tuple[Control, str], tuple[tuple[str, Direction], ...]]] = {
+    # "Keep replies short… Leave out background, restatement and offers of more."
+    (Control.LENGTH, LengthPosition.TERSE): (
+        ("words", Direction.DOWN),
+        ("rate_padding_restatement_opening", Direction.DOWN),
+        ("rate_padding_background_opening", Direction.DOWN),
+        ("rate_padding_offer_of_more_closing", Direction.DOWN),
+    ),
+    # "Give complete replies: the reasoning, the alternatives you weighed, and what you left out."
+    (Control.LENGTH, LengthPosition.FULL): (("words", Direction.UP),),
+    # "Do not soften criticism, and hedge only where the evidence is uncertain."
+    (Control.TONE, TonePosition.BLUNT): (("rate_hedges_hyland", Direction.DOWN),),
+    # "full sentences, no slang"
+    (Control.TONE, TonePosition.FORMAL): (("rate_contractions", Direction.DOWN),),
+    # "understated and factual, without enthusiasm or exclamation."
+    (Control.TONE, TonePosition.DRY): (
+        ("rate_liwc_positive_emotion", Direction.DOWN),
+        ("format_exclamations", Direction.DOWN),
+    ),
+}
+
 # Session vocabulary § P.3 (UI sprint 121): with `driver_params.cache_layout`, these session-stable
 # sources also go on the system channel. Off by default; never part of the default layout.
 CACHE_LAYOUT_SOURCES: Final[frozenset[PromptSource]] = frozenset(
@@ -519,6 +544,7 @@ __all__ = [
     "TRIGGER_ID_MODEL_ON_SESSION_PROMPT_CHANGE",
     "TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE",
     "SESSION_CHANGE_FIELDS",
+    "LANGUAGE_INTENTS",
     "SESSION_CHANGED",
     "HARNESS_TOOL_CALL",
     "HARNESS_TOOL_RESULT",
