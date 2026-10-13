@@ -46,6 +46,11 @@ dev = [
   "mypy", "ruff==0.15.17", "hypothesis", "coverage",
   "import-linter",                  # enforces the F-API-6 cli-imports-only-api contract (below)
   "httpx",                          # so dev + CI type-check/test the [openai-compat] reference adapter
+  # Sprint 304: the published implementations the language measures are checked against. Tests
+  # only; the measure library itself imports none of them. textstat is left out on purpose: its
+  # wheel installs a top-level `tests` package that shadows this repo's; the comparison script
+  # runs it with `uv run --with textstat==0.7.13`.
+  "lexicalrichness", "nolds", "powerlaw", "cmudict",
 ]
 openai-compat = ["httpx"]           # optional extra; kernel imports none of these
 # The SWE-bench confirmatory + host + agent scripts hard-import `datasets` (HuggingFace, to
