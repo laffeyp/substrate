@@ -38,6 +38,7 @@ class Family(StrEnum):
     LEXICON = "word lists"
     LIWC = "LIWC2007 categories"
     PADDING = "padding"
+    RELATION = "the user's text and the reply"
 
 
 @dataclass(frozen=True, slots=True)
@@ -735,6 +736,88 @@ _ENTRIES: Final[tuple[Measure, ...]] = (
         "Fillers (“blah”, “like”), LIWC2007. Its multi-word fillers are written run together "
         "(“youknow”) and do not match the words apart.",
     ),
+    # the relation between a user's message and the reply (stream "turns")
+    _m(
+        "length_ratio",
+        "length ratio",
+        "ratio",
+        _F.RELATION,
+        0,
+        20,
+        "Words in the reply for each word in the user's message.",
+    ),
+    _m(
+        "lexical_echo",
+        "echo",
+        "share",
+        _F.RELATION,
+        0,
+        1,
+        "The share of the user's own content words the reply uses. 1 means every one of them.",
+    ),
+    _m(
+        "phrase_copy_shared",
+        "shared phrases",
+        "phrases",
+        _F.RELATION,
+        0,
+        20,
+        "Four-word phrases the reply shares with the user's message.",
+    ),
+    _m(
+        "phrase_copy_share",
+        "copied",
+        "share",
+        _F.RELATION,
+        0,
+        1,
+        "The share of the reply's four-word phrases that also occur in the user's message.",
+    ),
+    _m(
+        "phrase_copy_longest_run",
+        "longest copy",
+        "words",
+        _F.RELATION,
+        0,
+        20,
+        "The longest run of words the reply copies from the user's message.",
+    ),
+    _m(
+        "ncd",
+        "distance",
+        "NCD",
+        _F.RELATION,
+        0,
+        1.2,
+        "How different the two texts look to a compressor (Cilibrasi and Vitányi 2005): near 0 alike, near 1 unrelated.",
+    ),
+    _m(
+        "lsm",
+        "style match",
+        "score",
+        _F.RELATION,
+        0,
+        1,
+        "How closely the reply's small words (pronouns, articles, prepositions) match the user's, from 0 to 1 (the categories of Ireland and colleagues, 2011). Needs 1,600 words on each side.",
+    ),
+    _m(
+        "window_lsm",
+        "style match (window)",
+        "score",
+        _F.RELATION,
+        0,
+        1,
+        "Style matching over the latest 3,200 words of each side, where one turn is too short to measure it.",
+    ),
 )
 
 CATALOG: Final[dict[str, Measure]] = {m.name: m for m in _ENTRIES}
+# The relation measures the language page shows for the turns stream, in order.
+RELATION_LANES: Final[tuple[str, ...]] = (
+    "length_ratio",
+    "lexical_echo",
+    "phrase_copy_share",
+    "phrase_copy_longest_run",
+    "ncd",
+    "window_lsm",
+)

@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 from substrate.language import profile
-from substrate.language.catalog import CATALOG, Group
+from substrate.language.catalog import CATALOG, RELATION_LANES, Group
 from substrate.language.drift import WATCHED
 from substrate.topologies.session.vocabulary import (
     LANGUAGE_INTENTS,
@@ -40,8 +40,13 @@ GROUPS = {
 }
 
 
-def test_the_catalog_names_exactly_the_profile_measures() -> None:
-    assert set(CATALOG) == set(profile("One text. Two sentences.").measures)
+def test_the_catalog_names_exactly_the_profile_and_relation_measures() -> None:
+    from substrate.language.catalog import Family
+    from substrate.topologies.session.language_lines import relation_values
+
+    relation = {m.name for m in CATALOG.values() if m.family is Family.RELATION}
+    assert set(CATALOG) - relation == set(profile("One text. Two sentences.").measures)
+    assert relation == set(relation_values("a question", "an answer")) | {"window_lsm"}
 
 
 def test_the_watched_measures_carry_their_groups_and_no_other_does() -> None:
@@ -64,3 +69,7 @@ def test_every_intent_reads_from_a_control_text() -> None:
         assert position in texts, (control, position)
         for measure, _direction in intents:
             assert measure in CATALOG, measure
+
+
+def test_the_relation_lanes_are_catalogued() -> None:
+    assert set(RELATION_LANES) <= set(CATALOG)
