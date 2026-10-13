@@ -49,16 +49,14 @@ def _lists(doc: dict[str, Any]) -> dict[str, list[str]]:
 def test_the_lexicons_exist() -> None:
     names = {p.stem for p in FILES}
     assert names == {
-        "address",
-        "boosters",
+        "amplifiers_alshaar_2017",
+        "boosters_hyland_2005",
         "contractions",
-        "enthusiasm",
-        "function_words",
-        "hedges",
-        "informal",
-        "intensifiers",
+        "hedges_hyland_2005",
+        "hedges_ulinski_2019",
         "kobak_style_2024",
         "kobak_style_2024_rare",
+        "liwc2007",
         "padding",
     }
 
@@ -74,7 +72,9 @@ def test_header_names_source_licence_and_preprocessing(path: Path) -> None:
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
 def test_entries_are_in_token_form(path: Path) -> None:
-    lists = _lists(_load(path))
+    doc = _load(path)
+    wildcard = doc["lexicon"].get("wildcard")
+    lists = _lists(doc)
     assert lists, f"{path.name}: no entries"
     for where, entries in lists.items():
         assert entries, f"{path.name} {where} is empty"
@@ -85,6 +85,8 @@ def test_entries_are_in_token_form(path: Path) -> None:
                 continue
             assert entry == entry.casefold(), f"{path.name} {where}: {entry!r} is not case-folded"
             assert "’" not in entry, f"{path.name} {where}: {entry!r} has a curly apostrophe"
+            if wildcard and entry.endswith(wildcard):
+                entry = entry[: -len(wildcard)]
             for token in entry.split(" "):
                 assert WORD.fullmatch(token), f"{path.name} {where}: {token!r} is not one W1 token"
 
@@ -92,8 +94,12 @@ def test_entries_are_in_token_form(path: Path) -> None:
 def test_published_lists_keep_their_published_counts() -> None:
     assert len(_load(LEXICONS / "kobak_style_2024.toml")["entries"]["words"]) == 379
     assert len(_load(LEXICONS / "kobak_style_2024_rare.toml")["entries"]["words"]) == 291
-    hedges = _load(LEXICONS / "hedges.toml")["entries"]
+    hedges = _load(LEXICONS / "hedges_ulinski_2019.toml")["entries"]
     assert len(hedges["relational"]) + len(hedges["propositional"]) == 117
+    assert len(_load(LEXICONS / "hedges_hyland_2005.toml")["entries"]["terms"]) == 97
+    assert len(_load(LEXICONS / "boosters_hyland_2005.toml")["entries"]["terms"]) == 63
+    amplifiers = _load(LEXICONS / "amplifiers_alshaar_2017.toml")["categories"]
+    assert (len(amplifiers["boosters"]), len(amplifiers["maximizers"])) == (15, 8)
 
 
 def test_the_rare_set_is_inside_the_full_set() -> None:
@@ -108,6 +114,7 @@ def test_the_mit_notice_ships_with_the_kobak_lists() -> None:
 
 
 def test_lsm_names_nine_categories_that_exist() -> None:
-    doc = _load(LEXICONS / "function_words.toml")
+    doc = _load(LEXICONS / "liwc2007.toml")
     assert len(doc["lsm"]["categories"]) == 9
-    assert set(doc["lsm"]["categories"]) == set(doc["categories"])
+    assert set(doc["lsm"]["categories"]) <= set(doc["categories"])
+    assert doc["categories"]["articles"] == ["a", "alot", "an", "the"]

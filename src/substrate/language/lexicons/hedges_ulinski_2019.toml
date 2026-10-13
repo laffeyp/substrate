@@ -1,5 +1,5 @@
 [lexicon]
-name = "hedges"
+name = "hedges-ulinski-2019"
 version = 1
 preprocessing = "substrate-text-1"
 kind = "terms"
