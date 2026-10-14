@@ -529,6 +529,9 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Catalog: the style-match minimum for the UI's turns view (2026-10-13)
+- `language_catalog.LSM_MIN_WORDS` re-exports `measures.MIN_WORDS_LSM` (1,600) so the UI's generator reads it instead of retyping it (`4296e70f`). The UI's turns view shows each side's progress toward it.
+
 ### K302–K313: language measurement, live and in the app (2026-10-13)
 - **Library** `substrate.language` 0.2.1: preprocessing spec `docs/language/substrate-text-1.md` (22 rules, 62 fixtures); lexicons from the published lists (Kobak 2024, Hyland 2005, Ulinski 2019, Al-Shaar 2017, LIWC2007, built by script and checked by sha256); measures matching lexicalrichness, powerlaw and nolds, ~4 ms per 1,800 tokens; Page–Hinkley drift equal to river 0.26.1; window minimums (`measures.MINIMUMS`). Research round 5 `process/planning/RESEARCH-2026-10-13-language-metrics-r5.md`.
 - **Session**: `substrate language <record>` (77 records, 1,480 lines, byte-identical across runs); vocabulary v0.11 § W (`LanguageProfile`, `LanguageDrift`); the language producer measures each reply inside the turn, before `Returned` (a pause cancels running producers), reading the record by claim check. Installed app: 8 of 8 live values equal the command's.
