@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.16 (2026-10-14).** Sprint K335 adds § AA, composed topologies: a plan of five standard parts, the events each part writes, how a composed run's start and end reach its caller, and the closed set of findings the plan tool returns. Agent-resolved; additive to v0.15.
+
 **Status: RATIFIED — v0.15 (2026-10-14).** Sprint K334 restores § Y as written under v0.13 (the `handoff` control, its texts and its measure), now ratified on v0.14. § Y's "v0.13" labels read as v0.15.
 
 **Status: RATIFIED — v0.14 (2026-10-14).** Sprint K327 adds § Z, the topology runs rebuilt from research round 9: a run's start and end in its caller's record, and in the run's own record a first message the topology writes and a report when its turn ends. No card form, checks, limits, judge or pause: round 9 removes them. Agent-resolved; additive to v0.11.
@@ -1071,3 +1073,88 @@ The producer `report` writes it, started by the trigger `report-on-returned`; th
 
 In a run's record: the `run` `UserMessage` is the first message; `ReportWritten` follows the first `Returned`, once; only `SessionEnded` and the kernel's finalisation follow it. In the caller's: a run's `TopologyRunEnded` follows its `TopologyRunStarted`, once.
 
+## AA. v0.16 — composed topologies (2026-10-14, sprint K335)
+
+Research: `process/planning/RESEARCH-2026-10-14-create-topology.md` § 3–§ 5. A composed topology is a plan: a name, steps and an end. Each step is one of five standard parts; the plan tool turns the plan into a kernel topology, so the calling model names parts and never writes code. Types in `topologies/compose/vocabulary.py`.
+
+### AA.1 The plan
+
+`Plan`: `name` (str), `steps` (list of `Step`), `end` (list of `End`, any one of which ends the run), `max_minutes` (int, default 30; past it the run ends `stopped`).
+
+`Step`:
+
+| Field | Type | Meaning | Default |
+|---|---|---|---|
+| `id` | str | the step; a lower-case word (`a-z`, `0-9`, `_`) | required |
+| `part` | `Part` | what the step is | required |
+| `role` | str | the text a model or agent step reads first | `""` |
+| `on` | list of str | the kinds that start it; `input` is the run's input | the kind of the step before; `input` for the first |
+| `with` | list of str | kinds whose latest event joins the step's input | `[]` |
+| `input` | str | the input laid out as text, with `{Kind.field}` placeholders | the starting event's main field |
+| `if` | `Test` or null | one test on the starting event | null |
+| `max` | int | how many times it may run | 50 for a step between a `split` and the `collect` after it; 1 otherwise |
+| `model` | str | the model a model or agent step runs on | the caller's |
+| `as` | `AgentAs` | an agent step's kind | `plain` |
+| `command` | str | a command step's shell command | `""` |
+| `n` | int or `all` | how many events a collect step waits for; `all` (0 in JSON) waits for one per item of the split before it | `all` after a split; 2 otherwise |
+
+A step's event kind is its id in CamelCase (`critic_a` writes `CriticA`). An id that is not a word, repeats, is `input`, or names a kind Substrate already writes (a session kind or a `substrate.` lifecycle kind) is refused as `bad_id`.
+
+`Test`: `kind` (str), `field` (str), `op` (`TestOp`), `value` (str). `has` and `has no` test whether the field's text contains the value; `is` and `is not` compare the field's text with it.
+
+`End`: `when` (`EndWhen`), `kind` (str; empty for `quiet`), `count` (int; `after` only, default 1). `first K` ends at the first `K`; `after n K` at the n-th; `quiet` when nothing is running and nothing is left to start.
+
+### AA.2 The parts and their events
+
+| `Part` | What it does | The step's event |
+|---|---|---|
+| `model` | one call to a model: the role as system text, then the input | `text` (str) |
+| `agent` | one session turn with tools in a worktree of the caller's repository (§ Z); `as: build` puts it on a new branch, `as: review` gives it read-only tools | `run_id`, `outcome` (`RunOutcome`), `reply`, `files`, `branch`, `commits` (the § Z.2 report) |
+| `command` | one shell command in the run's directory | `ok` (bool), `exit` (int), `output` (str) |
+| `collect` | waits for `n` events of the kinds in `on`, then writes them together | `items` (list of the events' payloads) |
+| `split` | writes one event per item of its input: each line of a text, or each entry of `items` | `item` (str), `index` (int), `of` (int) |
+
+The main field a step reads when it has no `input`: `text`, `reply`, `output`, `item`, or the run's input text.
+
+### AA.3 A composed run's record
+
+`RunStarted.baseline.plan` is the plan with every default filled, as JSON. The run's input reaches the steps `on` `input` as their first input. Each step's events are the kind of AA.1 with the payload of AA.2; the kernel's own lifecycle events surround them.
+
+### AA.4 In the caller's record
+
+A composed run starts and ends as a § Z run: `TopologyRunStarted` with `topology` the plan's name and no `sessions`; `TopologyRunEnded` with `report` null and the new optional field `result`:
+
+| `ComposedResult` field | Type | Meaning |
+|---|---|---|
+| `ended_on` | str or null | the kind of the end that matched; null when the run went quiet or did not end |
+| `event` | object or null | that event's payload |
+| `counts` | map of str to int | how many events each step wrote |
+| `record_root` | str | the run's record |
+
+`outcome` is `done` when an end matched, `stopped` when the caller stopped it or `max_minutes` passed, `failed` when a step or the run failed. Each agent step is a § Z run of its own in the caller's record, with `topology` `<plan>/<step>` and `role` `reviewer` for `as: review`, `worker` otherwise.
+
+### AA.5 What the plan tool finds
+
+`Finding`, a closed set; each comes with its step, its problem, its fix and its `Strength`:
+
+| Code | Means | The fix it names |
+|---|---|---|
+| `bad_id` | a step id is not a word, repeats, or names a kind Substrate already uses | a free id |
+| `unknown_part` | a step names no part | the five parts |
+| `unknown_field` | a field no part takes | the nearest field |
+| `missing_role` | a model or agent step has no role | add `role` |
+| `never_starts` | nothing writes a kind the step waits on | the steps that write kinds near it |
+| `no_limit` | a step on a loop has `max` 1 | raise `max` |
+| `never_ends` | the end names a kind no step writes, or the dry run went quiet or hit its cap with the end unmet | the kinds written, or `or quiet` |
+| `ends_early` | the dry run ended before a step ran | the step and what it waits on |
+| `unread` | a kind no step reads and the end does not name | read it, end on it, or leave it |
+
+`Strength`: `certain` (it follows from the plan's wiring) or `dry_run` (it rests on the run with stand-in answers, which shows the wiring and the end but not what a model will write).
+
+### AA.6 The tools
+
+`topology_help`, `topology_plan`, `topology_run` (`TOOL_NAME_TOPOLOGY_HELP`, `_PLAN`, `_RUN`). They replace `run_topology`, `run_topology_poll`, `list_topologies` and `list_applications`, whose runs blocked their caller or were polled; the code topologies stay runnable by name through `topology_run`.
+
+### Ratification signature
+
+- **v0.16** — Sprint K335, 2026-10-14, decided by the Architect ("lets go Recenter on the create topology tool… We'll work based on this going forward"), recorded by the Agent. §§ A–Z byte-preserved.

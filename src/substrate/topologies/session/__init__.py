@@ -342,12 +342,22 @@ class TopologyRunStarted(Struct, frozen=True):
     sessions: list[RunSession]
 
 
+class ComposedResult(Struct, frozen=True):
+    """A composed run's end (§ AA.4)."""
+
+    ended_on: str | None  # the kind of the end that matched; null when none did
+    event: dict[str, Any] | None  # that event's payload
+    counts: dict[str, int]  # events each step wrote
+    record_root: str
+
+
 class TopologyRunEnded(Struct, frozen=True):
     run_id: str
     topology: str
     outcome: RunOutcome
     report_seq: int | None
     report: ReportWritten | None
+    result: ComposedResult | None = None  # v0.16 (§ AA.4): a composed run's end
 
 
 # The core producer bodies. The model producer reads the just-appended UserMessage /
@@ -1741,6 +1751,7 @@ from .views import (  # noqa: E402
 __all__ = [
     "BackgroundTaskEnded",
     "ReportWritten",
+    "ComposedResult",
     "TopologyRunEnded",
     "TopologyRunStarted",
     "LanguageDrift",
