@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.12.1 (2026-10-13).** Sprint K316 adds `CardCheck.expect_exit` (§ X.3): a command check's expected exit code, 0 unless the card says otherwise. `PAYLOAD_FIELD_PROPOSED` from the SDD kit's own example card 003 ("`python -m wordcount tests/fixtures/sample_tree/` returns 2"); additive.
+
 **Status: RATIFIED — v0.12 (2026-10-13).** Sprint K314 adds section X: the events of a topology run in its caller's record and in its own, the producers and triggers of a driven session, the ordering rules, and the report. The vocabulary session for the topology layer of `process/planning/RESEARCH-2026-10-13-core-topologies-r8.md` (approved by the Architect, 2026-10-13). Agent-resolved on the grounds in § X.8. §§ A–W byte-preserved.
 
 **Status: RATIFIED — v0.8 (2026-10-11).** Sprint K296 adds section T: two controls a session opens with, Length and Tone, each a typed set of positions whose text reaches the model as a `control` fragment. Directed by the Architect, 2026-10-11 (substrate-ui OPEN-ITEMS 16). §§ A–S byte-preserved.
@@ -290,7 +292,7 @@ A topology run is started by a session, its caller, through a topology's tool. I
 | `form` | `CardForm` | `plain` (what, where, how to tell it is done) or `sdd` (the kit's sprint card) |
 | `what` | str | the work |
 | `where` | list of str | the files or parts of the project it touches, and what to read first |
-| `checks` | list of `CardCheck` | how to tell it is done: `kind` (`CheckKind`) and `text` |
+| `checks` | list of `CardCheck` | how to tell it is done: `kind` (`CheckKind`), `text`, and for a `command` its `expect_exit` (int, 0 unless the card names another; v0.12.1) |
 | `text` | str | the card as given |
 | `limits` | `RunLimits` | `max_stops`: turn ends before the run stops; `stall_stops`: turn ends in a row with no new commit and no change in the checks before it counts as stuck |
 

@@ -209,6 +209,7 @@ class RunLimits(Struct, frozen=True):
 class CardCheck(Struct, frozen=True):
     kind: CheckKind
     text: str
+    expect_exit: int = 0  # v0.12.1: a command's expected exit code (SDD example card 003 expects 2)
 
 
 class CheckResult(Struct, frozen=True):
