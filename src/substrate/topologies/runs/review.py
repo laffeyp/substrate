@@ -23,6 +23,7 @@ from ..session import session_topology
 from ..session.vocabulary import RunRole, RunSession
 from ..tool_loop.tools import TOOL_NAME_REVIEW, Tool, full_suite
 from ..workspace import make_detached_worktree
+from .build import started_next
 from .hold import RunTable
 from .run import RunSpec
 
@@ -176,7 +177,8 @@ def make_review_tool(start: Callable[[str, list[str], str], list[str]]) -> Tool:
         if not target:
             raise ValueError("review: say what to review (target): a branch, a range or files")
         styles = [str(s) for s in (a.get("styles") or [DEFAULT_STYLE])]
-        return {"runs": start(target, styles, str(a.get("focus", ""))), "styles": styles}
+        runs = start(target, styles, str(a.get("focus", "")))
+        return {"runs": runs, "styles": styles, "next": started_next(runs, "reviewer")}
 
     return Tool(
         name=REVIEW_TOOL_NAME,

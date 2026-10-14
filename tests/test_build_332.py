@@ -119,7 +119,8 @@ def test_every_field_given_reaches_the_builder(tmp_path: Path) -> None:
 def test_the_tool_takes_a_task_alone_or_a_card(tmp_path: Path) -> None:
     started: list[Card] = []
     tool = make_build_tool(lambda c: started.append(c) or ("r", "build/r"), tmp_path)
-    assert tool.run([{"task": "add b.txt"}]) == {"run_id": "r", "branch": "build/r"}
+    out = tool.run([{"task": "add b.txt"}])
+    assert (out["run_id"], out["branch"]) == ("r", "build/r") and "report comes" in out["next"]
     assert started[-1] == Card(task="add b.txt")
     tool.run(["add c.txt"])  # a bare string is the task
     assert started[-1].task == "add c.txt"

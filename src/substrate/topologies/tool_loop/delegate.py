@@ -406,7 +406,8 @@ def make_delegate(
         "{answer, session_id, child_root}: hand a self-contained subtask to a child session on "
         "your model; it works in its own pane and its answer folds back. model picks another "
         "model; child_session_name routes to a standing session; context hands the child a slice "
-        "of your record; children fans out to several sessions at once",
+        "of your record; children fans out to several sessions at once. Delegate work you want "
+        "answered or talked through; for a change you want on its own branch, use build",
         False,  # runs a real child session
         run,
         # The schema travels with the tool (review C-10); `x-args-passthrough` hands `run` the

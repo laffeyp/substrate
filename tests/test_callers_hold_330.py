@@ -120,7 +120,7 @@ def test_stepping_replaying_and_the_listing(
     assert [e["seq"] for e in steps] == [3, 4, 5, 6, 7]
     replay = tool.run([{"run_id": "r_4", "action": "replay"}])
     assert replay["complete"] and not replay["mismatches"]
-    with pytest.raises(ValueError, match="holds no run"):
+    with pytest.raises(ValueError, match="no run 'r_4'; this session has no runs"):
         make_run_tool("someone else").run([{"run_id": "r_4", "action": "stop"}])
     with pytest.raises(ValueError, match="action must be one of"):
         tool.run([{"run_id": "r_4", "action": "pause"}])

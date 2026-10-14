@@ -171,6 +171,22 @@ _BUILD_SCHEMA: dict[str, Any] = {
 }
 
 
+def started_next(run_ids: list[str], who: str) -> str:
+    """What a caller does after starting runs: wait for their ends, watch them, or stop them."""
+    if len(run_ids) == 1:
+        rid = run_ids[0]
+        return (
+            f"the {who}'s report comes to you once, when it finishes; carry on meanwhile. "
+            f"run(run_id={rid!r}, action='events') shows its progress; "
+            f"run(run_id={rid!r}, action='stop') stops it."
+        )
+    return (
+        f"each {who}'s report comes to you once, when it finishes; carry on meanwhile. "
+        f"run(run_id=<one of {', '.join(run_ids)}>, action='events') shows its progress; "
+        "action='stop' stops it."
+    )
+
+
 def make_build_tool(start: Callable[[Card], tuple[str, str]], root: Path) -> Tool:
     """The `build` tool. `start(card)` starts the build for the calling session (the daemon binds
     the session, its model and its repository) and returns its run id and branch."""
@@ -182,7 +198,7 @@ def make_build_tool(start: Callable[[Card], tuple[str, str]], root: Path) -> Too
             else {"task": str(args[0]) if args else ""}
         )
         run_id, branch = start(card_from_form(form, root))
-        return {"run_id": run_id, "branch": branch}
+        return {"run_id": run_id, "branch": branch, "next": started_next([run_id], "builder")}
 
     return Tool(
         name=BUILD_TOOL_NAME,
@@ -208,5 +224,6 @@ __all__ = [
     "card_from_form",
     "first_message",
     "make_build_tool",
+    "started_next",
     "start_build",
 ]

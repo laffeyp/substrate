@@ -47,7 +47,7 @@ from ..session.vocabulary import (
     SessionEndReason,
 )
 from ..tool_loop.kinds import TOOL_CALL
-from ..tool_loop.tools import TOOL_NAME_RUN, Tool
+from ..tool_loop.tools import TOOL_NAME_BUILD, TOOL_NAME_REVIEW, TOOL_NAME_RUN, Tool
 
 
 @dataclass
@@ -353,7 +353,25 @@ def run_notice(e: TopologyRunEnded) -> str:
             "action='events') reads the report]"
         )
     tail = f": {said}" if said else ""
-    return f"[run {e.run_id} ({e.topology}) ended {e.outcome.value}{tail}]"
+    return f"[run {e.run_id} ({e.topology}) ended {e.outcome.value}{tail}]{_next_moves(e)}"
+
+
+def _next_moves(e: TopologyRunEnded) -> str:
+    """What the caller can do with what an ended run left: a build's branch, a review's findings."""
+    if e.report is None or e.outcome is not RunOutcome.DONE:
+        return ""
+    if e.topology == TOOL_NAME_BUILD and e.report.branch:
+        b = e.report.branch
+        return (
+            f"\nThe branch {b} is not merged. `git diff HEAD...{b}` shows it; "
+            f"review(target={b!r}) has it reviewed; `git merge {b}` takes it."
+        )
+    if e.topology == TOOL_NAME_REVIEW:
+        return (
+            "\nFor each finding: fix it yourself, build(task=…) a fix on its own branch, "
+            "or say why it does not apply."
+        )
+    return ""
 
 
 def composed_said(r: ComposedResult) -> str:
@@ -394,22 +412,32 @@ def make_run_tool(owner: str) -> Tool:
         table = TABLE
         try:
             if action == "events":
-                rows = table.events(
-                    owner, run_id, int(a.get("from_seq", 0)), int(a.get("limit", 50))
-                )
-                return {"events": rows}
+                limit = int(a.get("limit", 50))
+                rows = table.events(owner, run_id, int(a.get("from_seq", 0)), limit)
+                out: dict[str, Any] = {"events": rows}
+                if len(rows) == limit:
+                    out["next"] = (
+                        f"more follow: run(run_id={run_id!r}, action='events', "
+                        f"from_seq={int(rows[-1]['seq']) + 1})"
+                    )
+                return out
             if action == "replay":
                 return table.replay(owner, run_id)
             table.stop(owner, run_id)
         except KeyError as exc:
-            raise ValueError(f"run: {exc.args[0]}") from exc
+            ids = [r["run_id"] for r in table.listing(owner)]
+            held = f"this session's runs: {', '.join(ids)}" if ids else "this session has no runs"
+            raise ValueError(f"run: no run {run_id!r}; {held}") from exc
         return {"run_id": run_id, "action": action, "ok": True}
 
     return Tool(
         name=RUN_TOOL_NAME,
         describe=(
-            "run(run_id, action=stop|events|replay, from_seq?, limit?): "
-            "control a run this session started"
+            "run(run_id, action=stop|events|replay, from_seq?, limit?): control a run this "
+            "session started (build, review, topology_run). `stop` ends it now; it ends "
+            "`stopped`. `events` reads its record from from_seq, limit at a time: seq, kind and "
+            "payload of each event. `replay` checks every decision the run recorded and returns "
+            "how many held."
         ),
         deterministic=False,
         run=_run,

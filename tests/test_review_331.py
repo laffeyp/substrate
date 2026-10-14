@@ -138,7 +138,10 @@ def test_the_review_tool_reads_the_form() -> None:
         return [f"r-{s}" for s in styles]
 
     tool = make_review_tool(_start)
-    assert tool.run([{"target": "feature"}]) == {"runs": ["r-defects"], "styles": ["defects"]}
+    out = tool.run([{"target": "feature"}])
+    assert (out["runs"], out["styles"]) == (["r-defects"], ["defects"]) and "report comes" in out[
+        "next"
+    ]
     tool.run([{"target": "main..x", "styles": ["design"], "focus": "names"}])
     assert calls[-1] == ("main..x", ["design"], "names")
     with pytest.raises(ValueError, match="target"):
@@ -235,5 +238,7 @@ def test_a_models_named_call_reaches_review_and_run_as_one_dict(tmp_path: Path) 
     suite = {"review": review, "run": run}
     review.run(_named_to_positional("review", {"target": "feature", "focus": "x"}, suite))
     assert seen == [("feature", ["defects"], "x")]
-    with pytest.raises(ValueError, match="holds no run 'r_none'"):  # read, then refused
+    with pytest.raises(
+        ValueError, match="no run 'r_none'; this session has no runs"
+    ):  # read, then refused
         run.run(_named_to_positional("run", {"run_id": "r_none", "action": "stop"}, suite))

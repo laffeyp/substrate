@@ -1139,7 +1139,7 @@ A composed run starts and ends as a § Z run: `TopologyRunStarted` with `topolog
 | `counts` | map of str to int | how many events each step wrote |
 | `record_root` | str | the run's record |
 
-`outcome` is `done` when an end matched, `stopped` when the caller stopped it or `max_minutes` passed, `failed` when a step or the run failed. Each agent step is a § Z run of its own in the caller's record, with `topology` `<plan>/<step>` and `role` `reviewer` for `as: review`, `worker` otherwise.
+`outcome` is `done` when an end matched, `stopped` when the caller stopped it or `max_minutes` passed, `failed` when a step or the run failed. Each agent step is a § Z run of its own in the caller's record, with `topology` `<plan>/<step>` and `role` `reviewer` for `as: review`, `worker` otherwise. As built (v0.16.1): an agent step's run is the caller's own build or review, so its `topology` is `build` or `review`.
 
 ### AA.5 What the plan tool finds
 
