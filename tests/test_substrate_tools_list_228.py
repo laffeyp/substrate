@@ -60,7 +60,8 @@ def test_list_applications_returns_shipped_specs() -> None:
     tool = make_list_applications(load_manifests())
     out = tool.run([{}])
     names = {entry["name"] for entry in out["applications"]}
-    assert {"code_review", "best_of_n_verified", "research_sweep", "daily", "pair_coding"} <= names
+    assert {"best_of_n_verified", "research_sweep", "daily", "pair_coding"} <= names
+    assert "code_review" not in names  # replaced by Review (kernel sprint 320)
 
 
 def test_list_sessions_buckets_live_and_parked() -> None:

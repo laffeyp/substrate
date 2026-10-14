@@ -110,6 +110,23 @@ def make_worktree(repo: Path, branch: str, dest: Path) -> Path:
     return dest
 
 
+def make_detached_worktree(repo: Path, ref: str, dest: Path) -> Path:
+    """A worktree of `repo` at `dest`, checked out at `ref` with no branch, so reading it moves no
+    branch (a Review's view of its target, K320). Reuses `dest` when it exists. Raises `ValueError`
+    when `repo` is not a git repository."""
+    repo = Path(repo).expanduser().resolve()
+    dest = Path(dest).expanduser().resolve()
+    if not repo.is_dir() or not is_inside_repository(repo):
+        raise ValueError(f"{repo} is not a git repository")
+    if dest.exists():
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    result = _git(repo, "worktree", "add", "--detach", str(dest), ref)
+    if result.returncode != 0:
+        raise RuntimeError(f"git worktree add {dest} at {ref} failed: {result.stderr.strip()}")
+    return dest
+
+
 def worktree_diff(wt: Path) -> dict[str, object]:
     """What changed in a worktree: `git diff` including new files, and the changed-file list.
     Read-only: new files are marked intent-to-add in a scratch copy of the index
@@ -130,4 +147,10 @@ def worktree_diff(wt: Path) -> dict[str, object]:
     return {"diff": diff, "files": names.strip().splitlines()}
 
 
-__all__ = ["ensure_repository", "is_inside_repository", "make_worktree", "worktree_diff"]
+__all__ = [
+    "ensure_repository",
+    "is_inside_repository",
+    "make_detached_worktree",
+    "make_worktree",
+    "worktree_diff",
+]

@@ -90,13 +90,13 @@ def test_run_topology_sync_flattens_to_output_child_root_run_id(tmp_path: Path) 
         "record_root": str(record),
         "status": "finalised",
         "final_seq": 1,
-        "application": "code_review",
+        "application": "research_sweep",
     }
     tool = make_run_topology(client)
     result = tool.run(
         [
             {
-                "name": "code_review",
+                "name": "research_sweep",
                 "inputs": {"repo": "/tmp/x"},
             }
         ]
@@ -113,13 +113,13 @@ def test_run_topology_async_returns_running_shape(tmp_path: Path) -> None:
         "run_id": "s_topo_async",
         "record_root": str(tmp_path / "any"),
         "status": "running",
-        "application": "code_review",
+        "application": "research_sweep",
     }
     tool = make_run_topology(client)
     result = tool.run(
         [
             {
-                "name": "code_review",
+                "name": "research_sweep",
                 "inputs": {"repo": "/tmp/x"},
                 "await_completion": False,
             }
@@ -141,7 +141,7 @@ def test_run_topology_passes_bundle_baseline_context(tmp_path: Path) -> None:
     tool.run(
         [
             {
-                "name": "code_review",
+                "name": "research_sweep",
                 "inputs": {"repo": "."},
                 "bundle": "reviewer",
                 "baseline": {"foo": 1},
@@ -162,11 +162,11 @@ def test_run_topology_poll_passes_through_daemon_response(tmp_path: Path) -> Non
         "status": "finalised",
         "record_root": str(tmp_path),
         "elapsed_seconds": 12.5,
-        "application": "code_review",
+        "application": "research_sweep",
         "output": {"answer": "42"},
     }
     tool = make_run_topology_poll(client)
-    result = tool.run([{"name": "code_review", "run_id": "s_topo_p"}])
+    result = tool.run([{"name": "research_sweep", "run_id": "s_topo_p"}])
     assert result == client.status_response
 
 
@@ -184,13 +184,13 @@ def test_run_topology_missing_name_raises_typed_valueerror() -> None:
 def test_run_topology_missing_inputs_raises_typed_valueerror() -> None:
     tool = make_run_topology(_StubClient())
     with pytest.raises(ValueError, match=r"run_topology: missing required argument 'inputs'"):
-        tool.run([{"name": "code_review"}])
+        tool.run([{"name": "research_sweep"}])
 
 
 def test_run_topology_poll_missing_run_id_raises_typed_valueerror() -> None:
     tool = make_run_topology_poll(_StubClient())
     with pytest.raises(ValueError, match=r"run_topology_poll: missing required argument 'run_id'"):
-        tool.run([{"name": "code_review"}])
+        tool.run([{"name": "research_sweep"}])
 
 
 def test_run_topology_schema_is_declared_on_the_tool() -> None:
