@@ -244,6 +244,8 @@
 
 ---
 
+- **2026-10-13 Claude (resolve-and-record) — the driven end of a turn is composed onto the one session topology, not built on a copy.** The 2026-09-24 autonomous build note (point 10) says to copy the session topology and modify the copy. Build, autonomous build and swarm workers need one change to it: at a turn's end, check the work and write the next message instead of pausing. Grounds: a topology is producers, triggers and termination composed by a builder, and the session topology already composes optional parts (`first_message`, `language`); SDD keeps one canonical home per contract, and two copies of `session_registry.py` drifted 33 hunks before sprint 099; extending by composition beats duplicating a 1,701-line module for one rule, and only shared code keeps the note's point 9 (everything else as the session topology) true. `process/planning/RESEARCH-2026-10-13-core-topologies-r5.md` §9. Overrulable.
+
 ## Decisions
 
 *Append-only. Anyone may record here a decision that has been MADE (Architect ruling, 2026-07-22, superseding the section's original Architect-only discipline): the section records decisions, it does not mint them — a decision still originates with the Architect (verbally or in review), and the recording entry names its date and source.*
