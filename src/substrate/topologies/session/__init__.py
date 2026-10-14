@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from msgspec import Struct
 
@@ -34,6 +34,7 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
+    REPORT_WRITTEN,
     RunOutcome,
     RunSession,
     Control,
@@ -91,6 +92,10 @@ from .vocabulary import (
     ToolMode,
     SessionWarningKind,
 )
+
+
+if TYPE_CHECKING:
+    from ..runs.run import RunSpec
 
 
 def _refuse_all_completed(policy: TerminationPolicy) -> None:
@@ -999,6 +1004,7 @@ def session_topology(
     length: str | None = None,
     tone: str | None = None,
     language: bool = False,
+    run: "RunSpec | None" = None,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -1010,6 +1016,13 @@ def session_topology(
     `(tool_name, args)` the model fires in order, matching `tool_loop`'s script convention;
     omit for the driver-parse path.
     """
+    if run is not None:
+        # v0.14 (§ Z.2): a run session's first message is the topology's, marked `run`.
+        if first_turn_user_message is not None:
+            raise ValueError("a run session's first message comes from its topology")
+        from ..runs.run import first_message as _run_first_message
+
+        first_turn_user_message = _run_first_message(run)
     # `driver_name`, `workspace_path`, `parent_session_id`, `parent_seq_at_call` are
     # placeholders on the daemon's call-site contract; sprint 213/217/225 bind them.
     # They ride the signature so the outer daemon does not shift when they wire up.
@@ -1646,15 +1659,25 @@ def session_topology(
             },
             policy=api.Once(),
         )
-        termination = api.any_of(
-            api.pause_await_input(
-                when=lambda tctx: tctx.event is not None and tctx.event.kind == RETURNED,
-                resume_condition=USER_MESSAGE,
-            ),
-            # Not threshold_count(SESSION_ENDED, 1): a resume restores counts from the whole
-            # record, so an ended-then-resumed session would finalise on its next event.
-            api.finalise_on(SESSION_ENDED),
-        )
+        if run is not None:
+            # v0.14 (§ Z.2): a run session reports when its turn ends, and finalises on the
+            # report instead of pausing for a person.
+            from ..runs.run import compose_run
+
+            compose_run(b, run, own_record=_own_record)
+            termination = api.any_of(
+                api.finalise_on(REPORT_WRITTEN), api.finalise_on(SESSION_ENDED)
+            )
+        else:
+            termination = api.any_of(
+                api.pause_await_input(
+                    when=lambda tctx: tctx.event is not None and tctx.event.kind == RETURNED,
+                    resume_condition=USER_MESSAGE,
+                ),
+                # Not threshold_count(SESSION_ENDED, 1): a resume restores counts from the whole
+                # record, so an ended-then-resumed session would finalise on its next event.
+                api.finalise_on(SESSION_ENDED),
+            )
         _refuse_all_completed(termination)
         b.termination(termination)
 

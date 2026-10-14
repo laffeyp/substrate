@@ -55,11 +55,25 @@ def test_the_registered_triggers_are_the_declared_ones(tmp_path: Path) -> None:
         ),
         language=True,  # v0.11 (§ W.4): registers language-on-reply and return-on-language
     )
+    # v0.14 (§ Z.2): a run session registers its report trigger as well (kernel sprint 329).
+    from substrate.topologies.runs.run import RunSpec
+
+    run = session_topology(
+        driver=DeterministicResponder(seed=0),
+        driver_name="deterministic",
+        driver_context_tokens=8_192,
+        seed="SEED",
+        tools=dict(CALCULATOR),
+        session_id="s264r",
+        workspace_path=str(tmp_path),
+        run=RunSpec(worktree=tmp_path, base="", first_message="hi"),
+    )
     ids = set(_trigger_ids(session)) | set(_trigger_ids(ci_session_topology()))
+    assert set(_trigger_ids(run)) - ids == set(RUN_SESSION_TRIGGER_IDS)
+    ids |= set(_trigger_ids(run))
     # The SessionStarted instrument's trigger is the kernel's, named after its producer.
     ids.discard("session_started")
-    # v0.14 (§ Z.2): only a run session registers its report trigger (kernel sprint 329).
-    assert ids | RUN_SESSION_TRIGGER_IDS == set(SESSION_TRIGGER_IDS)
+    assert ids == set(SESSION_TRIGGER_IDS)
 
 
 def test_the_turn_cap_reason_names_turns_and_old_records_still_read() -> None:
