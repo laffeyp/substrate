@@ -40,11 +40,11 @@ class AgentCall:
 
 @dataclass(frozen=True)
 class Deps:
-    """What the parts need from outside. `responder(model)` gives a model step its model (an empty
-    name is the caller's); `start_agent(call)` runs one agent turn to its end and returns the
-    § Z.2 report with its run id; `workdir` is where commands run."""
+    """What the parts need from outside. `responder(step)` gives a model step its model (the
+    step's `model`, or the caller's when it names none); `start_agent(call)` runs one agent turn to
+    its end and returns the § Z.2 report with its run id; `workdir` is where commands run."""
 
-    responder: Callable[[str], Responder]
+    responder: Callable[[Step], Responder]
     start_agent: Callable[[AgentCall], Mapping[str, Any]]
     workdir: Path
 
@@ -72,7 +72,7 @@ def producer(step: Step, cls: type[Struct], deps: Deps) -> Producer:
     if step.part is Part.MODEL:
 
         async def model(inp: Any) -> AsyncIterator[Any]:
-            text = await call_responder(deps.responder(step.model), inp["text"], system=step.role)
+            text = await call_responder(deps.responder(step), inp["text"], system=step.role)
             yield cls(text=text)
 
         return model

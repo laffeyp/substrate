@@ -448,13 +448,17 @@ def read_lines(text: str) -> dict[str, Any]:
             i += 1
             if word in {"on", "with"}:
                 names: list[str] = []
-                # `input` here is the run's input, unless a quoted layout follows it.
+                # `input` in the list is the run's input when it comes first or no quoted
+                # layout follows it; `on Draft input "…"` lays out the input.
                 while (
                     i < len(toks)
                     and not toks[i][1]
                     and (
                         toks[i][0] not in _KEYWORDS
-                        or (toks[i][0] == INPUT and not (i + 1 < len(toks) and toks[i + 1][1]))
+                        or (
+                            toks[i][0] == INPUT
+                            and (not names or not (i + 1 < len(toks) and toks[i + 1][1]))
+                        )
                     )
                 ):
                     names += _names(toks[i][0])

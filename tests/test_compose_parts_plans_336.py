@@ -40,7 +40,7 @@ class Heard:
 
 def _deps(model: Heard, tmp: Path, agent: Any = None) -> Deps:
     return Deps(
-        responder=lambda _name: model,
+        responder=lambda _step: model,
         start_agent=agent or (lambda _call: {}),
         workdir=tmp,
     )

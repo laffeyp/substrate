@@ -22,7 +22,7 @@ from .parts import Deps, event_class, main_field, producer
 from .vocabulary import COLLECT_ALL, INPUT, End, EndWhen, Part, Plan, Step, Test, TestOp, kind_of
 
 FIRED_VIEW: Final[str] = "fired"
-_PLACEHOLDER: Final[re.Pattern[str]] = re.compile(
+PLACEHOLDER: Final[re.Pattern[str]] = re.compile(
     r"\{(input|[A-Z][A-Za-z0-9]*)(?:\.([a-z_][a-z0-9_]*))?\}"
 )
 
@@ -106,7 +106,7 @@ def lay_out(
         return value if isinstance(value, str) else msgspec.json.encode(value).decode()
 
     if step.input:
-        return _PLACEHOLDER.sub(fill, step.input)
+        return PLACEHOLDER.sub(fill, step.input)
     text = main_field(source)
     for kind in step.with_:
         payload = latest(kind)
@@ -149,7 +149,7 @@ def topology(plan: Plan, deps: Deps, run_input: str = "") -> Callable[[Any], Non
         read_kinds.update(s.with_)
         if s.if_ is not None:
             read_kinds.add(s.if_.kind)
-        read_kinds.update(m.group(1) for m in _PLACEHOLDER.finditer(s.input) if m.group(1) != INPUT)
+        read_kinds.update(m.group(1) for m in PLACEHOLDER.finditer(s.input) if m.group(1) != INPUT)
     splits = {s.id: _split_before(s, by_kind) for s in plan.steps if s.part is Part.COLLECT}
     read_kinds.update(kind_of(sid) for sid in splits.values() if sid)
     input_source = {"text": run_input}
@@ -265,6 +265,7 @@ def _predicate(step: Step, split_id: str | None) -> Callable[[Any], bool]:
 
 __all__ = [
     "FIRED_VIEW",
+    "PLACEHOLDER",
     "FiredCounts",
     "Gather",
     "gather_view",
