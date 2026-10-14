@@ -117,6 +117,8 @@ TOPOLOGY_RUN_ENDED = "TopologyRunEnded"
 CARD_ACCEPTED = "CardAccepted"
 CHECKS_RUN = "ChecksRun"
 REPORT_WRITTEN = "ReportWritten"
+RUN_PAUSED = "RunPaused"  # v0.12.3
+RUN_RESUMED = "RunResumed"  # v0.12.3
 TURN_END_KINDS: Final[frozenset[str]] = frozenset({RETURNED, PARK})
 # Kinds a session record written before v0.3 carries and v0.3 no longer writes (§ K.3); a reader
 # of session records accepts them.
@@ -276,6 +278,8 @@ SESSION_KINDS: frozenset[str] = frozenset(
         CARD_ACCEPTED,
         CHECKS_RUN,
         REPORT_WRITTEN,
+        RUN_PAUSED,
+        RUN_RESUMED,
     }
 )
 
@@ -524,6 +528,7 @@ TRIGGER_ID_CARD_ON_SESSION_PROMPT: Final[str] = "card-on-session-prompt"  # v0.1
 TRIGGER_ID_CHECKS_ON_RETURNED: Final[str] = "checks-on-returned"
 TRIGGER_ID_CONTINUE_ON_CHECKS: Final[str] = "continue-on-checks"
 TRIGGER_ID_REPORT_ON_CHECKS: Final[str] = "report-on-checks"
+TRIGGER_ID_CONTINUE_ON_RESUMED: Final[str] = "continue-on-resumed"  # v0.12.3
 # The triggers only a driven session registers (§ X.5); an undriven session registers the rest.
 DRIVEN_SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -531,6 +536,7 @@ DRIVEN_SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_CHECKS_ON_RETURNED,
         TRIGGER_ID_CONTINUE_ON_CHECKS,
         TRIGGER_ID_REPORT_ON_CHECKS,
+        TRIGGER_ID_CONTINUE_ON_RESUMED,
     }
 )
 TRIGGER_ID_END_ON_EXIT: Final[str] = "end-on-exit"
@@ -605,6 +611,7 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_CHECKS_ON_RETURNED,
         TRIGGER_ID_CONTINUE_ON_CHECKS,
         TRIGGER_ID_REPORT_ON_CHECKS,
+        TRIGGER_ID_CONTINUE_ON_RESUMED,
     }
 )
 
@@ -647,6 +654,9 @@ __all__ = [
     "CARD_ACCEPTED",
     "CHECKS_RUN",
     "REPORT_WRITTEN",
+    "RUN_PAUSED",
+    "RUN_RESUMED",
+    "TRIGGER_ID_CONTINUE_ON_RESUMED",
     "PRODUCER_KIND_CARD",
     "PRODUCER_KIND_CHECKS",
     "PRODUCER_KIND_CONTINUE",

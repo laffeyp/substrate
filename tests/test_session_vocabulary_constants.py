@@ -154,8 +154,9 @@ def test_session_trigger_ids_frozenset_covers_all() -> None:
     session-prompt-on-session-changed with session-prompt-on-user-message-change,
     model-on-session-prompt-change and skill-fragment-on-session-prompt-change (§ V)."""
     # v0.11 (§ W.4): language-on-reply, return-on-language; v0.12 (§ X.5): checks-on-returned,
-    # continue-on-checks, report-on-checks; v0.12.2: card-on-session-prompt.
-    assert len(SESSION_TRIGGER_IDS) == 24
+    # continue-on-checks, report-on-checks; v0.12.2: card-on-session-prompt; v0.12.3:
+    # continue-on-resumed.
+    assert len(SESSION_TRIGGER_IDS) == 25
     assert "session-prompt-on-session-changed" not in SESSION_TRIGGER_IDS
     assert {
         "session-prompt-on-user-message-change",

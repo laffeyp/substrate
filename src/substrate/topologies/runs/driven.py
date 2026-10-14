@@ -44,10 +44,14 @@ from ..session.vocabulary import (
     PRODUCER_KIND_REPORT,
     PRODUCER_KIND_SESSION_PROMPT,
     RETURNED,
+    RUN_PAUSED,
+    RUN_RESUMED,
     TRIGGER_ID_CARD_ON_SESSION_PROMPT,
     TRIGGER_ID_CHECKS_ON_RETURNED,
     TRIGGER_ID_CONTINUE_ON_CHECKS,
+    TRIGGER_ID_CONTINUE_ON_RESUMED,
     TRIGGER_ID_REPORT_ON_CHECKS,
+    USER_MESSAGE,
     CheckKind,
     ReturnReason,
     RunOutcome,
@@ -73,28 +77,51 @@ class DrivenRun:
 
 
 class DrivenChecks:
-    """Each `ChecksRun` as (passed, head, what its results say), and the latest `Returned`'s reason
-    and detail, in record order."""
+    """Each `ChecksRun` as (passed, head, what its results say), the latest `ChecksRun` itself, the
+    latest `Returned`'s reason and detail, whether a pause is asked for (v0.12.3), and whether the
+    run awaits its next turn (its latest checks have no message after them), in record order."""
 
     deterministic = True
 
     def __init__(self) -> None:
-        self.subscription = api.Subscription(kinds=frozenset({CHECKS_RUN, RETURNED}))
+        self.subscription = api.Subscription(
+            kinds=frozenset({CHECKS_RUN, RETURNED, RUN_PAUSED, RUN_RESUMED, USER_MESSAGE})
+        )
         self._checks: list[tuple[bool, str | None, str]] = []
+        self._last: dict[str, Any] = {}
         self._returned: tuple[str, str] = (ReturnReason.REPLIED, "")
+        self._pauses = 0
+        self._awaiting = False
 
     def update(self, event: Any) -> None:
         payload = event.payload if isinstance(event.payload, dict) else {}
         if event.kind == RETURNED:
             self._returned = (str(payload.get("reason", "")), str(payload.get("detail", "")))
-            return
-        signature = msgspec.json.encode(
-            [(r.get("index"), r.get("passed"), r.get("exit")) for r in payload.get("results", [])]
-        ).decode()
-        self._checks.append((bool(payload.get("passed")), payload.get("head"), signature))
+        elif event.kind == RUN_PAUSED:
+            self._pauses += 1
+        elif event.kind == RUN_RESUMED:
+            self._pauses -= 1
+        elif event.kind == USER_MESSAGE:
+            self._awaiting = False
+        elif event.kind == CHECKS_RUN:
+            signature = msgspec.json.encode(
+                [
+                    (r.get("index"), r.get("passed"), r.get("exit"))
+                    for r in payload.get("results", [])
+                ]
+            ).decode()
+            self._checks.append((bool(payload.get("passed")), payload.get("head"), signature))
+            self._last = dict(payload)
+            self._awaiting = True
 
     def value(self) -> dict[str, Any]:
-        return {"checks": list(self._checks), "returned": self._returned}
+        return {
+            "checks": list(self._checks),
+            "last": dict(self._last),
+            "returned": self._returned,
+            "paused": self._pauses > 0,
+            "awaiting": self._awaiting,
+        }
 
 
 def _ended_by(card: CardAccepted, state: dict[str, Any]) -> tuple[RunOutcome, str] | None:
@@ -270,11 +297,30 @@ def compose_driven(
     b.trigger(
         TRIGGER_ID_CONTINUE_ON_CHECKS,
         subscription=api.Subscription(kinds=frozenset({CHECKS_RUN})),
-        predicate=lambda ctx: _ended_by(run.card, _state(ctx)) is None,
+        # v0.12.3: a paused run takes no next turn; it pauses when it goes quiet.
+        predicate=lambda ctx: (
+            _ended_by(run.card, _state(ctx)) is None and not _state(ctx)["paused"]
+        ),
         starts=PRODUCER_KIND_CONTINUE,
         input_builder=lambda ctx: {
             "turn_index": user_turns(ctx),
             "text": _failed_text(msgspec.convert(ctx.event.payload, ChecksRun), run.card),
+        },
+        policy=api.PerEvent(),
+    )
+
+    b.trigger(
+        TRIGGER_ID_CONTINUE_ON_RESUMED,
+        subscription=api.Subscription(kinds=frozenset({RUN_RESUMED})),
+        predicate=lambda ctx: (
+            _state(ctx)["awaiting"]
+            and not _state(ctx)["paused"]
+            and _ended_by(run.card, _state(ctx)) is None
+        ),
+        starts=PRODUCER_KIND_CONTINUE,
+        input_builder=lambda ctx: {
+            "turn_index": user_turns(ctx),
+            "text": _failed_text(msgspec.convert(_state(ctx)["last"], ChecksRun), run.card),
         },
         policy=api.PerEvent(),
     )

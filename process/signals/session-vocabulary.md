@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.12.3 (2026-10-13).** Sprint K319b adds `RunPaused` and `RunResumed` (§ X.3) and the trigger `continue-on-resumed` (§ X.5): a caller pauses and resumes a driven run on its record. § X.8 left pause "until K319 shows otherwise"; K319 showed that an idle run whose termination says continue is failed as stuck, so a pause must be on the record for the termination to read. Agent-resolved; additive.
+
 **Status: RATIFIED — v0.12.2 (2026-10-13).** Sprint K318 adds `ChecksRun.head` (the worktree's commit at the check, so a stall is read from the record), the trigger `card-on-session-prompt` (the card waits for a session prompt, as `first_message` does), and restates the card's order rule in § X.6: `CardAccepted` precedes the first `UserMessage` (a session prompt's fragments may come first). Agent-resolved; additive except the restated rule, which loosens it.
 
 **Status: RATIFIED — v0.12.1 (2026-10-13).** Sprint K316 adds `CardCheck.expect_exit` (§ X.3): a command check's expected exit code, 0 unless the card says otherwise. `PAYLOAD_FIELD_PROPOSED` from the SDD kit's own example card 003 ("`python -m wordcount tests/fixtures/sample_tree/` returns 2"); additive.
@@ -323,6 +325,8 @@ A `statement` check is judged by a reviewer, not run; until a reviewer judges it
 | `branch` | str or null | the branch the work is on |
 | `commits` | list of str | its commits |
 
+`RunPaused` and `RunResumed` (v0.12.3) — injected into a driven run's record by its caller (`by`: str, who asked). A run with more `RunPaused` than `RunResumed` takes no next turn; when it goes quiet it pauses (the kernel's `pause_await_input`) until a `RunResumed` resumes it. A pause asked for mid-turn takes effect when the turn's checks have run; a run whose checks end it still reports. A stop ends a run at once.
+
 A `UserMessage` the `continue` producer writes carries `slash_source` `driven`. `SessionEnded.reason` gains `caller_stop`, for a run its caller stopped.
 
 ### X.4 Enums
@@ -347,8 +351,9 @@ A `UserMessage` the `continue` producer writes carries `slash_source` `driven`. 
 | `checks-on-returned` | `Returned` in a driven session | `checks` |
 | `continue-on-checks` | `ChecksRun` not passed, within the card's limits | `continue` |
 | `report-on-checks` | `ChecksRun` passed, or the limits reached | `report` |
+| `continue-on-resumed` (v0.12.3) | `RunResumed`, when the run awaits its next turn and has not ended | `continue`, with the last checks' failures |
 
-A driven session finalises on `ReportWritten`, or on `SessionEnded`. An undriven session is v0.11 unchanged.
+A driven session finalises on `ReportWritten`, or on `SessionEnded`, and pauses when it goes quiet with a pause asked for (v0.12.3). An undriven session is v0.11 unchanged.
 
 ### X.6 Order
 

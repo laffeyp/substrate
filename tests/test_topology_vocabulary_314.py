@@ -50,7 +50,10 @@ def test_the_kinds_enums_producers_and_triggers_are_in_the_vocabulary() -> None:
     assert triggers == ("checks-on-returned", "continue-on-checks", "report-on-checks")
     assert set(triggers) <= v.SESSION_TRIGGER_IDS
     # v0.12.2: the card's trigger after a session prompt.
-    assert v.DRIVEN_SESSION_TRIGGER_IDS == set(triggers) | {v.TRIGGER_ID_CARD_ON_SESSION_PROMPT}
+    assert v.DRIVEN_SESSION_TRIGGER_IDS == set(triggers) | {
+        v.TRIGGER_ID_CARD_ON_SESSION_PROMPT,
+        v.TRIGGER_ID_CONTINUE_ON_RESUMED,  # v0.12.3
+    }
     assert [o.value for o in v.RunOutcome] == [
         "done",
         "partly_done",

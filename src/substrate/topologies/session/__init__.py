@@ -56,6 +56,8 @@ from .vocabulary import (
     MODEL_REPLY,
     REPORT_WRITTEN,
     RETURNED,
+    RUN_PAUSED,
+    RUN_RESUMED,
     PROMPT_STRATEGY_MODEL_INPUT,
     PRODUCER_KIND_FIRST_MESSAGE,
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
@@ -355,6 +357,14 @@ class ReportWritten(Struct, frozen=True):
     left: str
     branch: str | None
     commits: list[str]
+
+
+class RunPaused(Struct, frozen=True):
+    by: str  # who asked (v0.12.3)
+
+
+class RunResumed(Struct, frozen=True):
+    by: str  # who asked (v0.12.3)
 
 
 class TopologyRunStarted(Struct, frozen=True):
@@ -1700,7 +1710,15 @@ def session_topology(
                 has_session_prompt=has_session_prompt,
             )
             termination = api.any_of(
-                api.finalise_on(REPORT_WRITTEN), api.finalise_on(SESSION_ENDED)
+                api.finalise_on(REPORT_WRITTEN),
+                api.finalise_on(SESSION_ENDED),
+                # v0.12.3: a run its caller paused stops when it goes quiet, until RunResumed.
+                api.pause_await_input(
+                    when=lambda tctx: (
+                        tctx.quiescent and tctx.counts(RUN_PAUSED) > tctx.counts(RUN_RESUMED)
+                    ),
+                    resume_condition=RUN_RESUMED,
+                ),
             )
         else:
             termination = api.any_of(
@@ -1760,6 +1778,8 @@ __all__ = [
     "CardAccepted",
     "ChecksRun",
     "ReportWritten",
+    "RunPaused",
+    "RunResumed",
     "TopologyRunEnded",
     "TopologyRunStarted",
     "LanguageDrift",
