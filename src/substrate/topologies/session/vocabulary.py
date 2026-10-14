@@ -183,6 +183,15 @@ class RunSession(Struct, frozen=True):
     record_root: str
 
 
+class ComposedResult(Struct, frozen=True):
+    """A composed run's end, a payload part of `TopologyRunEnded` (§ AA.4)."""
+
+    ended_on: str | None  # the kind of the end that matched; null when none did
+    event: dict[str, Any] | None  # that event's payload
+    counts: dict[str, int]  # events each step wrote
+    record_root: str
+
+
 class ReturnReason(StrEnum):
     """Returned.reason (§ K.2): how the turn ended."""
 
@@ -588,6 +597,7 @@ def is_session_kind(kind: str) -> bool:
 
 
 __all__ = [
+    "ComposedResult",
     "HandoffPosition",
     "HANDOFF_TOOLS",
     "HANDOFF_TEXTS",

@@ -34,6 +34,7 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
+    ComposedResult,
     REPORT_WRITTEN,
     RunOutcome,
     RunSession,
@@ -341,15 +342,6 @@ class TopologyRunStarted(Struct, frozen=True):
     call_seq: int  # the caller's ToolCall; -1 when the person started it from the app (v0.16.2)
     sessions: list[RunSession]
     record_root: str = ""  # v0.16.2: the run's own record
-
-
-class ComposedResult(Struct, frozen=True):
-    """A composed run's end (§ AA.4)."""
-
-    ended_on: str | None  # the kind of the end that matched; null when none did
-    event: dict[str, Any] | None  # that event's payload
-    counts: dict[str, int]  # events each step wrote
-    record_root: str
 
 
 class TopologyRunEnded(Struct, frozen=True):
