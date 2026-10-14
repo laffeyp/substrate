@@ -460,13 +460,25 @@ class SessionRegistry:
         driver_params: dict[str, Any] | None = None,
         length: str | None = None,
         tone: str | None = None,
+        branch: str | None = None,
     ) -> SessionManifest:
         """Register a new session. Atomic against by-name.json under `fcntl.flock`.
 
         If `name` is set and already in the index, raises `NameCollision` with
         the existing session_id. The caller shapes the 409 response.
+
+        K315: the workspace is made a git repository when it is not inside one
+        (`workspace.ensure_repository`). With `branch`, the session works in its own
+        worktree of that repository, on that branch, under `<base>/wt/<session_id>`, and its
+        manifest names the worktree with shape `worktree`.
         """
         _check_controls(length, tone)
+        from .workspace import ensure_repository, make_worktree
+
+        ensure_repository(Path(workspace))
+        if branch is not None:
+            workspace = str(make_worktree(Path(workspace), branch, self._base / "wt" / session_id))
+            workspace_shape = WorkspaceShape.WORKTREE
         manifest = SessionManifest(
             session_id=session_id,
             name=name,

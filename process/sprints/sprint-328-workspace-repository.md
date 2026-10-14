@@ -3,7 +3,8 @@
 ```yaml
 ---
 id: 328
-status: open
+status: closed
+closed_at: 2026-10-14
 phase: 4
 pass_kind: functional
 depends_on: []
@@ -18,3 +19,8 @@ r9 § 5: a session opened on a folder that is not a git repository gets `git ini
 ## observation contract
 
 A plain folder becomes a repository with one commit; a folder inside a repository is left alone; a run's worktree is on its branch; the app's worktree sessions still work.
+
+## result
+
+- **Re-applied** kernel sprint 315's code unchanged (it carried none of what round 9 removes): `topologies/workspace.py` (`ensure_repository`, `make_worktree`, `worktree_diff`), `SessionRegistry.create(branch=...)`, `substrate.app.workspace`; and in the app server, worktree creation and diffing from the kernel.
+- **Tests.** `tests/test_workspace_315.py`, 6 pass; the app's `test_server.py` and `test_server_security_boundary_110.py`, 28 pass.
