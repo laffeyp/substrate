@@ -20,6 +20,7 @@ from .language import drift as language_drift
 from .templates.interpolate import parse_template_header
 from .templates.interpolate import render as render_template
 from .topologies import bundled
+from .topologies import workspace
 from .topologies.instruments.grader import score_grades
 from .topologies.instruments.scoring import select_scoring_rule
 from .topologies.session.language_lines import language_lines, line_json
@@ -68,5 +69,6 @@ __all__ = [
     "render_template",
     "scan_record_status",
     "score_grades",
+    "workspace",
     "select_scoring_rule",
 ]
