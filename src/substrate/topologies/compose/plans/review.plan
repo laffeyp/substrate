@@ -1,3 +1,0 @@
-# One reviewer reads what the input names (a branch, a range or files) and writes a review.
-name: review
-review: agent as review "Find the defects that would make this change wrong."

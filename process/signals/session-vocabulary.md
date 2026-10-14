@@ -1,3 +1,5 @@
+**Status: v0.15 IN FORCE — v0.16 to v0.16.3 WITHDRAWN (2026-10-14).** The create-topology tool of kernel sprints K335–K338 and app sprints U187–U189 is removed (`POSTMORTEM-2026-10-14-create-topology-without-substrate.md`): it gave a model a plan language of the agent's own in place of Substrate's primitives. § AA and the v0.16.1–v0.16.3 additions to § Z.1 stay below as history; no code writes or reads them. `TopologyRunStarted` has no `record_root`, `TopologyRunEnded` no `result`, and a run's start is written only inside its caller's tool call, as v0.14 says.
+
 **Status: RATIFIED — v0.16.3 (2026-10-14).** UI sprint U189's live run, as built: an `if` test may leave out its field, and then reads its kind's main field; a test the plan tool cannot read stops the plan instead of being dropped. Agent-resolved.
 
 **Status: RATIFIED — v0.16.2 (2026-10-14).** UI sprint U187 adds to § Z.1 for runs the app starts: `TopologyRunStarted.record_root`, and the start of a run the person started (not the session's model) written at the session's next model step with `call_seq` -1. Agent-resolved; additive.

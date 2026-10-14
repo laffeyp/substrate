@@ -34,7 +34,6 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
-    ComposedResult,
     REPORT_WRITTEN,
     RunOutcome,
     RunSession,
@@ -339,9 +338,8 @@ class ReportWritten(Struct, frozen=True):
 class TopologyRunStarted(Struct, frozen=True):
     run_id: str
     topology: str
-    call_seq: int  # the caller's ToolCall; -1 when the person started it from the app (v0.16.2)
+    call_seq: int  # the caller's ToolCall
     sessions: list[RunSession]
-    record_root: str = ""  # v0.16.2: the run's own record
 
 
 class TopologyRunEnded(Struct, frozen=True):
@@ -350,7 +348,6 @@ class TopologyRunEnded(Struct, frozen=True):
     outcome: RunOutcome
     report_seq: int | None
     report: ReportWritten | None
-    result: ComposedResult | None = None  # v0.16 (§ AA.4): a composed run's end
 
 
 # The core producer bodies. The model producer reads the just-appended UserMessage /
@@ -532,7 +529,6 @@ def _model_factory(
         | ModelReply
         | TranscriptCompacted
         | BackgroundTaskEnded
-        | TopologyRunStarted
         | TopologyRunEnded
         | PromptComposed
         | SessionChanged
@@ -599,12 +595,8 @@ def _model_factory(
                 yield ended
                 notices.append(background_notice(ended))
             # v0.14 (§ Z.1, K330): this session's runs that ended since the last step, each once.
-            # v0.16.2: first, the starts of runs the person started from the app, each once.
             from ..runs import hold as _hold
 
-            for run_started in _hold.TABLE.drain_started(session_id):
-                yield run_started
-                notices.append(_hold.start_notice(run_started))
             for run_ended in _hold.TABLE.drain_ended(session_id):
                 yield run_ended
                 notices.append(_hold.run_notice(run_ended))
@@ -1243,7 +1235,6 @@ def session_topology(
                 ModelReply,
                 TranscriptCompacted,
                 BackgroundTaskEnded,
-                TopologyRunStarted,
                 TopologyRunEnded,
                 PromptComposed,
                 HarnessToolCall,
@@ -1750,7 +1741,6 @@ from .views import (  # noqa: E402
 __all__ = [
     "BackgroundTaskEnded",
     "ReportWritten",
-    "ComposedResult",
     "TopologyRunEnded",
     "TopologyRunStarted",
     "LanguageDrift",

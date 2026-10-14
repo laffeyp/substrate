@@ -3,7 +3,7 @@
 ```yaml
 ---
 id: 338
-status: closed
+status: withdrawn
 closed_at: 2026-10-14
 phase: 4
 pass_kind: functional
@@ -26,3 +26,5 @@ A session with a scripted model plans the draft-and-critique plan, gets the `nev
 - **Daemon** (`substrate-ui/server.py`): the three tools join every session's tools, bound to the session; model steps run on the session's model or the step's; agent steps start the session's own builds and reviews (`_start_build` and `_start_review` take an optional model); `run_topology`, `run_topology_poll`, `list_topologies` and `list_applications` leave a session's tools and stay in the kernel for the CLI (vocabulary v0.16.1).
 - **Found and fixed.** A stopped run left its running command alive: cancelling the step did not end the child process. A command now runs in its own process group, killed on a stop or a time-out; the test reads the command's pid and checks it is gone, and fails with the kill removed.
 - **Tests.** `tests/test_compose_tools_338.py`, 5: a scripted caller session plans the draft-and-critique plan, gets `never_ends` and the fixed plan id, runs it, and its next step is told the end once (ended on `Fix`, each step's count); `save` then a run by name, with help listing the parts, the shipped plans and the saved one; `from` a named plan with a changed end; a stopped run ends `stopped` and its command is gone; an agent step builds on a real branch, the repository's own branch unmoved. App: `tests/test_session_tool_suite_composition_228.py` asserts the three in and the four out. The run-table, build, review and vocabulary tests pass (58).
+
+- **Withdrawn (2026-10-14).** The Architect: "undo all those changes and zero them out." Everything this card built is removed from the code; the kernel's `src/` and `tests/` match `a76adace` but for K339. See `process/planning/POSTMORTEM-2026-10-14-create-topology-without-substrate-r2.md`.

@@ -68,10 +68,6 @@ TOOL_NAME_DELEGATE: Final[str] = "delegate"
 TOOL_NAME_RUN: Final[str] = "run"
 TOOL_NAME_REVIEW: Final[str] = "review"
 TOOL_NAME_BUILD: Final[str] = "build"
-# Kernel K335 (session vocabulary § AA.6): the create-topology tools.
-TOOL_NAME_TOPOLOGY_HELP: Final[str] = "topology_help"
-TOOL_NAME_TOPOLOGY_PLAN: Final[str] = "topology_plan"
-TOOL_NAME_TOPOLOGY_RUN: Final[str] = "topology_run"
 # Substrate tools (implementations at substrate_tools.py).
 TOOL_NAME_INSPECT_RECORD: Final[str] = "inspect_record"
 TOOL_NAME_LIST_RECORDS: Final[str] = "list_records"

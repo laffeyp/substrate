@@ -27,13 +27,8 @@ from typing import Any
 import msgspec
 
 from ... import api
-from ...constants import RUN_FINALISED
 from ...errors import describe_error
-from ..compose.parts import main_field
-from ..compose.vocabulary import RUN_STOP_REQUESTED, Plan, RunStopRequested, StopSource, kind_of
-from ..compose.wire import which_end
 from ..session import (
-    ComposedResult,
     ReportWritten,
     SessionEndRequested,
     TopologyRunEnded,
@@ -63,11 +58,6 @@ class HeldRun:
     done: threading.Event = field(default_factory=threading.Event)  # set when it has ended
     error: str = ""
     reported: bool = False
-    # Session vocabulary § AA: a composed run carries its plan; it has no sessions of its own.
-    plan: Plan | None = None
-    # v0.16.2: the start of a run the person started from the app, written at the caller's next
-    # model step; None once written, or when the caller's tool call wrote it.
-    pending_start: TopologyRunStarted | None = None
 
 
 def _caller_call_seq() -> tuple[Any, int] | None:
@@ -104,10 +94,9 @@ class RunTable:
         sessions: list[RunSession],
         factory: Callable[[api.TopologyBuilder], None],
         record_root: Path,
-        plan: Plan | None = None,
     ) -> HeldRun:
         """Start the run and return at once. Posts `TopologyRunStarted` into the caller's record when
-        called from inside the caller's tool. A composed run passes its `plan` (§ AA)."""
+        called from inside the caller's tool."""
         held = HeldRun(
             owner=owner,
             run_id=run_id,
@@ -115,7 +104,6 @@ class RunTable:
             sessions=sessions,
             record_root=Path(record_root),
             factory=factory,
-            plan=plan,
         )
         with self._lock:
             runs = self._runs.setdefault(owner, {})
@@ -124,31 +112,13 @@ class RunTable:
             runs[run_id] = held
         self._run_on_thread(held, lambda runtime: runtime.run(factory, name=topology))
         caller = _caller_call_seq()
-        started = TopologyRunStarted(
-            run_id=run_id,
-            topology=topology,
-            call_seq=caller[1] if caller is not None else -1,
-            sessions=sessions,
-            record_root=str(record_root),
-        )
         if caller is not None:
-            runtime = caller[0]
+            runtime, call_seq = caller
+            started = TopologyRunStarted(
+                run_id=run_id, topology=topology, call_seq=call_seq, sessions=sessions
+            )
             runtime._loop.call_soon_threadsafe(runtime.inject_event, started)  # noqa: SLF001 — as emit_tool_progress
-        else:
-            held.pending_start = started
         return held
-
-    def drain_started(self, owner: str) -> list[TopologyRunStarted]:
-        """The starts of `owner`'s runs the person started from the app, not yet written, once
-        each (v0.16.2): the caller's next model step writes them, before any end."""
-        with self._lock:
-            runs = list(self._runs.get(owner, {}).values())
-        out: list[TopologyRunStarted] = []
-        for held in runs:
-            if held.pending_start is not None:
-                out.append(held.pending_start)
-                held.pending_start = None
-        return out
 
     @staticmethod
     def _run_on_thread(held: HeldRun, body: Callable[[Any], Any]) -> None:
@@ -183,30 +153,18 @@ class RunTable:
     def running(self, owner: str, run_id: str) -> bool:
         return not self._get(owner, run_id).done.is_set()
 
-    def stop(self, owner: str, run_id: str, source: StopSource = StopSource.CALLER_STOP) -> None:
-        """Ask the run's session to end; it ends with reason `caller_stop`. A composed run is sent
-        `RunStopRequested` and finalises at it (§ AA.3)."""
+    def stop(self, owner: str, run_id: str) -> None:
+        """Ask the run's session to end; it ends with reason `caller_stop`."""
         held = self._get(owner, run_id)
         if held.done.is_set() or held.loop is None or held.loop.is_closed():
             return
-        request: Any = (
-            RunStopRequested(source=source)
-            if held.plan is not None
-            else SessionEndRequested(
-                session_id=held.sessions[0].session_id, source=SessionEndReason.CALLER_STOP
-            )
+        request = SessionEndRequested(
+            session_id=held.sessions[0].session_id, source=SessionEndReason.CALLER_STOP
         )
         try:
             held.loop.call_soon_threadsafe(held.runtime.inject_event, request)
         except RuntimeError:  # the run's loop closed as we asked: it had ended
             pass
-
-    def wait(self, owner: str, run_id: str, timeout: float | None = None) -> TopologyRunEnded:
-        """Block until the run ends, then its end (an agent step waits on its run this way). Its end
-        is still told to the caller once, as every run's is."""
-        held = self._get(owner, run_id)
-        held.done.wait(timeout)
-        return self._ended(held)
 
     def events(
         self, owner: str, run_id: str, from_seq: int = 0, limit: int = 50
@@ -260,7 +218,6 @@ class RunTable:
                     "sessions": [msgspec.to_builtins(s) for s in held.sessions],
                     "running": not held.done.is_set(),
                     "outcome": self._ended(held).outcome.value if ended else None,
-                    "record_root": str(held.record_root),  # U187: a composed run's pane reads it
                 }
             )
         return out
@@ -278,8 +235,6 @@ class RunTable:
         return out
 
     def _ended(self, held: HeldRun) -> TopologyRunEnded:
-        if held.plan is not None:
-            return self._composed_end(held, held.plan)
         report: ReportWritten | None = None
         report_seq: int | None = None
         stopped = False
@@ -310,51 +265,6 @@ class RunTable:
             report=report,
         )
 
-    def _composed_end(self, held: HeldRun, plan: Plan) -> TopologyRunEnded:
-        """A composed run's end (§ AA.4): which end held, its event, each step's count."""
-        steps = {kind_of(s.id): s.id for s in plan.steps}
-        counts: dict[str, int] = {}
-        latest: dict[str, dict[str, Any]] = {}
-        last: dict[str, Any] | None = None
-        stopped = False
-        finalised = False
-        try:
-            events = list(api.read_record(held.record_root, resolve_blobs=True))
-        except Exception:  # noqa: BLE001 — an unreadable record is a failed run, said so below
-            events = []
-        for env in events:
-            kind = str(env.get("kind"))
-            if kind in steps:
-                counts[kind] = counts.get(kind, 0) + 1
-                latest[kind] = dict(env.get("payload") or {})
-                last = latest[kind]
-            elif kind == RUN_STOP_REQUESTED:
-                stopped = True
-            elif kind == RUN_FINALISED:
-                # A failed run's RunFinalised names its RunFailureReason; a clean one has none.
-                finalised = "reason" not in (env.get("payload") or {})
-        end = which_end(plan.end, counts)
-        if stopped:
-            outcome = RunOutcome.STOPPED
-        elif finalised and not held.error:
-            outcome = RunOutcome.DONE
-        else:
-            outcome = RunOutcome.FAILED
-        result = ComposedResult(
-            ended_on=end.kind if end is not None else None,
-            event=latest.get(end.kind) if end is not None else last,
-            counts={steps[k]: n for k, n in counts.items()},
-            record_root=str(held.record_root),
-        )
-        return TopologyRunEnded(
-            run_id=held.run_id,
-            topology=held.topology,
-            outcome=outcome,
-            report_seq=None,
-            report=None,
-            result=result,
-        )
-
 
 # A run's words can be its whole output (a review), so the notice carries them up to this length;
 # past it, the notice says how to read the rest.
@@ -366,8 +276,6 @@ def run_notice(e: TopologyRunEnded) -> str:
     said = ""
     if e.report is not None:
         said = e.report.reply.strip()
-    elif e.result is not None:
-        said = composed_said(e.result)
     if len(said) > _NOTICE_CAP_CHARS:
         said = (
             said[:_NOTICE_CAP_CHARS]
@@ -394,19 +302,6 @@ def _next_moves(e: TopologyRunEnded) -> str:
             "or say why it does not apply."
         )
     return ""
-
-
-def start_notice(s: TopologyRunStarted) -> str:
-    """What the caller's model reads about a run the person started from the app."""
-    return f"[run {s.run_id} ({s.topology}) was started from the app; its end will come to you]"
-
-
-def composed_said(r: ComposedResult) -> str:
-    """A composed run's end in words: which end held, the event's main field, each step's count."""
-    on = f"on {r.ended_on}" if r.ended_on else "when nothing was left to run"
-    text = main_field(r.event) if r.event else ""
-    counts = ", ".join(f"{step} {n}" for step, n in r.counts.items()) or "no step ran"
-    return f"ended {on} ({counts}); record {r.record_root}" + (f"\n{text}" if text else "")
 
 
 # The process's table: one app per machine, as the background-task table.
@@ -480,5 +375,4 @@ __all__ = [
     "RunTable",
     "make_run_tool",
     "run_notice",
-    "start_notice",
 ]

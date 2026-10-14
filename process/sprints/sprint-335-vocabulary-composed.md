@@ -3,7 +3,7 @@
 ```yaml
 ---
 id: 335
-status: closed
+status: withdrawn
 closed_at: 2026-10-14
 phase: 4
 pass_kind: vocabulary
@@ -25,3 +25,5 @@ The types encode and decode; the guards list the new members; the document carri
 - **Ratified** v0.16 § AA in `process/signals/session-vocabulary.md`: the plan and its step fields with their defaults; the five parts and each part's event; the kind named from the step id, and the ids refused (not a word, repeated, `input`, a session or `substrate.` kind); the ends; the plan and input in `RunStarted.baseline`; `TopologyRunEnded.result` (`ComposedResult`) for a composed run, and its outcomes; agent steps as § Z runs of their own; the nine findings and the two strengths; the three tools and the four they retire. Two defaults were added while building K336 and ratified here before commit: a step between a `split` and its `collect` runs up to 50 times, and a `collect` after a split waits for every item (`n all`).
 - **Types.** `topologies/compose/vocabulary.py`: `Part`, `AgentAs`, `TestOp`, `EndWhen`, `Finding`, `Strength`, `Test`, `Step` (wire names `with`, `if`, `as`), `End`, `Plan`, `PART_PAYLOAD`, `MAIN_FIELDS`, `INPUT`, the defaults, `kind_of`. `session/`: `ComposedResult` and `TopologyRunEnded.result` (optional, so § Z ends written before v0.16 still decode). `tool_loop/tools.py`: `TOOL_NAME_TOPOLOGY_HELP`, `_PLAN`, `_RUN`.
 - **Tests.** `tests/test_compose_vocabulary_335.py`, 4: the closed sets, the kind from the id, the plan's wire names and round trip, a composed end and an old § Z end decoding.
+
+- **Withdrawn (2026-10-14).** The Architect: "undo all those changes and zero them out." Everything this card built is removed from the code; the kernel's `src/` and `tests/` match `a76adace` but for K339. See `process/planning/POSTMORTEM-2026-10-14-create-topology-without-substrate-r2.md`.

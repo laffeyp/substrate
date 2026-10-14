@@ -1,6 +1,0 @@
-# A draft, a critic, and fixes until the critic finds nothing.
-name: draft_and_critique
-draft: model "Write what the input asks for."
-critic: model on Draft, Fix max 4 "List the defects in this draft, or say NONE."
-fix: model on Critic with Draft if Critic.text has no NONE max 3 "Fix the listed defects. Give the whole corrected draft."
-end: first Fix or quiet

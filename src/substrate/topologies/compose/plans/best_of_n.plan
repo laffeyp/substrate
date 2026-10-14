@@ -1,8 +1,0 @@
-# Three answers to the input, written apart; a judge picks the best and gives it whole.
-name: best_of_n
-answer_a: model on input "Answer the request."
-answer_b: model on input "Answer the request."
-answer_c: model on input "Answer the request."
-all: collect on AnswerA, AnswerB, AnswerC n 3
-pick: model on All input "Request: {input}\n\nAnswers:\n{All.items}" "Pick the best answer to the request and give it whole, unchanged."
-end: first Pick
