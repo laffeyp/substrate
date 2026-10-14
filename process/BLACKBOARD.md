@@ -533,6 +533,13 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### K314–K321: topologies that run work, held by their caller (2026-10-13)
+- **Plan.** Research rounds 1–8 `process/planning/RESEARCH-2026-10-13-core-topologies*.md` (round 8 approved), roadmap `ROADMAP-2026-10-13-core-topologies.md`. A run takes a card (what to do, where, how to tell it is done; the SDD card is accepted, never required), reports in a fixed shape, is checked by a role that did not do the work, and is held by the session that started it.
+- **K314** session vocabulary v0.12 § X (run started and ended, card, checks, report; outcomes; roles). **K315** `topologies/workspace.py`: every workspace a git repository; worktrees per session or run. **K316** cards, plain and SDD; a card missing one of the three is refused, naming it. **K317** checks run with the gate's core in the worktree, the record checked against the vocabulary, the report written from the card, checks and git. **K318** the driven session: the checks write its next message; ends done, stuck, failed or stopped. **K319, K319b** the caller's hold: a run returns at once, its end is told once at the caller's next model step; stop, pause, resume, step, replay; the `run` tool.
+- **K320 Review**: three styles (defects, design, security) from published practice, sources in `runs/review_styles/README.md`; one read-only, one-turn reviewer per style in a worktree detached at the target; the `review` tool. The `code_review` application is removed; its library topology and bundle stay. **K321 Build**: one card on a new branch `build/<run id>` in its own worktree, the role prompt and guidance of its model class, no memory and no parent context; a card bigger than the model holds is refused; never merges; the `build` tool.
+- **With the app (U176, U177):** `RunTable.listing`; `DriverParamKey.SCRIPT` (a deterministic session's tool calls); `substrate.interpreter` (the packaged app's `PYTHONHOME` no longer reaches the processes it starts; the coding gate and the SWE-bench harness take it back). A real model (`glm-5.2:cloud`) in the installed app reviewed a branch (found the `mean([])` defect) and built a card whose branch passes its two commands.
+- **Tests.** Kernel suite 1,729 passed, 14 skipped; mypy --strict and lint-imports clean.
+
 ### Catalog: the style-match minimum for the UI's turns view (2026-10-13)
 - `language_catalog.LSM_MIN_WORDS` re-exports `measures.MIN_WORDS_LSM` (1,600) so the UI's generator reads it instead of retyping it (`4296e70f`). The UI's turns view shows each side's progress toward it.
 

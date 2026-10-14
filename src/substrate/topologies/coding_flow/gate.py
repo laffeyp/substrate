@@ -132,7 +132,10 @@ def _gate_env() -> dict[str, str]:
     import sys
     import sysconfig
 
-    env = dict(os.environ)
+    from ...interpreter import own_interpreter_env
+
+    # The gate's `python` is the app's own interpreter, so it takes the app's Python home back.
+    env = own_interpreter_env()
     first = [sysconfig.get_path("scripts"), str(Path(sys.executable).parent)]
     env["PATH"] = os.pathsep.join([*dict.fromkeys(first), env.get("PATH", "")])
     return env

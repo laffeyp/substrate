@@ -114,6 +114,17 @@ def test_driver_version_is_an_accepted_driver_param(tmp_path: Path) -> None:
         reg.set_driver_params(sid, {"driver_version": True})
 
 
+def test_script_is_a_list_of_tool_and_args_pairs(tmp_path: Path) -> None:
+    """UI sprint 176: a deterministic session's tool calls ride its driver params."""
+    reg = _registry(tmp_path, _RecordingResponder())
+    sid = _create(reg, tmp_path)
+    script = [["build", [{"what": "x"}]], ["read_file", ["a.txt"]]]
+    assert reg.set_driver_params(sid, {"script": script}).driver_params == {"script": script}
+    for bad in (["build"], [["build", {"what": "x"}]], [[1, []]], "build"):
+        with pytest.raises(ValueError, match="script must be"):
+            reg.set_driver_params(sid, {"script": bad})
+
+
 def test_boot_scan_reads_no_record_for_turn_indexes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

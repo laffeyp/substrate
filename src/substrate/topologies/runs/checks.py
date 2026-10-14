@@ -126,7 +126,10 @@ def write_report(
 ) -> ReportWritten:
     """The run's report: the card's work, what the worker said it did, the files and commits on the
     worktree since `base`, the last checks, and what is left."""
+    # A detached worktree (a review's) is on no branch; git names it "HEAD".
     branch = _git(worktree, "rev-parse", "--abbrev-ref", "HEAD") or None
+    if branch == "HEAD":
+        branch = None
     committed = _git(worktree, "diff", "--name-only", f"{base}..HEAD").splitlines()
     uncommitted = [
         line[3:] for line in _git(worktree, "status", "--porcelain").splitlines() if line

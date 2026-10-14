@@ -199,3 +199,20 @@ def test_a_run_id_is_held_once(tmp_path: Path) -> None:
         table.start("caller", "r_5", "build", _session("r_5", root), _slow_factory(tmp_path), root)
     table.stop("caller", "r_5")
     _wait(table, "caller", "r_5", timeout=30)
+
+
+def test_the_listing_shows_each_run_and_reports_nothing(tmp_path: Path) -> None:
+    table = RunTable()
+    factory = _driven_factory(
+        tmp_path, commands=["test -f b.txt"], script=WRITE_AND_COMMIT, limits=RunLimits(5, 2)
+    )
+    root = tmp_path / "run"
+    table.start("caller", "r_6", "build", _session("r_6", root), factory, root)
+    (row,) = table.listing("caller")
+    assert row["run_id"] == "r_6" and row["topology"] == "build"
+    assert row["sessions"][0]["session_id"] == "s_r_6" and row["sessions"][0]["driven"] is True
+    _wait(table, "caller", "r_6")
+    (row,) = table.listing("caller")
+    assert row["running"] is False and row["paused"] is False and row["outcome"] == "done"
+    assert table.listing("someone else") == []
+    assert len(table.drain_ended("caller")) == 1  # the listing did not report it

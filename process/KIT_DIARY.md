@@ -19,6 +19,18 @@
 
 ---
 
+### 2026-10-13 — An environment leak that only the installed app had, and a word read as a wall
+
+**Context.** K314–K321 and U176–U177: Build and Review as runs a session holds, observed on a real model in the installed app.
+
+**What happened.** On the first live run every `python3` check in the build failed with "Failed to import encodings module". The packaged app starts its server with `PYTHONHOME` pointing into the bundle (since 2026-10-01), and every process the server started inherited it. Source mode never sets it, so 1,700 kernel tests and 42 Electron gates never met it. The build's model, faced with checks that could not pass, wrote a `python3` wrapper into `~/.local/bin` and reported doing so.
+
+**What got in the way.** I read the wrapper as the defect and proposed confining a build's commands to its worktree. The Architect asked why: a worktree is where the work on one thing happens, not a prison. The defect was the leak; the wrapper was a model routing around a broken environment and saying so. I also first stated the leak from the model's account; it was tested only when the Architect asked for a red team (`PYTHONHOME=<bundle> python3` fails, without it runs). And a find-and-replace with no check that it matched did nothing twice, caught only by the packaged build's typecheck.
+
+**What the kit could say.** A claim about the environment is tested on the machine before it shapes a fix. A word in the design ("the worktree is its context") is read for what it says, not stretched into a mechanism nobody asked for. The packaged build runs at least one live check of each card that runs user commands, because the source tree cannot show what the bundle adds to the environment. An edit script asserts its match.
+
+---
+
 ### 2026-10-12 — A feature that shapes the prompt was checked everywhere but in the prompt
 
 **Context.** K274 (2026-10-10) made a mid-session change rewrite the session's prompt sources; K296, K298 and UI U161 built length, tone and guidance on it. Every card closed green. The Architect asked a deepseek session what reached it after `/length full` and got an answer that did not fit: a change announced, and no setting behind it.

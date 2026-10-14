@@ -17,10 +17,14 @@ from . import _daemon as daemon_client
 from .conformance.conformance import CheckResult, ConformanceReport, Status, run_conformance
 from .language import catalog as language_catalog
 from .language import drift as language_drift
+from .interpreter import release_python_home
 from .templates.interpolate import parse_template_header
 from .templates.interpolate import render as render_template
 from .topologies import bundled
 from .topologies import workspace
+from .topologies.runs import build
+from .topologies.runs import hold as run_hold
+from .topologies.runs import review
 from .topologies.instruments.grader import score_grades
 from .topologies.instruments.scoring import select_scoring_rule
 from .topologies.session.language_lines import language_lines, line_json
@@ -57,6 +61,7 @@ __all__ = [
     "TOOL_CALL",
     "TOOL_RESULT",
     "TornRecordOnResume",
+    "build",
     "bundled",
     "daemon_client",
     "language_catalog",
@@ -66,7 +71,10 @@ __all__ = [
     "line_json",
     "manifest_from_dict",
     "parse_template_header",
+    "release_python_home",
     "render_template",
+    "review",
+    "run_hold",
     "scan_record_status",
     "score_grades",
     "workspace",

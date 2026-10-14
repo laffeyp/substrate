@@ -233,6 +233,27 @@ class RunTable:
                 stopped += 1
         return stopped
 
+    def listing(self, owner: str) -> list[dict[str, Any]]:
+        """`owner`'s runs in start order: id, topology, sessions, whether each runs or is paused,
+        and the outcome of one that ended. Reading it reports nothing: `drain_ended` still tells
+        the caller's model once."""
+        with self._lock:
+            runs = list(self._runs.get(owner, {}).values())
+        out: list[dict[str, Any]] = []
+        for held in runs:
+            ended = held.done.is_set() and not held.paused
+            out.append(
+                {
+                    "run_id": held.run_id,
+                    "topology": held.topology,
+                    "sessions": [msgspec.to_builtins(s) for s in held.sessions],
+                    "running": not held.done.is_set(),
+                    "paused": held.done.is_set() and held.paused,
+                    "outcome": self._ended(held).outcome.value if ended else None,
+                }
+            )
+        return out
+
     def drain_ended(self, owner: str) -> list[TopologyRunEnded]:
         """Each of `owner`'s runs that ended (not paused) and has not been reported, once."""
         with self._lock:
@@ -277,12 +298,23 @@ class RunTable:
         )
 
 
+# A run's words can be its whole output (a review), so the notice carries them up to this length;
+# past it, the notice says how to read the rest.
+_NOTICE_CAP_CHARS = 4000
+
+
 def run_notice(e: TopologyRunEnded) -> str:
-    """The one line the caller's model reads about an ended run."""
+    """What the caller's model reads about an ended run: its outcome and what it said."""
     said = ""
     if e.report is not None:
-        said = e.report.left or e.report.done
-    tail = f": {said.strip()[:300]}" if said.strip() else ""
+        said = (e.report.left or e.report.done).strip()
+    if len(said) > _NOTICE_CAP_CHARS:
+        said = (
+            said[:_NOTICE_CAP_CHARS]
+            + f"\n[cut at {_NOTICE_CAP_CHARS:,} characters; run(run_id={e.run_id!r}, "
+            "action='events') reads the report]"
+        )
+    tail = f": {said}" if said else ""
     return f"[run {e.run_id} ({e.topology}) ended {e.outcome.value}{tail}]"
 
 

@@ -39,6 +39,7 @@ from typing import Any
 from msgspec import Struct
 
 from ..constants import PRODUCER_FAILED
+from ..interpreter import own_interpreter_env
 from .oracle import EXTERNAL_GRADER, LOG_PROJECTION, ExternalGraderOracle, Result, Verdict
 
 # Default grader_error_band for SWE-bench Lite (Xia & Chen 2025, arxiv 2503.15223). Rides on every
@@ -449,6 +450,7 @@ def run_swebench_one(
             capture_output=True,
             text=True,
             check=False,
+            env=own_interpreter_env(),  # `sys.executable` is the app's own interpreter
         )
     except subprocess.TimeoutExpired:
         _docker_kill(container)

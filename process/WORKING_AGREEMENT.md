@@ -121,6 +121,8 @@ Superseded drafts under `docs/specs/product_spec/`, `docs/specs/technical_spec/`
 | Session manifest (per-session hint the boot scan reads to rebuild the in-memory catalog; `SessionManifest` msgspec Struct per TECH-SPEC §5; status one of `running`/`parked`/`interrupted`/`ended`) | `~/.substrate/sessions/<session_id>/manifest.json` | sprint 211 |
 | A workspace as a git repository: `ensure_repository`, `make_worktree`, `worktree_diff` (replaces the `_session_worktree` row above, K315) | `substrate/src/substrate/topologies/workspace.py`; a run's worktree at `~/.substrate/sessions/wt/<session_id>/` on the branch it asks for | K315 (2026-10-13) |
 | Topology runs: the card (`read_card`, `read_sdd_card`, `CardRefused`), and from K317 on the checks, the report and the caller's hold | `substrate/src/substrate/topologies/runs/`; vocabulary § X | K316 (2026-10-13) |
+| A build of one card (`runs/build.py`): its worktree at `~/.substrate/sessions/wt/<run_id>/` on branch `build/<run_id>`, its record at `~/.substrate/sessions/runs/<run_id>/` | `substrate/src/substrate/topologies/runs/build.py` | K321 (2026-10-13) |
+| Review styles (one text per style; sources in its README) and the review run | `substrate/src/substrate/topologies/runs/review_styles/`, `runs/review.py`; a run's record at `~/.substrate/sessions/runs/<run_id>/`, its worktree at `~/.substrate/sessions/wt/<run_id>/` (detached at the target) | K320 (2026-10-13) |
 
 Every claim in TECH-SPEC-2026-08-25-round6 about where a daily-driver entity lives cites a row above. When a downstream sprint discovers a new entity, it halts on `canonical_home_missing` and adds the row before writing code.
 
