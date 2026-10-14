@@ -95,6 +95,29 @@ def test_4_leftover_children_become_a_task_the_owner_stops(tmp_path: Path, owner
     assert _wait(lambda: not _alive(child), 5), "the leftover child outlived its owner"
 
 
+def test_5_a_delegated_childs_tasks_stop_when_the_child_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from substrate.adapters import DeterministicResponder
+    from substrate.topologies.tool_loop import delegate as D
+
+    started: dict[str, Any] = {}
+
+    def fake_child(topology: Any, record_root: Path, *, timeout_seconds: Any) -> tuple[str, int]:
+        workspace = record_root.parent / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        r = T._bash(workspace, str(workspace.resolve()), ["sleep 30", None, True])
+        started["owner"], started["task"] = str(workspace.resolve()), r["task_id"]
+        return "done", 1
+
+    monkeypatch.setattr(D, "_run_child_to_answer", fake_child)
+    tool = D.make_delegate(responder=DeterministicResponder(seed=0), root=tmp_path)
+    out = tool.run([{"task": "start a server"}])
+    assert out["answer"] == "done"
+    task = TABLE.get(started["owner"], started["task"])
+    assert task.poll() == "stopped" and task.stopped_because == "its delegated run ended"
+
+
 def test_6_session_end_and_delete_stop_the_sessions_tasks(tmp_path: Path) -> None:
     from substrate.adapters import DeterministicResponder
     from substrate.topologies.session import SessionEndRequested, UserMessage, session_topology

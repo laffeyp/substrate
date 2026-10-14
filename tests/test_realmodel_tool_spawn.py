@@ -101,9 +101,9 @@ def _last_answer(envs: list[dict]) -> str:
 @pytest.mark.asyncio
 @pytest.mark.timeout(90)
 async def test_delegate_child_returns_and_parent_quotes_it(tmp_path: Path) -> None:
-    """Parent (qwen2.5) calls `delegate(task=...)`. Child is a registry session on a
+    """Parent (qwen2.5) calls `delegate(task=...)`. Child runs a
     DeterministicResponder — deterministic reply, no second live model.
-    ToolResult carries `{answer, child_root, session_id}`. Parent's answer
+    ToolResult carries `{answer, child_root, steps}`. Parent's answer
     quotes something from the child_root path.
 
     Every artefact lands under tmp_path: parent workspace + record,
@@ -111,36 +111,26 @@ async def test_delegate_child_returns_and_parent_quotes_it(tmp_path: Path) -> No
     _require_model()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    from substrate.topologies.session_registry import SessionManifest, SessionRegistry
+    child_responder = DeterministicResponder(seed=0)
+    # child_record_root: place child records as siblings of the parent
+    # record, inside tmp_path/child_records/<n>/. Sprint 052 sandbox:
+    # every child artefact stays under tmp_path.
+    child_records_base = tmp_path / "child_records"
+    child_records_base.mkdir()
 
-    # K323: the child is a registry session; here it runs the deterministic stand-in.
-    def _child(m: SessionManifest, first: Any = None) -> Any:
-        return session_topology(
-            driver=DeterministicResponder(seed=0),
-            driver_name=m.driver,
-            driver_context_tokens=4096,
-            seed="",
-            tools={},
-            session_id=m.session_id,
-            workspace_path=m.workspace,
-            first_turn_user_message=first,
-        )
+    def _child_record_root(n: int) -> Path:
+        p = child_records_base / f"child_{n}"
+        # `_default_child_factory` creates parent dirs; return the path
+        # it should mkdir under, not the dir itself.
+        return p
 
-    registry = SessionRegistry(base=tmp_path / "sessions", session_topology_factory=_child)
-    registry.create(
-        session_id="s_spawn_test",
-        name=None,
-        driver="deterministic",
-        workspace=str(workspace),
-        workspace_shape="flat",
-        bundle=None,
-        seed="",
-    )
     delegate = make_delegate(
-        session_registry=registry,
-        parent_session_id="s_spawn_test",
+        responder=child_responder,
+        root=workspace,
+        child_record_root=_child_record_root,
         max_depth=1,
         max_children=2,
+        child_max_steps=4,
         timeout_seconds=60.0,
     )
     tools = {"delegate": delegate}
@@ -160,8 +150,8 @@ async def test_delegate_child_returns_and_parent_quotes_it(tmp_path: Path) -> No
     ok = [r for r in tr if r["payload"].get("ok") is True]
     assert ok, f"no successful delegate: {[r['payload'] for r in tr]}"
     output = ok[0]["payload"].get("output") or {}
-    assert "answer" in output and "child_root" in output and "session_id" in output, (
-        f"delegate ToolResult must carry (answer, child_root, session_id); got {output}"
+    assert "answer" in output and "child_root" in output and "steps" in output, (
+        f"delegate ToolResult must carry (answer, child_root, steps); got {output}"
     )
     child_root = str(output["child_root"])
     # SANDBOX: child_root must live under tmp_path.

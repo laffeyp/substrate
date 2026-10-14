@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Peter Laffey
 """UI sprint 177: the app's Python home stays with the app. In the packaged app the server starts
 with PYTHONHOME pointing into the bundle; a user's `python3` run with it died with "Failed to import
-encodings module". After `release_python_home`, a run's checks and a session's bash get no
+encodings module". After `release_python_home`, a session's bash gets no
 PYTHONHOME, and the coding gate, which runs the app's own interpreter, gets it back."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from substrate.interpreter import OWN_PYTHONHOME, own_interpreter_env, release_python_home
-from substrate.topologies.coding_flow.gate import _gate_env, run_command
+from substrate.topologies.coding_flow.gate import _gate_env
 from substrate.topologies.tool_loop.tools import full_suite
 
 BUNDLE = "/Applications/Substrate.app/Contents/Resources/python"
@@ -32,10 +32,6 @@ def test_the_release_moves_the_home_aside(released: None) -> None:
     assert "PYTHONHOME" not in os.environ and os.environ[OWN_PYTHONHOME] == BUNDLE
     assert own_interpreter_env()["PYTHONHOME"] == BUNDLE
     assert own_interpreter_env({"PYTHONHOME": "/x", OWN_PYTHONHOME: BUNDLE})["PYTHONHOME"] == "/x"
-
-
-def test_a_runs_check_gets_no_home(released: None, tmp_path: Path) -> None:
-    assert run_command(SHOW, tmp_path, timeout=10).summary == "unset"
 
 
 def test_a_sessions_bash_gets_no_home(released: None, tmp_path: Path) -> None:

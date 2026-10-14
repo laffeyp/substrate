@@ -206,8 +206,8 @@ def _extract_terminal_output(record_root: str) -> Any:
 
 def make_run_topology(daemon_client: DaemonClient) -> Tool:
     """Sprint 226 — the `run_topology` tool. A session model calls
-    `run_topology(name="research_sweep", inputs={...})` and the child
-    run's output flows back as the tool result's `output` field."""
+    `run_topology(name="code_review", inputs={repo: "."})` and the child
+    run's Verdict flows back as the tool result's `output` field."""
     return Tool(
         name=TOOL_NAME_RUN_TOPOLOGY,
         describe=(

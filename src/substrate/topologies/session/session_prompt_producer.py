@@ -31,14 +31,11 @@ from .context_slice import extract_context_slice
 from .environment import render_baseline
 from .roles import resolve_role_prompt_with_source
 from .vocabulary import (
-    HANDOFF_DEFAULT,
-    HANDOFF_TEXTS,
     LENGTH_DEFAULT,
     LENGTH_TEXTS,
     TONE_DEFAULT,
     TONE_TEXTS,
     Control,
-    HandoffPosition,
     LengthPosition,
     PromptSource,
     SessionWarningKind,
@@ -118,17 +115,14 @@ def bundle_style_fragments(bundle: str) -> list[PromptFragment]:
     ]
 
 
-def control_fragments(
-    length: str, tone: str, handoff: str = HANDOFF_DEFAULT
-) -> list[PromptFragment]:
-    """One fragment per control not at its default (§ T, K296; § Y, K324), its provenance naming
-    the control and the position. An unknown position raises, and session_prompt records it."""
+def control_fragments(length: str, tone: str) -> list[PromptFragment]:
+    """One fragment per control not at its default (§ T, K296), its provenance naming the control
+    and the position. An unknown position raises, and session_prompt records the failure."""
     pairs = (
         (Control.LENGTH, LENGTH_TEXTS.get(LengthPosition(length))),
         (Control.TONE, TONE_TEXTS.get(TonePosition(tone))),
-        (Control.HANDOFF, HANDOFF_TEXTS.get(HandoffPosition(handoff))),
     )
-    positions = {Control.LENGTH: length, Control.TONE: tone, Control.HANDOFF: handoff}
+    positions = {Control.LENGTH: length, Control.TONE: tone}
     return [
         PromptFragment(
             source=PromptSource.CONTROL,
@@ -294,7 +288,6 @@ def session_prompt_sources(
     memory: bool = False,
     length: str | None = None,
     tone: str | None = None,
-    handoff: str | None = None,
 ) -> dict[PromptSource, Source]:
     """The sources a session names, in the order the producer runs them."""
     sources: dict[PromptSource, Source] = {}
@@ -305,9 +298,9 @@ def session_prompt_sources(
     if bundle is not None:
         sources[PromptSource.BUNDLE_METHODOLOGY] = lambda: bundle_methodology_fragments(bundle)
         sources[PromptSource.BUNDLE_STYLE] = lambda: bundle_style_fragments(bundle)
-    if length is not None or tone is not None or handoff is not None:
+    if length is not None or tone is not None:
         sources[PromptSource.CONTROL] = lambda: control_fragments(
-            length or LENGTH_DEFAULT, tone or TONE_DEFAULT, handoff or HANDOFF_DEFAULT
+            length or LENGTH_DEFAULT, tone or TONE_DEFAULT
         )
     if baseline:
         sources[PromptSource.BASELINE] = lambda: baseline_fragments(baseline)

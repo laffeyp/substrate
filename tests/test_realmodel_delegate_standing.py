@@ -154,6 +154,8 @@ async def test_live_standing_reviewer_answers_and_parent_quotes(tmp_path: Path) 
     parent_record = tmp_path / "parent_record"
 
     delegate = make_delegate(
+        responder=OllamaResponder(_PARENT_DRIVER, max_tokens=64, temperature=0),
+        root=parent_workspace,
         session_registry=registry,
         parent_session_id="s_parent",
     )

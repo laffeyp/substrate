@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from msgspec import Struct
 
@@ -34,14 +34,7 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
-    CardCheck,
-    CardForm,
-    CheckResult,
-    JudgeCall,
     Control,
-    RunLimits,
-    RunOutcome,
-    RunSession,
     LanguagePairing,
     LanguageStream,
     PromptSource,
@@ -55,10 +48,7 @@ from .vocabulary import (
     DRIVER_SLASH_SOURCE,
     SYSTEM_SOURCES,
     MODEL_REPLY,
-    REPORT_WRITTEN,
     RETURNED,
-    RUN_PAUSED,
-    RUN_RESUMED,
     PROMPT_STRATEGY_MODEL_INPUT,
     PRODUCER_KIND_FIRST_MESSAGE,
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
@@ -99,9 +89,6 @@ from .vocabulary import (
     ToolMode,
     SessionWarningKind,
 )
-
-if TYPE_CHECKING:
-    from ..runs.driven import DrivenRun
 
 
 def _refuse_all_completed(policy: TerminationPolicy) -> None:
@@ -146,7 +133,6 @@ class SessionStarted(Struct, frozen=True):
     # § T (K296): the Length and Tone positions the session opened with; empty before v0.8.
     length: str = ""
     tone: str = ""
-    handoff: str = ""  # v0.13 (§ Y, K324): the Handoff position; empty before v0.13
 
 
 class UserMessage(Struct, frozen=True):
@@ -331,60 +317,6 @@ class LanguageDrift(Struct, frozen=True):
     warmup: int
 
 
-# § X (v0.12): topology runs. The events of a run session (its card, its checks, its report) and of
-# its caller (the run's start and end). Their payload parts are in the vocabulary.
-class CardAccepted(Struct, frozen=True):
-    form: CardForm
-    what: str
-    where: list[str]
-    checks: list[CardCheck]
-    text: str  # the card as given
-    limits: RunLimits
-
-
-class ChecksRun(Struct, frozen=True):
-    after_seq: int  # the Returned they follow
-    results: list[CheckResult]
-    record_problems: list[str]
-    passed: bool
-    head: str | None = None  # v0.12.2: the worktree's commit at the check
-    judge: JudgeCall | None = None  # v0.12.4: the call that judged the statement checks
-
-
-class ReportWritten(Struct, frozen=True):
-    outcome: RunOutcome
-    asked: str
-    done: str
-    files: list[str]
-    checks: list[CheckResult]
-    left: str
-    branch: str | None
-    commits: list[str]
-
-
-class RunPaused(Struct, frozen=True):
-    by: str  # who asked (v0.12.3)
-
-
-class RunResumed(Struct, frozen=True):
-    by: str  # who asked (v0.12.3)
-
-
-class TopologyRunStarted(Struct, frozen=True):
-    run_id: str
-    topology: str
-    call_seq: int  # the caller's ToolCall
-    sessions: list[RunSession]
-
-
-class TopologyRunEnded(Struct, frozen=True):
-    run_id: str
-    topology: str
-    outcome: RunOutcome
-    report_seq: int | None
-    report: ReportWritten | None
-
-
 # The core producer bodies. The model producer reads the just-appended UserMessage /
 # ToolResult and yields ModelReply (and a ToolCall after a `tool_use` reply). The tool producer
 # is verbatim from `tool_loop` — same tool seam, same error-as-observation discipline.
@@ -398,8 +330,9 @@ _MAX_CONSECUTIVE_FAILS = 3
 _REWRITTEN_ON_CHANGE: dict[str, tuple[str, ...]] = {
     "bundle": ("bundle_style", "bundle_methodology", "per_turn"),
     "per_turn": ("per_turn",),
-    # § T (K296), § Y (K324): any control changed writes the `control` source again.
-    **{control: (PromptSource.CONTROL,) for control in Control},
+    # § T (K296): either control changed writes the `control` source again.
+    Control.LENGTH: (PromptSource.CONTROL,),
+    Control.TONE: (PromptSource.CONTROL,),
 }
 
 
@@ -459,7 +392,6 @@ def _session_started_factory(
     driver_context_source: str = "",
     length: str = "",
     tone: str = "",
-    handoff: str = "",
 ) -> Callable[[], Any]:
     """Sprint 240 — the SessionStarted instrument's producer body.
 
@@ -492,7 +424,6 @@ def _session_started_factory(
             driver_context_source=driver_context_source,
             length=length,
             tone=tone,
-            handoff=handoff,
         )
 
     return lambda: _session_started
@@ -564,7 +495,6 @@ def _model_factory(
         | ModelReply
         | TranscriptCompacted
         | BackgroundTaskEnded
-        | TopologyRunEnded
         | PromptComposed
         | SessionChanged
         | HarnessToolCall
@@ -629,12 +559,6 @@ def _model_factory(
                 )
                 yield ended
                 notices.append(background_notice(ended))
-            # v0.12 (§ X.2, K319): this session's runs that ended since the last step, each once.
-            from ..runs import hold as _hold
-
-            for run_ended in _hold.TABLE.drain_ended(session_id):
-                yield run_ended
-                notices.append(_hold.run_notice(run_ended))
 
         # K299 (§ V): a change is recorded, and its text written, by session_prompt before this
         # step starts; the history draws its line beside the message.
@@ -1047,9 +971,7 @@ def session_topology(
     driver_context_source: str = "",
     length: str | None = None,
     tone: str | None = None,
-    handoff: str | None = None,  # v0.13 (§ Y, K324)
     language: bool = False,
-    driven: "DrivenRun | None" = None,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -1061,8 +983,6 @@ def session_topology(
     `(tool_name, args)` the model fires in order, matching `tool_loop`'s script convention;
     omit for the driver-parse path.
     """
-    if driven is not None and first_turn_user_message is not None:
-        raise ValueError("a driven session's first message comes from its card, not the caller")
     # `driver_name`, `workspace_path`, `parent_session_id`, `parent_seq_at_call` are
     # placeholders on the daemon's call-site contract; sprint 213/217/225 bind them.
     # They ride the signature so the outer daemon does not shift when they wire up.
@@ -1211,8 +1131,6 @@ def session_topology(
         current_settings[Control.LENGTH] = length
     if tone is not None:
         current_settings[Control.TONE] = tone
-    if handoff is not None:
-        current_settings[Control.HANDOFF] = handoff
 
     # Sprint 240: freeze the tool_names tuple at build time so the
     # SessionStarted instrument's closure captures a snapshot even if the
@@ -1254,7 +1172,6 @@ def session_topology(
                 driver_context_source=driver_context_source,
                 length=length or "",
                 tone=tone or "",
-                handoff=handoff or "",
             ),
             deterministic=True,
         )
@@ -1265,7 +1182,6 @@ def session_topology(
                 ModelReply,
                 TranscriptCompacted,
                 BackgroundTaskEnded,
-                TopologyRunEnded,
                 PromptComposed,
                 HarnessToolCall,
                 HarnessToolResult,
@@ -1339,7 +1255,6 @@ def session_topology(
             memory=memory,
             length=length,
             tone=tone,
-            handoff=handoff,
         )
         # K299: always present, even with no sources, because it records every mid-session change.
         has_session_prompt = True
@@ -1696,51 +1611,23 @@ def session_topology(
             starts=PRODUCER_KIND_SESSION_END,
             input_builder=lambda ctx: {
                 "reason": (
-                    # v0.12 (§ X.3): a run's caller stopping it ends it `caller_stop`.
-                    SessionEndReason(str((ctx.event.payload or {}).get("source")))
-                    if (ctx.event.payload or {}).get("source")
-                    in (SessionEndReason.DAEMON_SHUTDOWN, SessionEndReason.CALLER_STOP)
+                    SessionEndReason.DAEMON_SHUTDOWN
+                    if (ctx.event.payload or {}).get("source") == SessionEndReason.DAEMON_SHUTDOWN
                     else SessionEndReason.USER_END
                 ),
                 "total_turns": int(ctx.views["user_turns"].value()),
             },
             policy=api.Once(),
         )
-        if driven is not None:
-            # v0.12 (§ X.5): a driven session's turn end runs its checks and writes the next
-            # message or its report; it finalises on the report instead of pausing for a person.
-            from ..runs.driven import compose_driven
-
-            compose_driven(
-                b,
-                driven,
-                own_record=_own_record,
-                user_turns=lambda ctx: int(ctx.views["user_turns"].value()),
-                has_session_prompt=has_session_prompt,
-                driver=driver,
-                driver_name=driver_name,
-            )
-            termination = api.any_of(
-                api.finalise_on(REPORT_WRITTEN),
-                api.finalise_on(SESSION_ENDED),
-                # v0.12.3: a run its caller paused stops when it goes quiet, until RunResumed.
-                api.pause_await_input(
-                    when=lambda tctx: (
-                        tctx.quiescent and tctx.counts(RUN_PAUSED) > tctx.counts(RUN_RESUMED)
-                    ),
-                    resume_condition=RUN_RESUMED,
-                ),
-            )
-        else:
-            termination = api.any_of(
-                api.pause_await_input(
-                    when=lambda tctx: tctx.event is not None and tctx.event.kind == RETURNED,
-                    resume_condition=USER_MESSAGE,
-                ),
-                # Not threshold_count(SESSION_ENDED, 1): a resume restores counts from the whole
-                # record, so an ended-then-resumed session would finalise on its next event.
-                api.finalise_on(SESSION_ENDED),
-            )
+        termination = api.any_of(
+            api.pause_await_input(
+                when=lambda tctx: tctx.event is not None and tctx.event.kind == RETURNED,
+                resume_condition=USER_MESSAGE,
+            ),
+            # Not threshold_count(SESSION_ENDED, 1): a resume restores counts from the whole
+            # record, so an ended-then-resumed session would finalise on its next event.
+            api.finalise_on(SESSION_ENDED),
+        )
         _refuse_all_completed(termination)
         b.termination(termination)
 
@@ -1786,13 +1673,6 @@ from .views import (  # noqa: E402
 
 __all__ = [
     "BackgroundTaskEnded",
-    "CardAccepted",
-    "ChecksRun",
-    "ReportWritten",
-    "RunPaused",
-    "RunResumed",
-    "TopologyRunEnded",
-    "TopologyRunStarted",
     "LanguageDrift",
     "LanguageProfile",
     "FinalAnswer",

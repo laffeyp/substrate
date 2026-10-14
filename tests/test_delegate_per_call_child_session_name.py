@@ -1,8 +1,17 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""Sprint 213a/b — path 1 (child_session_name) routes into a standing session through the
-registry. Kernel K323 made the registry a required argument of `make_delegate`, so the
-"no registry" refusal no longer exists."""
+"""Sprint 213a/b — path 1 (child_session_name) requires a session_registry.
+Sprint 054 phase C — the substrate side now owns SessionRegistry, so the
+"real registry routes correctly" case moved from substrate-ui/tests/ to
+here. Both the "no registry → typed refusal" and "real registry → path 1
+routes" contracts pin on the same seam.
+
+Sprint 213a's original stub raised a "deferred to sprint 213b" error
+unconditionally. Sprint 213b (2026-08-26) wired the standing-session
+dispatch when `session_registry` is bound. When it is NOT bound, path 1
+still raises a typed ValueError so the model reads a clear refusal via
+tool_loop's `ToolResult(ok=False, error=...)` shape.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +20,28 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
 
 from substrate import api
 from substrate.adapters import DeterministicResponder
 from substrate.topologies.session import UserMessage, session_topology
 from substrate.topologies.session_registry import SessionManifest, SessionRegistry
 from substrate.topologies.tool_loop.delegate import make_delegate
+
+
+def test_child_session_name_dispatch_without_registry_raises_typed(tmp_path: Path) -> None:
+    d = make_delegate(responder=DeterministicResponder(seed=0), root=tmp_path)
+    with pytest.raises(ValueError, match="child_session_name"):
+        d.run([{"task": "review this", "child_session_name": "reviewer"}])
+
+
+def test_error_message_names_the_registry_seam(tmp_path: Path) -> None:
+    """The error string names `session_registry` so the model (or a human reading
+    the tool result) knows what unblocks the path.
+    """
+    d = make_delegate(responder=DeterministicResponder(seed=0), root=tmp_path)
+    with pytest.raises(ValueError, match="session_registry"):
+        d.run([{"task": "review", "child_session_name": "reviewer"}])
 
 
 def _reviewer_factory(
@@ -82,6 +107,8 @@ def test_path_1_routes_into_standing_session_with_real_registry(tmp_path: Path) 
     parent_workspace = tmp_path / "parent_ws"
     parent_workspace.mkdir()
     d = make_delegate(
+        responder=DeterministicResponder(seed=0),
+        root=parent_workspace,
         session_registry=registry,
         parent_session_id="s_parent",
     )
@@ -90,6 +117,7 @@ def test_path_1_routes_into_standing_session_with_real_registry(tmp_path: Path) 
     assert result["via"] == "standing_session:reviewer", result
     assert Path(result["child_root"]) == reviewer_record, result
     assert "answer" in result and result["answer"], result
+    assert result["steps"] == -1  # standing-session marker per delegate.py:519.
 
     # Reviewer's record grew with the delegated UserMessage.
     envelopes = list(api.read_record(reviewer_record))

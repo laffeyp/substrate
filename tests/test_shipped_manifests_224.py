@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""Sprint 224 — the shipped application manifests parse and match signatures. Kernel sprint 320
-replaced the `code_review` application with Review (`topologies/runs/review.py`).
+"""Sprint 224 — four shipped application manifests parse and match signatures.
 
 Card's dual contract: each manifest's [inputs] schema matches its
 topology's signature. The parse test proves the file is valid TOML +
@@ -26,11 +25,27 @@ def specs() -> dict[str, ApplicationSpec]:
     return load_manifests()
 
 
-def test_the_shipped_manifests_are_present(specs: dict[str, ApplicationSpec]) -> None:
-    assert {"best_of_n_verified", "research_sweep", "daily"} <= set(specs), (
-        f"expected the shipped manifests; got {sorted(specs)}"
+def test_all_four_manifests_present(specs: dict[str, ApplicationSpec]) -> None:
+    assert {"code_review", "best_of_n_verified", "research_sweep", "daily"} <= set(specs), (
+        f"expected the four shipped manifests; got {sorted(specs)}"
     )
-    assert "code_review" not in specs  # replaced by Review (kernel sprint 320)
+
+
+def test_code_review_manifest_inputs_match_fanout_review_signature(
+    specs: dict[str, ApplicationSpec],
+) -> None:
+    """Wire input keys must be a subset of the topology's kwarg names
+    OR follow the roles-to-models `<role>_model` convention (§7.6 line
+    1038). A drift raises `dual_contract_fail` per the card halt."""
+    from substrate.topologies.applications.fanout_review import fanout_review_topology
+    from substrate.topologies.code_review import DEFAULT_ROLES
+
+    kwargs = set(inspect.signature(fanout_review_topology).parameters) | {"repo"}
+    role_model_keys = {f"{role}_model" for role in DEFAULT_ROLES} | {"judge_model"}
+    accepted = kwargs | role_model_keys
+    manifest_keys = set(specs["code_review"].inputs_schema)
+    unknown = manifest_keys - accepted
+    assert not unknown, f"code_review manifest names inputs not on the signature: {unknown}"
 
 
 def test_best_of_n_verified_manifest_inputs_match_signature(

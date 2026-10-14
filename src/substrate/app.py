@@ -21,13 +21,8 @@ from .interpreter import release_python_home
 from .templates.interpolate import parse_template_header
 from .templates.interpolate import render as render_template
 from .topologies import bundled
-from .topologies import workspace
-from .topologies.runs import build
-from .topologies.runs import hold as run_hold
-from .topologies.runs import review
 from .topologies.instruments.grader import score_grades
 from .topologies.instruments.scoring import select_scoring_rule
-from .topologies.session.handoff import handoff_calls
 from .topologies.session.language_lines import language_lines, line_json
 from .topologies.session.language_view import language_view
 from .topologies.session.vocabulary import MODEL_REPLY
@@ -62,10 +57,8 @@ __all__ = [
     "TOOL_CALL",
     "TOOL_RESULT",
     "TornRecordOnResume",
-    "build",
     "bundled",
     "daemon_client",
-    "handoff_calls",
     "language_catalog",
     "language_drift",
     "language_lines",
@@ -75,10 +68,7 @@ __all__ = [
     "parse_template_header",
     "release_python_home",
     "render_template",
-    "review",
-    "run_hold",
     "scan_record_status",
     "score_grades",
-    "workspace",
     "select_scoring_rule",
 ]

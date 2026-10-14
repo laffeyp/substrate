@@ -558,21 +558,6 @@ def language(root: str, out: str | None) -> None:
 
 
 @main.command()
-@click.argument("root", type=click.Path(exists=True, file_okay=False))
-def handoff(root: str) -> None:
-    """Topology calls per turn of a session record (delegate, review, build), with each turn's
-    handoff position and model (session vocabulary § Y.3). Read-only."""
-    import json as _json
-
-    rows = app.handoff_calls(api.read_record(Path(root), resolve_blobs=True))
-    for row in rows:
-        click.echo(_json.dumps(row, separators=(",", ":")))
-    if rows:
-        total = sum(r["calls"] for r in rows)
-        _err.print(f"{total} topology calls in {len(rows)} turns ({total / len(rows):.2f} a turn)")
-
-
-@main.command()
 @click.argument("root", type=click.Path(exists=True))
 @click.option("--level", type=click.Choice(["1", "2", "3a", "3b"]), default="1")
 @click.option("--diff", "diff_root", type=click.Path(exists=True), default=None)

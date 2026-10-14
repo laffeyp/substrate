@@ -137,8 +137,8 @@ class SessionManifest(Struct, frozen=True):
     # sessions. For a child sub-agent in a session composite (e.g.
     # sprint 225c's pair_coding reviewer), holds the parent's session_id.
     # POST /end and DELETE on the parent cascade to every child via
-    # list_children(parent_id). Kernel K323: delegate children nest, so the
-    # cascades walk `descendants(parent_id)`, deepest first.
+    # list_children(parent_id). The relationship is one level deep — a
+    # child of a child is not a supported shape.
     composite_of: str | None = None
     # Sprint 032c (piece-G mechanical translation): per-session driver
     # params. `OllamaResponder.__init__` accepts think/max_tokens/timeout/
@@ -156,21 +156,11 @@ class SessionManifest(Struct, frozen=True):
     # (normal, neutral). Set at creation; mutable via PATCH /api/session/<id> {length, tone}.
     length: str | None = None
     tone: str | None = None
-    handoff: str | None = None  # Kernel K324 (§ Y); None is the default (normal)
 
 
-def _check_controls(length: str | None, tone: str | None, handoff: str | None = None) -> None:
-    """Refuse an unknown Length, Tone or Handoff position (§ T, § Y): ValueError, a 400 at the
-    daemon."""
-    from .session.vocabulary import HandoffPosition, LengthPosition, TonePosition
-
-    if handoff is not None:
-        try:
-            HandoffPosition(handoff)
-        except ValueError as exc:
-            raise ValueError(
-                f"handoff must be one of {[p.value for p in HandoffPosition]}; got {handoff!r}"
-            ) from exc
+def _check_controls(length: str | None, tone: str | None) -> None:
+    """Refuse an unknown Length or Tone position (§ T): ValueError, a 400 at the daemon."""
+    from .session.vocabulary import LengthPosition, TonePosition
 
     if length is not None:
         try:
@@ -470,26 +460,13 @@ class SessionRegistry:
         driver_params: dict[str, Any] | None = None,
         length: str | None = None,
         tone: str | None = None,
-        branch: str | None = None,
-        handoff: str | None = None,
     ) -> SessionManifest:
         """Register a new session. Atomic against by-name.json under `fcntl.flock`.
 
         If `name` is set and already in the index, raises `NameCollision` with
         the existing session_id. The caller shapes the 409 response.
-
-        K315: the workspace is made a git repository when it is not inside one
-        (`workspace.ensure_repository`). With `branch`, the session works in its own
-        worktree of that repository, on that branch, under `<base>/wt/<session_id>`, and its
-        manifest names the worktree with shape `worktree`.
         """
-        _check_controls(length, tone, handoff)
-        from .workspace import ensure_repository, make_worktree
-
-        ensure_repository(Path(workspace))
-        if branch is not None:
-            workspace = str(make_worktree(Path(workspace), branch, self._base / "wt" / session_id))
-            workspace_shape = WorkspaceShape.WORKTREE
+        _check_controls(length, tone)
         manifest = SessionManifest(
             session_id=session_id,
             name=name,
@@ -507,7 +484,6 @@ class SessionRegistry:
             driver_params=driver_params,
             length=length,
             tone=tone,
-            handoff=handoff,
         )
         # Sprint 223e race fix: bridge finds a session by_name and dispatches
         # a turn immediately after create. Under flock, the by-name.json write
@@ -601,8 +577,6 @@ class SessionRegistry:
           - "driver_version" (str)          — CLI model chosen in the version picker
           - "cache_layout" (bool)           — session-stable texts on the system channel
                                                (UI sprint 121; the daemon checks the driver)
-          - "script"     (list)             — a deterministic session's [tool, args] calls
-                                               (UI sprint 176)
 
         None clears every override — the resolver builds Responders with
         pure defaults again. An unknown key or wrong type raises
@@ -635,7 +609,6 @@ class SessionRegistry:
                 DriverParamKey.NUM_CTX: int,
                 DriverParamKey.DRIVER_VERSION: str,
                 DriverParamKey.CACHE_LAYOUT: bool,
-                DriverParamKey.SCRIPT: list,
             }
             allowed_names = {k.value for k in allowed}
             unknown = set(params.keys()) - allowed_names
@@ -677,14 +650,6 @@ class SessionRegistry:
                 # mypy --strict tracks the comparison. int/float(value) rejects
                 # `object` under call-overload, and the isinstance narrowing
                 # gets erased at branch entry — cast is the least-noisy fix.
-                if key_enum is DriverParamKey.SCRIPT and not all(
-                    isinstance(step, list)
-                    and len(step) == 2
-                    and isinstance(step[0], str)
-                    and isinstance(step[1], list)
-                    for step in cast(list[Any], value)
-                ):
-                    raise ValueError("driver_params.script must be a list of [tool, args] pairs")
                 if key_enum is DriverParamKey.MAX_TOKENS:
                     v_int = cast(int, value)
                     if v_int < 0:
@@ -738,12 +703,7 @@ class SessionRegistry:
         return self._update_manifest(session_id, bundle=bundle)
 
     def set_controls(
-        self,
-        session_id: str,
-        *,
-        length: str | None,
-        tone: str | None,
-        handoff: str | None = None,
+        self, session_id: str, *, length: str | None, tone: str | None
     ) -> SessionManifest:
         """Kernel K296: change the Length and Tone positions. The next turn's topology carries them;
         the model step writes `SessionChanged` for each that differs from the record, and
@@ -751,8 +711,8 @@ class SessionRegistry:
         session, ValueError on an unknown position."""
         if session_id not in self._manifests:
             raise KeyError(f"unknown session_id {session_id!r}")
-        _check_controls(length, tone, handoff)
-        return self._update_manifest(session_id, length=length, tone=tone, handoff=handoff)
+        _check_controls(length, tone)
+        return self._update_manifest(session_id, length=length, tone=tone)
 
     def set_driver(self, session_id: str, driver: str) -> SessionManifest:
         """Change the driver for a session. In-memory catalog and manifest.json
@@ -796,23 +756,6 @@ class SessionRegistry:
         catalog — a small n; the daemon holds sessions in the hundreds, not
         millions."""
         return [m for m in self.list_all() if m.composite_of == parent_id]
-
-    def descendants(self, parent_id: str) -> list[SessionManifest]:
-        """Every session under `parent_id` through `composite_of`, deepest first, so ending them in
-        order ends a child before its parent (kernel K323: delegate children nest)."""
-        out: list[SessionManifest] = []
-        seen = {parent_id}
-
-        def walk(pid: str) -> None:
-            for child in self.list_children(pid):
-                if child.session_id in seen:
-                    continue
-                seen.add(child.session_id)
-                walk(child.session_id)
-                out.append(child)
-
-        walk(parent_id)
-        return out
 
     # ── standing-session turn (delegate path 1 + POST /api/session/<id>/turn) ─
 
@@ -1327,12 +1270,9 @@ def _record_has_envelopes(record_root: Path) -> bool:
 def _stop_background_tasks(session_id: str, because: str) -> None:
     """Stop the bash tool's background tasks this session owns (UI sprint 103). The daemon builds
     session tools with owner=session_id."""
-    from .runs import hold
     from .tool_loop.background import TABLE
 
     TABLE.stop_owner(session_id, because)
-    # v0.12 (§ X, K319): the topology runs this session started end with it.
-    hold.TABLE.stop_owner(session_id)
 
 
 _STOP_GRACE_S = 10.0
@@ -1639,7 +1579,6 @@ def _manifest_to_dict(m: SessionManifest) -> dict[str, Any]:
         # Kernel K296: the Length and Tone positions; None is the default.
         Control.LENGTH: m.length,
         Control.TONE: m.tone,
-        Control.HANDOFF: m.handoff,
     }
 
 
@@ -1683,7 +1622,6 @@ def _manifest_from_dict(d: dict[str, Any]) -> SessionManifest:
         driver_params=(dict(d["driver_params"]) if d.get("driver_params") is not None else None),
         length=str(d[Control.LENGTH]) if d.get(Control.LENGTH) is not None else None,
         tone=str(d[Control.TONE]) if d.get(Control.TONE) is not None else None,
-        handoff=str(d[Control.HANDOFF]) if d.get(Control.HANDOFF) is not None else None,
     )
 
 

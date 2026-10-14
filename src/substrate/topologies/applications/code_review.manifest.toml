@@ -1,0 +1,33 @@
+# Application manifest — code_review.
+# Wraps fanout_review_topology (fanout_review.py:91). fanout_review is the
+# outer wrapper over code_review_topology that adds `changed_files(repo, ref)`
+# and emits a ReviewSubject event before the review fires (per §7.1).
+
+name = "code_review"
+description = "Fan-out review of a repo diff by N reviewer models with a judge quorum."
+runs = "one-shot"
+default_bundle = "reviewer"
+
+# TECH-SPEC §7.6 line 1038: each role that takes a model is a `<role>_model`
+# key. `fanout_review_topology(responders=)` binds one Responder per role
+# from `code_review.DEFAULT_ROLES` (security, performance, style,
+# correctness, clarity). `judge` is a separate Responder. The daemon
+# resolves each `<role>_model` string via _agent_models at POST time.
+[inputs]
+repo = {type = "string"}
+ref = {type = "string", default = "HEAD~1"}
+quorum = {type = "integer", default = 3}
+security_model = {type = "string", default = "kimi-k2.6:cloud"}
+performance_model = {type = "string", default = "kimi-k2.6:cloud"}
+style_model = {type = "string", default = "kimi-k2.6:cloud"}
+correctness_model = {type = "string", default = "kimi-k2.6:cloud"}
+clarity_model = {type = "string", default = "kimi-k2.6:cloud"}
+judge_model = {type = "string", default = "claude"}
+
+[output]
+kind = "review-transcript"
+
+# Piece H (sprint 230) reads these; sprint 231 ships the default reviewer
+# bundle whose methodology fills the slot.
+[slots]
+methodology = {default = "bundle:methodology"}
