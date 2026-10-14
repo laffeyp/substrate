@@ -68,6 +68,9 @@ class DriverParamKey(StrEnum):
     # session-stable text on the system channel. Off unless the operator sets it; the daemon
     # accepts it only for a driver whose profile names a system flag.
     CACHE_LAYOUT = "cache_layout"
+    # UI sprint 182: a `deterministic` session's tool calls, each [tool, args], made in order every
+    # turn (the session topology's `script`). Other drivers ignore it.
+    SCRIPT = "script"
 
 
 __all__ = [

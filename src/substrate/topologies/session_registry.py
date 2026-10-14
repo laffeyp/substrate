@@ -601,6 +601,8 @@ class SessionRegistry:
           - "driver_version" (str)          — CLI model chosen in the version picker
           - "cache_layout" (bool)           — session-stable texts on the system channel
                                                (UI sprint 121; the daemon checks the driver)
+          - "script"     (list)             — a deterministic session's [tool, args] calls
+                                               (UI sprint 182)
 
         None clears every override — the resolver builds Responders with
         pure defaults again. An unknown key or wrong type raises
@@ -633,6 +635,7 @@ class SessionRegistry:
                 DriverParamKey.NUM_CTX: int,
                 DriverParamKey.DRIVER_VERSION: str,
                 DriverParamKey.CACHE_LAYOUT: bool,
+                DriverParamKey.SCRIPT: list,
             }
             allowed_names = {k.value for k in allowed}
             unknown = set(params.keys()) - allowed_names
@@ -674,6 +677,14 @@ class SessionRegistry:
                 # mypy --strict tracks the comparison. int/float(value) rejects
                 # `object` under call-overload, and the isinstance narrowing
                 # gets erased at branch entry — cast is the least-noisy fix.
+                if key_enum is DriverParamKey.SCRIPT and not all(
+                    isinstance(step, list)
+                    and len(step) == 2
+                    and isinstance(step[0], str)
+                    and isinstance(step[1], list)
+                    for step in cast(list[Any], value)
+                ):
+                    raise ValueError("driver_params.script must be a list of [tool, args] pairs")
                 if key_enum is DriverParamKey.MAX_TOKENS:
                     v_int = cast(int, value)
                     if v_int < 0:
