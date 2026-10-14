@@ -533,6 +533,14 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### K322–K324: statements judged, delegate children as sessions, the handoff setting (2026-10-14)
+- **Roadmap round 2** `process/planning/ROADMAP-2026-10-13-core-topologies-r2.md`; its check found round 1 built the command half of r8 § 3.4 and not the statement half.
+- **K322** vocabulary v0.12.4: a card's statement checks are judged by one model call apart from the worker (card, diff, the worker's reply), recorded as `ChecksRun.judge`; a failed statement keeps the run going with its reason; a review's statement is now judged.
+- **K323** every delegate child is a registry session on the caller's model (unless named), in its workspace, with its bundle, controls and tools, `composite_of` the caller; no six-step cap; depth and tree budget from the registry; `descendants` for the nested end/delete cascades. The bare `tool_loop` child, its runner and seven test files that tested it are gone.
+- **K324** vocabulary v0.13 § Y: the `handoff` control (`rare`, `normal`, `eager`), its texts, `substrate handoff <record>` (topology calls per turn). Three hand-written lists of controls were each missing it; all now follow `Control`.
+- **Open.** Live, `glm-5.2:cloud` and `kimi-k2.7-code:cloud` made 0 topology calls at `rare` and at `eager` on a build-shaped task; each edited the files itself. `build` hands back a branch it never merges, so a model asked to change a file here does it directly. The setting's effect depends on what `build` returns.
+- **Tests.** Kernel suite 1,704 passed, 14 skipped; mypy --strict and lint-imports clean.
+
 ### K314–K321: topologies that run work, held by their caller (2026-10-13)
 - **Plan.** Research rounds 1–8 `process/planning/RESEARCH-2026-10-13-core-topologies*.md` (round 8 approved), roadmap `ROADMAP-2026-10-13-core-topologies.md`. A run takes a card (what to do, where, how to tell it is done; the SDD card is accepted, never required), reports in a fixed shape, is checked by a role that did not do the work, and is held by the session that started it.
 - **K314** session vocabulary v0.12 § X (run started and ended, card, checks, report; outcomes; roles). **K315** `topologies/workspace.py`: every workspace a git repository; worktrees per session or run. **K316** cards, plain and SDD; a card missing one of the three is refused, naming it. **K317** checks run with the gate's core in the worktree, the record checked against the vocabulary, the report written from the card, checks and git. **K318** the driven session: the checks write its next message; ends done, stuck, failed or stopped. **K319, K319b** the caller's hold: a run returns at once, its end is told once at the caller's next model step; stop, pause, resume, step, replay; the `run` tool.

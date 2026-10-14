@@ -37,6 +37,7 @@ from .vocabulary import (
     CardCheck,
     CardForm,
     CheckResult,
+    JudgeCall,
     Control,
     RunLimits,
     RunOutcome,
@@ -145,6 +146,7 @@ class SessionStarted(Struct, frozen=True):
     # § T (K296): the Length and Tone positions the session opened with; empty before v0.8.
     length: str = ""
     tone: str = ""
+    handoff: str = ""  # v0.13 (§ Y, K324): the Handoff position; empty before v0.13
 
 
 class UserMessage(Struct, frozen=True):
@@ -346,6 +348,7 @@ class ChecksRun(Struct, frozen=True):
     record_problems: list[str]
     passed: bool
     head: str | None = None  # v0.12.2: the worktree's commit at the check
+    judge: JudgeCall | None = None  # v0.12.4: the call that judged the statement checks
 
 
 class ReportWritten(Struct, frozen=True):
@@ -395,9 +398,8 @@ _MAX_CONSECUTIVE_FAILS = 3
 _REWRITTEN_ON_CHANGE: dict[str, tuple[str, ...]] = {
     "bundle": ("bundle_style", "bundle_methodology", "per_turn"),
     "per_turn": ("per_turn",),
-    # § T (K296): either control changed writes the `control` source again.
-    Control.LENGTH: (PromptSource.CONTROL,),
-    Control.TONE: (PromptSource.CONTROL,),
+    # § T (K296), § Y (K324): any control changed writes the `control` source again.
+    **{control: (PromptSource.CONTROL,) for control in Control},
 }
 
 
@@ -457,6 +459,7 @@ def _session_started_factory(
     driver_context_source: str = "",
     length: str = "",
     tone: str = "",
+    handoff: str = "",
 ) -> Callable[[], Any]:
     """Sprint 240 — the SessionStarted instrument's producer body.
 
@@ -489,6 +492,7 @@ def _session_started_factory(
             driver_context_source=driver_context_source,
             length=length,
             tone=tone,
+            handoff=handoff,
         )
 
     return lambda: _session_started
@@ -1043,6 +1047,7 @@ def session_topology(
     driver_context_source: str = "",
     length: str | None = None,
     tone: str | None = None,
+    handoff: str | None = None,  # v0.13 (§ Y, K324)
     language: bool = False,
     driven: "DrivenRun | None" = None,
 ) -> Callable[[api.TopologyBuilder], None]:
@@ -1206,6 +1211,8 @@ def session_topology(
         current_settings[Control.LENGTH] = length
     if tone is not None:
         current_settings[Control.TONE] = tone
+    if handoff is not None:
+        current_settings[Control.HANDOFF] = handoff
 
     # Sprint 240: freeze the tool_names tuple at build time so the
     # SessionStarted instrument's closure captures a snapshot even if the
@@ -1247,6 +1254,7 @@ def session_topology(
                 driver_context_source=driver_context_source,
                 length=length or "",
                 tone=tone or "",
+                handoff=handoff or "",
             ),
             deterministic=True,
         )
@@ -1331,6 +1339,7 @@ def session_topology(
             memory=memory,
             length=length,
             tone=tone,
+            handoff=handoff,
         )
         # K299: always present, even with no sources, because it records every mid-session change.
         has_session_prompt = True
@@ -1708,6 +1717,8 @@ def session_topology(
                 own_record=_own_record,
                 user_turns=lambda ctx: int(ctx.views["user_turns"].value()),
                 has_session_prompt=has_session_prompt,
+                driver=driver,
+                driver_name=driver_name,
             )
             termination = api.any_of(
                 api.finalise_on(REPORT_WRITTEN),

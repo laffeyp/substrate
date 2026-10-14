@@ -26,7 +26,7 @@ from ..session import CardAccepted, session_topology
 from ..session.model_class import class_variant
 from ..session.transcript import _est_tokens
 from ..session.vocabulary import CardForm, RunLimits, RunRole, RunSession
-from ..tool_loop.tools import Tool, full_suite
+from ..tool_loop.tools import TOOL_NAME_BUILD, Tool, full_suite
 from ..workspace import make_worktree
 from .card import CardRefused, read_card, read_sdd_card
 from .driven import DrivenRun
@@ -70,9 +70,11 @@ def start_build(
     records: Path,
     check_timeout_s: float = 300,
     script: list[tuple[str, list[Any]]] | None = None,
+    judge: Any = None,
 ) -> tuple[str, str]:
     """Start the build and return (its run id, its branch) at once. `driver_for(worktree)` gives the
-    worker's model, run in its worktree. `script` is a deterministic worker's tool calls, for tests."""
+    worker's model, run in its worktree. `script` is a deterministic worker's tool calls, for tests; `judge` checks
+    the card's statements (K322), the worker's own model when None."""
     branch = build_branch(run_id)
     first = _first_message(card, branch)
     budget = int(driver_context_tokens * _HEADROOM)
@@ -100,14 +102,19 @@ def start_build(
         model_class=model_class,
         script=script,
         driven=DrivenRun(
-            card=card, worktree=wt, base=base, check_timeout_s=check_timeout_s, first_message=first
+            card=card,
+            worktree=wt,
+            base=base,
+            check_timeout_s=check_timeout_s,
+            first_message=first,
+            judge=judge,
         ),
     )
     root = records / run_id
     session = RunSession(
         session_id=session_id, role=RunRole.WORKER, record_root=str(root), driven=True
     )
-    table.start(owner, run_id, "build", [session], factory, root)
+    table.start(owner, run_id, BUILD_TOOL_NAME, [session], factory, root)
     return run_id, branch
 
 
@@ -134,7 +141,7 @@ def card_from_form(form: dict[str, Any], root: Path) -> CardAccepted:
     )
 
 
-BUILD_TOOL_NAME = "build"
+BUILD_TOOL_NAME = TOOL_NAME_BUILD
 _BUILD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {

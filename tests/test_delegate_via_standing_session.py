@@ -105,8 +105,6 @@ async def test_delegate_routes_into_standing_session(tmp_path: Path) -> None:
 
     # Parent delegate call — synchronous seam under a fresh event loop.
     d = make_delegate(
-        responder=DeterministicResponder(seed=0),
-        root=tmp_path / "parent",
         session_registry=registry,
         parent_session_id="s_parent",
     )
@@ -116,7 +114,6 @@ async def test_delegate_routes_into_standing_session(tmp_path: Path) -> None:
         lambda: d.run([{"task": "please review this diff", "child_session_name": "reviewer"}]),
     )
     assert result["via"] == "standing_session:reviewer"
-    assert result["steps"] == -1
     assert Path(result["child_root"]) == reviewer_record
     # Reviewer's record grew: a second UserMessage lands + a second ModelReply.
     user_msgs = [e for e in api.read_record(reviewer_record) if e["kind"] == "UserMessage"]
@@ -182,8 +179,6 @@ async def test_delegated_turn_index_comes_from_reviewer_not_parent(tmp_path: Pat
     await api.Runtime(parent_record).run(parent_topology)
 
     d = make_delegate(
-        responder=DeterministicResponder(seed=0),
-        root=tmp_path / "parent",
         session_registry=registry,
         parent_session_id="s_parent",
         parent_record_root=parent_record,
@@ -243,9 +238,8 @@ async def test_delegate_reads_only_this_turns_final_answer(tmp_path: Path) -> No
     prior_last_final_seq, prior_last_final_text = turn_replies(api.read_record(reviewer_record))[-1]
 
     d = make_delegate(
-        responder=DeterministicResponder(seed=0),
-        root=tmp_path / "parent",
         session_registry=registry,
+        parent_session_id="s_parent",
     )
     import asyncio
 
@@ -287,14 +281,12 @@ async def test_two_parents_delegating_to_same_reviewer_serialize(tmp_path: Path)
     await _open_reviewer(reviewer_record)
 
     d1 = make_delegate(
-        responder=DeterministicResponder(seed=0),
-        root=tmp_path / "parent1",
         session_registry=registry,
+        parent_session_id="s_parent",
     )
     d2 = make_delegate(
-        responder=DeterministicResponder(seed=0),
-        root=tmp_path / "parent2",
         session_registry=registry,
+        parent_session_id="s_parent",
     )
     results: list[object] = [None, None]  # type: ignore[list-item]
     errors: list[BaseException] = []

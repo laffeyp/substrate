@@ -21,7 +21,7 @@ from typing import Any
 
 from ..session import session_topology
 from ..session.vocabulary import RunLimits, RunRole, RunSession
-from ..tool_loop.tools import Tool, full_suite
+from ..tool_loop.tools import TOOL_NAME_REVIEW, Tool, full_suite
 from ..workspace import make_detached_worktree
 from .card import read_card
 from .driven import DrivenRun
@@ -105,9 +105,11 @@ def start_review(
     driver_context_tokens: int,
     worktrees: Path,
     records: Path,
+    judge: Any = None,
 ) -> list[str]:
     """Start one reviewer per style and return their run ids at once (`<run_id>-<style>`).
-    `driver_for(worktree)` gives the reviewer's model, run in its worktree."""
+    `driver_for(worktree)` gives the reviewer's model, run in its worktree; `judge` checks the
+    review's statement (K322), the reviewer's own model when None."""
     for s in styles:
         style_text(s)  # refuse an unknown style before anything starts
     head, changed, diff = resolve_target(Path(repo), target)
@@ -138,18 +140,19 @@ def start_review(
                 base=base,
                 check_timeout_s=60,
                 first_message=_first_message(style, target, changed, diff, focus),
+                judge=judge,
             ),
         )
         root = records / rid
         session = RunSession(
             session_id=f"s_{rid}", role=RunRole.REVIEWER, record_root=str(root), driven=True
         )
-        table.start(owner, rid, "review", [session], factory, root)
+        table.start(owner, rid, REVIEW_TOOL_NAME, [session], factory, root)
         run_ids.append(rid)
     return run_ids
 
 
-REVIEW_TOOL_NAME = "review"
+REVIEW_TOOL_NAME = TOOL_NAME_REVIEW
 _REVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {

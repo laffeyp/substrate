@@ -1,3 +1,7 @@
+**Status: RATIFIED — v0.13 (2026-10-13).** Sprint K324 adds § Y: a third control, `handoff`, for how readily the model hands work to a topology (`delegate`, `review`, `build`) instead of doing it itself (research r8 § 5), and the measure of its effect, topology calls per turn. Agent-resolved; additive.
+
+**Status: RATIFIED — v0.12.4 (2026-10-13).** Sprint K322 adds `ChecksRun.judge` (§ X.3): the checking role's call that judged the card's statement checks, its model, prompt and reply. A statement check's `passed` is now the judge's answer and its `note` the judge's reason; `ChecksRun.passed` requires every statement to hold. r8 § 3.4 asks that checks be run by a role that did not do the work; until now statements were run by no one, and a card whose done-condition was a statement ended `done` unexamined. Agent-resolved; additive except `passed`, which now counts statements.
+
 **Status: RATIFIED — v0.12.3 (2026-10-13).** Sprint K319b adds `RunPaused` and `RunResumed` (§ X.3) and the trigger `continue-on-resumed` (§ X.5): a caller pauses and resumes a driven run on its record. § X.8 left pause "until K319 shows otherwise"; K319 showed that an idle run whose termination says continue is failed as stuck, so a pause must be on the record for the termination to read. Agent-resolved; additive.
 
 **Status: RATIFIED — v0.12.2 (2026-10-13).** Sprint K318 adds `ChecksRun.head` (the worktree's commit at the check, so a stall is read from the record), the trigger `card-on-session-prompt` (the card waits for a session prompt, as `first_message` does), and restates the card's order rule in § X.6: `CardAccepted` precedes the first `UserMessage` (a session prompt's fragments may come first). Agent-resolved; additive except the restated rule, which loosens it.
@@ -307,10 +311,11 @@ A topology run is started by a session, its caller, through a topology's tool. I
 | `after_seq` | int | the `Returned` they follow |
 | `results` | list of `CheckResult` | per card check: `index`, `kind`, `passed` (bool, or null when not run), `exit` (int or null), `output_tail`, `note` |
 | `record_problems` | list of str | what the check of the session's own events against this vocabulary found |
-| `passed` | bool | every command check passed and `record_problems` is empty |
+| `passed` | bool | every command check passed, every statement check holds (v0.12.4), and `record_problems` is empty |
 | `head` | str or null | the worktree's commit at the check (v0.12.2); a stall is read from it |
+| `judge` | `JudgeCall` or null | v0.12.4: the call that judged the statement checks — `model` (str), `prompt` (str), `reply` (str); null when the card has none |
 
-A `statement` check is judged by a reviewer, not run; until a reviewer judges it (K320) its `passed` is null and its note says so.
+A `statement` check is judged, not run (v0.12.4): after each turn one model call apart from the worker reads the card, the worktree's diff since the run's base and the worker's last reply, and answers each statement "holds" or "does not hold" with a reason. Its `passed` is that answer and its `note` the reason. A statement the reply leaves unanswered does not hold, and its note says so.
 
 `ReportWritten` — the run's report, its last application event:
 
@@ -929,6 +934,31 @@ Where a text meets the guidance level's own rules, the level's rules win: a posi
 | `SessionChanged.field` | adds `length`, `tone` | A position differs from the record at a turn's first step (§ P.4). |
 
 A change writes the `control` source again with the change's seq as its generation (§ P.4). A rewrite that leaves a source with no text writes one empty fragment of that source, `provenance = {cleared: true}`, so the cohort's newest generation is empty and the old text stops; this holds for every rewritten source, `per_turn` included.
+
+## Y. v0.13 — Handoff (2026-10-13, sprint K324)
+
+Research: `process/planning/RESEARCH-2026-10-13-core-topologies-r8.md` § 5. A setting beside length and tone, written into the session prompt and changeable mid-session the way they are; its effect is read from the record.
+
+### Y.1 The control and its positions
+
+| Control | Positions | Default |
+|---|---|---|
+| `handoff` | `rare`, `normal`, `eager` | `normal` |
+
+`Control.HANDOFF` and `HandoffPosition` in `topologies/session/vocabulary.py`; `HANDOFF_TOOLS` (`delegate`, `review`, `build`) names the tools it is about. Everything in § T holds for it: an unknown position is refused at create and change; the default writes no text; any other position writes one `control` fragment (`provenance = {control: "handoff", position}`); `SessionStarted.handoff` records the opening position (empty before v0.13); `SessionChanged.field` adds `handoff`; a change writes the `control` source again. A delegate child opens with its caller's position.
+
+### Y.2 The texts (`HANDOFF_TEXTS`)
+
+| Position | Text |
+|---|---|
+| `rare` | Do the work yourself. Use delegate, review or build only when the user asks you to. |
+| `eager` | Hand work off. For any change you can check with a command, call build with a card (what to do, where, the command) instead of editing files yourself; ask review to check a finished change; give a self-contained subtask to delegate. Edit files yourself only for a one-line fix. |
+
+The tools' own descriptions are unchanged at every position; the text says how readily to use them.
+
+### Y.3 The measure
+
+`handoff_calls(events)`: per turn of a session record, the number of `ToolCall`s whose tool is in `HANDOFF_TOOLS`, with the turn's `handoff` position (the opening position, then each `SessionChanged {field: "handoff"}`). `substrate handoff <record>` prints one line per turn. Read across sessions, it gives calls per turn by position and by model.
 
 ## U. v0.9 — guidance changed mid-session (2026-10-12, sprint K298)
 

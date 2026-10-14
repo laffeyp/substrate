@@ -46,7 +46,7 @@ from ..session.vocabulary import (
     SessionEndReason,
 )
 from ..tool_loop.kinds import TOOL_CALL
-from ..tool_loop.tools import Tool
+from ..tool_loop.tools import TOOL_NAME_RUN, Tool
 
 RUN_PAUSED_STATUS = "paused"  # Runtime.run / resume's status for a run that paused
 
@@ -321,7 +321,7 @@ def run_notice(e: TopologyRunEnded) -> str:
 # The process's table: one app per machine, as the background-task table.
 TABLE = RunTable()
 
-RUN_TOOL_NAME = "run"
+RUN_TOOL_NAME = TOOL_NAME_RUN
 RUN_ACTIONS = ("stop", "pause", "resume", "events", "replay")
 _RUN_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",

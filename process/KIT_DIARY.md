@@ -19,6 +19,18 @@
 
 ---
 
+### 2026-10-14 — Three hand-written lists, and a setting that changed the prompt and not the behaviour
+
+**Context.** K322–K324, U178–U179.
+
+**What happened.** Adding a third control, the prompt assertion from the 2026-10-12 postmortem failed at once: the change was not recorded and the text was not rewritten. Three lists named the controls by hand (`SESSION_CHANGE_FIELDS`, the field-to-source map, the view's opening defaults) and each lacked the new one. They now follow `Control`. Then the live check: the eager text reached the prompt, the tools reached the model, and two models still did the work themselves.
+
+**What got in the way.** The first live task (summarise three files) was one the eager text itself exempts, so its zero said nothing; the probe has to be the case the text names. And the effect of a setting about using a tool depends on what the tool returns: `build` returns a branch, not the change the user asked for.
+
+**What the kit could say.** A vocabulary that adds a member to an enum is checked by deriving every list of that enum from it, not by remembering the lists. A setting meant to change behaviour is not done when its text reaches the prompt; it is done when a live run shows the behaviour move, on a task the text actually covers.
+
+---
+
 ### 2026-10-13 — An environment leak that only the installed app had, and a word read as a wall
 
 **Context.** K314–K321 and U176–U177: Build and Review as runs a session holds, observed on a real model in the installed app.

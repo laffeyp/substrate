@@ -29,6 +29,7 @@ from msgspec import Struct
 
 from ...language.drift import Direction
 from ..tool_loop.kinds import FINAL_ANSWER
+from ..tool_loop.tools import TOOL_NAME_BUILD, TOOL_NAME_DELEGATE, TOOL_NAME_REVIEW
 
 # Sprint 070 (2026-09-02): closed-set string values as StrEnum. Each class
 # below carries the values documented in session-vocabulary.md; wire
@@ -223,6 +224,14 @@ class CheckResult(Struct, frozen=True):
     note: str
 
 
+class JudgeCall(Struct, frozen=True):
+    """v0.12.4 (§ X.3): the checking role's call that judged a card's statement checks."""
+
+    model: str
+    prompt: str
+    reply: str
+
+
 class ReturnReason(StrEnum):
     """Returned.reason (§ K.2): how the turn ended."""
 
@@ -362,6 +371,7 @@ SYSTEM_SOURCES: Final[frozenset[PromptSource]] = frozenset(
 class Control(StrEnum):
     LENGTH = "length"
     TONE = "tone"
+    HANDOFF = "handoff"  # v0.13 (§ Y, K324)
 
 
 class LengthPosition(StrEnum):
@@ -377,8 +387,24 @@ class TonePosition(StrEnum):
     DRY = "dry"
 
 
+# v0.13 (§ Y, K324): how readily the model hands work to a topology instead of doing it itself.
+class HandoffPosition(StrEnum):
+    RARE = "rare"
+    NORMAL = "normal"
+    EAGER = "eager"
+
+
 LENGTH_DEFAULT: Final[LengthPosition] = LengthPosition.NORMAL
 TONE_DEFAULT: Final[TonePosition] = TonePosition.NEUTRAL
+HANDOFF_DEFAULT: Final[HandoffPosition] = HandoffPosition.NORMAL
+# Every control's default, so code that walks the controls walks this table and cannot miss one.
+CONTROL_DEFAULTS: Final[dict[Control, str]] = {
+    Control.LENGTH: LENGTH_DEFAULT,
+    Control.TONE: TONE_DEFAULT,
+    Control.HANDOFF: HANDOFF_DEFAULT,
+}
+# The tools the handoff control is about (§ Y.1); its measure counts their calls per turn (§ Y.3).
+HANDOFF_TOOLS: Final[tuple[str, ...]] = (TOOL_NAME_DELEGATE, TOOL_NAME_REVIEW, TOOL_NAME_BUILD)
 
 LENGTH_TEXTS: Final[dict[LengthPosition, str]] = {
     LengthPosition.TERSE: (
@@ -400,6 +426,17 @@ TONE_TEXTS: Final[dict[TonePosition, str]] = {
         "sentences, no slang, each term defined on first use."
     ),
     TonePosition.DRY: "Keep the tone dry: understated and factual, without enthusiasm or exclamation.",
+}
+HANDOFF_TEXTS: Final[dict[HandoffPosition, str]] = {
+    HandoffPosition.RARE: (
+        "Do the work yourself. Use delegate, review or build only when the user asks you to."
+    ),
+    HandoffPosition.EAGER: (
+        "Hand work off. For any change you can check with a command, call build with a card "
+        "(what to do, where, the command) instead of editing files yourself; ask review to check "
+        "a finished change; give a self-contained subtask to delegate. Edit files yourself only "
+        "for a one-line fix."
+    ),
 }
 
 # K312: the measures each length and tone text names a direction for, read from the texts above (the
@@ -569,8 +606,7 @@ SESSION_CHANGE_FIELDS: Final[tuple[str, ...]] = (
     "bundle",
     "per_turn",
     "date",
-    Control.LENGTH,
-    Control.TONE,
+    *Control,  # § T, § Y: every control, in its declared order
 )
 # K277: a UserMessage sent with `/dellm` (slash_source "skill:<name>") starts skill_fragment, and the
 # model starts when skill_fragment ends, so the turn's first step reads the skill (§ P.10).
@@ -628,6 +664,11 @@ def is_session_kind(kind: str) -> bool:
 
 
 __all__ = [
+    "CONTROL_DEFAULTS",
+    "HandoffPosition",
+    "HANDOFF_TOOLS",
+    "HANDOFF_TEXTS",
+    "HANDOFF_DEFAULT",
     "END_ON_EXIT_SENTINEL",
     "LEGACY_PARK_REASONS",
     "LEGACY_SESSION_END_REASONS",
@@ -673,6 +714,7 @@ __all__ = [
     "RunLimits",
     "CardCheck",
     "CheckResult",
+    "JudgeCall",
     "DRIVEN_SESSION_TRIGGER_IDS",
     "PRODUCER_KIND_SKILL_FRAGMENT",
     "CACHE_LAYOUT_SOURCES",

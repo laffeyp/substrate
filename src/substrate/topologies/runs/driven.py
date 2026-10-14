@@ -32,6 +32,7 @@ import msgspec
 
 from ... import api
 from ..session import CardAccepted, ChecksRun, ModelReply, ReportWritten, UserMessage
+from ..session.vocabulary import JudgeCall
 from ..session.views import producer_kind_from_lifecycle_payload
 from ..session.vocabulary import (
     CARD_ACCEPTED,
@@ -57,7 +58,15 @@ from ..session.vocabulary import (
     RunOutcome,
     StopReason,
 )
-from .checks import run_checks, write_report
+from .checks import (
+    judge_prompt,
+    read_verdicts,
+    run_checks,
+    statements_of,
+    worker_reply,
+    worktree_diff,
+    write_report,
+)
 
 VIEW_DRIVEN_CHECKS = "driven_checks"
 _FAILED_TAIL_LINES = 20
@@ -74,6 +83,9 @@ class DrivenRun:
     base: str
     check_timeout_s: float
     first_message: str
+    # K322: the checking role's model for the card's statement checks; None: the session's own
+    # model, called apart from the worker's turns.
+    judge: Any = None
 
 
 class DrivenChecks:
@@ -162,6 +174,9 @@ def _failed_text(checks: ChecksRun, card: CardAccepted) -> str:
             lines.append(f"- `{check.text}`: {got} (expected {check.expect_exit})")
             if tail:
                 lines.append(tail)
+        elif r.kind is CheckKind.STATEMENT and r.passed is not True:
+            # K322: the checking role's reason, so the worker can act on it.
+            lines.append(f"- {card.checks[r.index].text}: does not hold ({r.note})")
     lines += [f"- {p}" for p in checks.record_problems]
     lines.append("Keep working on the card until its checks pass, committing as you go.")
     return "\n".join(lines)
@@ -179,9 +194,14 @@ def compose_driven(
     own_record: Callable[[], Path],
     user_turns: Callable[[Any], int],
     has_session_prompt: bool,
+    driver: Any,
+    driver_name: str,
 ) -> None:
     """Register the driven session's producers, view and triggers on the session topology's
-    builder. The caller sets the termination (finalise on `ReportWritten` or `SessionEnded`)."""
+    builder. The caller sets the termination (finalise on `ReportWritten` or `SessionEnded`).
+    `driver` judges the card's statements unless the run names its own judge (K322)."""
+    judge = run.judge if run.judge is not None else driver
+    judge_name = getattr(run.judge, "name", "judge") if run.judge is not None else driver_name
 
     async def _card(_inp: Any) -> AsyncIterator[Any]:
         yield run.card
@@ -194,12 +214,30 @@ def compose_driven(
 
     async def _checks(inp: Any) -> AsyncIterator[ChecksRun]:
         card, events = _read_card(own_record())
+        after_seq = int(inp["after_seq"])
+        verdicts: dict[int, tuple[bool, str]] | None = None
+        call: JudgeCall | None = None
+        if statements_of(card):
+            # K322 (§ X.3 v0.12.4): the checking role judges the statements in a call of its own.
+            prompt = judge_prompt(
+                card,
+                diff=worktree_diff(run.worktree, run.base),
+                reply=worker_reply(events, after_seq=after_seq),
+            )
+            try:
+                reply = await judge.arespond(prompt)
+            except Exception as exc:  # noqa: BLE001 — a failed judge fails the statements, said so
+                reply = f"[the judge failed: {type(exc).__name__}: {exc}]"
+            verdicts = read_verdicts(card, reply)
+            call = JudgeCall(model=judge_name, prompt=prompt, reply=reply)
         yield run_checks(
             card,
             run.worktree,
             events,
-            after_seq=int(inp["after_seq"]),
+            after_seq=after_seq,
             timeout_s=run.check_timeout_s,
+            verdicts=verdicts,
+            judge=call,
         )
 
     async def _continue(inp: Any) -> AsyncIterator[UserMessage]:

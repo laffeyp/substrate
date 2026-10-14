@@ -25,6 +25,11 @@ from substrate.topologies.runs.review import (
 from substrate.topologies.session.vocabulary import RunOutcome
 from substrate.topologies.workspace import ensure_repository
 
+# K322: the checking role judges the review's statement; a stub model cannot, so it answers.
+HOLDS = DeterministicResponder(
+    seed=0, menu=["S1: holds — names stats.py, the division and a guard"]
+)
+
 pytestmark = pytest.mark.filterwarnings(r"ignore:session_topology\(record_root=None\)")
 
 
@@ -71,6 +76,7 @@ def _start(
         driver_context_tokens=8192,
         worktrees=tmp_path / "wt",
         records=tmp_path / "records",
+        judge=HOLDS,
     )
 
 
@@ -108,6 +114,8 @@ def test_one_reviewer_per_style_each_ends_done_with_its_review(tmp_path: Path) -
         assert e.report.done.strip()  # the review
         assert e.report.files == []  # a reviewer changes nothing
         assert e.report.branch is None  # a detached worktree is on no branch
+        (statement,) = e.report.checks  # K322: the review's statement, judged
+        assert statement.passed is True and statement.note.startswith("names stats.py")
         wt = tmp_path / "wt" / rid
         assert (wt / "b.py").read_text() == "y = x / 0\n"  # checked out at the target
         assert _git(wt, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"  # detached
@@ -173,6 +181,7 @@ def test_a_caller_starts_two_reviews_and_reads_both(tmp_path: Path) -> None:
             driver_context_tokens=8192,
             worktrees=tmp_path / "wt",
             records=tmp_path / "records",
+            judge=HOLDS,
         )
     )
 

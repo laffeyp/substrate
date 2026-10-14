@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""Sprint 212 — delegate's schema declares six properties + the passthrough marker.
+"""Sprint 212 — delegate's schema declares its properties + the passthrough marker. Kernel K323
+dropped `baseline` (a child session records its own environment at open); a call carrying it is
+refused.
 
 TECH-SPEC-2026-08-25-round6 §5:
   - `task` (string, required) — the self-contained subtask
@@ -23,13 +25,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from substrate.adapters import DeterministicResponder
+import pytest
+
+from substrate.topologies.session_registry import SessionRegistry
 from substrate.topologies.tool_loop.delegate import make_delegate
 from substrate.topologies.tool_loop.tools import _named_to_positional, ollama_tools
 
 
 def _suite(root: Path) -> dict:
-    return {"delegate": make_delegate(responder=DeterministicResponder(seed=0), root=root)}
+    registry = SessionRegistry(base=root / "sessions", session_topology_factory=lambda *a: None)
+    return {"delegate": make_delegate(session_registry=registry, parent_session_id="s_parent")}
 
 
 def test_schema_declares_all_six_properties(tmp_path: Path) -> None:
@@ -40,7 +45,6 @@ def test_schema_declares_all_six_properties(tmp_path: Path) -> None:
         "model",
         "child_session_name",
         "context",
-        "baseline",
         "timeout_seconds",
         "children",  # sprint 245 fan-out (the test predates it; updated in UI sprint 097)
     }
@@ -70,7 +74,6 @@ def test_ollama_tools_exposes_all_six_fields_to_native_calling(tmp_path: Path) -
         "model",
         "child_session_name",
         "context",
-        "baseline",
         "timeout_seconds",
         "children",  # sprint 245 fan-out (the test predates it; updated in UI sprint 097)
     }
@@ -84,7 +87,7 @@ def test_named_to_positional_hands_delegate_a_single_dict(tmp_path: Path) -> Non
     suite = _suite(tmp_path)
     positional = _named_to_positional(
         "delegate",
-        {"task": "hi", "timeout_seconds": 30, "baseline": {"foo": "bar"}},
+        {"task": "hi", "timeout_seconds": 30, "children": [{"task": "a"}]},
         suite,
     )
     assert len(positional) == 1
@@ -92,7 +95,7 @@ def test_named_to_positional_hands_delegate_a_single_dict(tmp_path: Path) -> Non
     assert positional[0] == {
         "task": "hi",
         "timeout_seconds": 30,
-        "baseline": {"foo": "bar"},
+        "children": [{"task": "a"}],
     }
 
 
@@ -106,31 +109,15 @@ def test_named_to_positional_preserves_optional_gap_that_would_otherwise_drop(
     of intermediate gaps.
     """
     suite = _suite(tmp_path)
-    # task set, model absent, child_session_name absent, context absent, baseline absent,
+    # task set, model absent, child_session_name absent, context absent,
     # timeout_seconds set. Without the marker, positional would be [task] and timeout_seconds
     # would drop. With the marker, positional is [{task, timeout_seconds}] and both survive.
     positional = _named_to_positional("delegate", {"task": "hi", "timeout_seconds": 45}, suite)
     assert positional == [{"task": "hi", "timeout_seconds": 45}]
 
 
-def test_run_reads_every_per_call_arg_from_the_dict(tmp_path: Path) -> None:
-    """`Tool.run(a)` with `a = [args_dict]` reads task and does not raise on the
-    other args. Actual dispatch behavior for model/context/baseline/child_session_name
-    is sprint 213 scope; sprint 212 just parses.
-    """
+def test_a_call_with_baseline_is_refused(tmp_path: Path) -> None:
+    """K323: a child session records its own environment; a baseline override has no target."""
     suite = _suite(tmp_path)
-    result = suite["delegate"].run(
-        [
-            {
-                "task": "hi",
-                "model": "deterministic",
-                "context": {"parent_seq_range": [0, 5], "kinds": ["FinalAnswer"]},
-                "baseline": {"foo": "bar"},
-                "timeout_seconds": 30,
-            }
-        ]
-    )
-    assert isinstance(result, dict)
-    assert "answer" in result
-    assert "child_root" in result
-    assert "steps" in result
+    with pytest.raises(ValueError, match="baseline"):
+        suite["delegate"].run([{"task": "hi", "baseline": {"foo": "bar"}}])

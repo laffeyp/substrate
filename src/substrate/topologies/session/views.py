@@ -16,14 +16,12 @@ from typing import Any, NamedTuple
 
 from ...types import Event, Subscription
 from .vocabulary import (
-    LENGTH_DEFAULT,
-    Control,
+    CONTROL_DEFAULTS,
     PROMPT_COMPOSED,
     PROMPT_FRAGMENT,
     SESSION_CHANGED,
     SESSION_STARTED,
     SESSION_OPEN_SOURCES,
-    TONE_DEFAULT,
     TURN_SCOPED_SOURCES,
     parse_prompt_source,
 )
@@ -217,8 +215,8 @@ class SessionSettings:
                 self._settings["date"] = str(baseline["date"])
             # § T (K296): the controls the session opened with; a record from before v0.8 opened
             # at the defaults, so a control set on it later is still seen as a change.
-            self._settings[Control.LENGTH] = str(payload.get(Control.LENGTH) or LENGTH_DEFAULT)
-            self._settings[Control.TONE] = str(payload.get(Control.TONE) or TONE_DEFAULT)
+            for control, default in CONTROL_DEFAULTS.items():
+                self._settings[control] = str(payload.get(control) or default)
         elif event.kind == PROMPT_FRAGMENT:
             if parse_prompt_source(str(payload.get("source", ""))) == "per_turn":
                 self._settings["per_turn"] = str(payload.get("text", ""))
