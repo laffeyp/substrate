@@ -10,6 +10,19 @@
 
 *Agent + Architect. Halts, partials, comprehension affirmations, Rubber Duck observations marked `surfaced`, proposed decisions awaiting ratification.*
 
+- **2026-10-14 Claude — FAILURE: the create-topology tool did not build with Substrate; built, then zeroed in both repos.** Postmortem `process/planning/POSTMORTEM-2026-10-14-create-topology-without-substrate-r2.md` (round 1 beside it).
+  - **The ask.** The Architect asked for a tool through which any model builds topologies "via standardized parts", "like the musical tools", with Substrate "fully known". He had already corrected the agent's restatement, "building topology from a description", once.
+  - **What was built.** In 1 h 41 min (01:42–03:23), the agent built a plan language of its own and nine cards on it (K335–K339, U185–U189): five fixed parts (`model`, `agent`, `command`, `collect`, `split`), step fields `on`, `with`, `if`, `max`, three ends (`first`, `after`, `quiet`). It ratified the language as session vocabulary v0.16 and amended it three times while building (v0.16.1–v0.16.3).
+  - **What it hid.** A model writing a plan could name none of Substrate's primitives: producer kinds and their schemas; views; triggers with predicates, firing policies and cooldowns; routes into staged slots; termination recipes; instruments; initial inputs; budgets; embedded substrates. Those are what `TopologyBuilder` takes and what the session topology is built from (10 producers, 20 triggers, 7 views). The agent's own notes from the code read said "TopologyBuilder methods ARE the vocabulary."
+  - **The Studio.** U188 replaced the Studio's form, which spoke those primitives (producers, views with `≥ n` predicates, triggers, routes into slots, termination policies), with an editor for the new language. The Architect found the failure there: "This is not what the studio is … you've lost the granularity of substrate."
+  - **The zero-out.** Kernel `7380a0c4`: 33 files, 3,170 lines removed; `src/` and `tests/` equal `a76adace` except for K339. App `dd8f390`: 17 files, 566 lines removed. Studio revert `3b2ed96`. Vocabulary v0.16–v0.16.3 withdrawn; v0.15 in force. Kept: K339's next-move text for `build`, `review`, `run`, `delegate`.
+  - **Recurrence.** The same day, research round 9 had removed machinery the agent added in rounds 1–8 without being asked (entry below). Both times the agent built its own design in place of the thing asked for.
+
+- **2026-10-14 Claude — Round 8's topology code reverted; round 9 rebuilt it plainly.** Commit `615d9d32` reverted the topology code of K314–K324.
+  - **What came out.** A card refused for lacking a done-condition; checks run after each turn; a retry loop that sent failed checks back as the next message; a second model call that judged a card's statements; limits; `stuck`.
+  - **The Architect's words.** "You've ruined this … This was supposed to be something very simple"; "A lot of tools are built as a test for the model."
+  - **The rebuild.** Research round 9 (`process/planning/RESEARCH-2026-10-14-core-topologies-r9.md`), roadmap `ROADMAP-2026-10-14-core-topologies-r3.md`, built as K327–K334 (Sprint tail below). Vocabulary v0.12–v0.13 withdrawn; v0.14 and v0.15 ratified for the rebuild.
+
 - **[SUPERSEDED 2026-09-01 by sprints 058-067 closing on main — see ## Sprint tail entries for 058, 059, 060, 061, 062, 063, 064, 065, 066, 067] 2026-09-01 Claude — Context-composition audit + nine-card fix arc (058-066) opened for Architect review.** Audit surfaced five distinct prompt-composition concepts in the tree (`seed`, `per_turn`, `bundle`, `role`, delegate `context`), three with no runtime consumer (`role` validated at create then dropped; `assemble_seed` / `assemble_seed_from_chain` / `bind_slots` zero call sites outside their own tests), one client-supplied and passed verbatim (`seed`), one actually plumbed (`per_turn`). Every composition site builds strings inline (`f"..."` or `"\n\n".join(parts)`); no typed event carries fragment provenance; no live-model test exercises any of it end-to-end. Docstring cross-references to `TECH-SPEC §1.6.5`, `§3a`, `§7b`, `§9`, `§7 line 674`, and `TECH-SPEC-2026-08-25-round6` are fabricated — those section IDs do not exist in any current or historical draft under `docs/specs/`. Substrate-native fix shape: two typed events (`PromptFragment`, `PromptComposed`), one composer Producer, one Producer per fragment source, prompts become first-class replayable events with fragment-level provenance. Nine sprint cards written under `process/sprints/sprint-058-*.md` through `sprint-066-*.md`: 058 vocabulary lock, 059 composer Producer, 060 per_turn migrates to fragment, 061 role wires end-to-end, 062 bundle slots as fragments, 063 parent_context fragment (delegate rewrite), 064 tools_suite + wrap_up fragments, 065 delete dead code, 066 spec-citation audit. Sequential build order; every real path closes on a live-model test that asserts the fragment reaches the driver. Cards open; awaiting Architect ratification before dispatch.
 
 - **2026-09-03 Claude — substrate-kernel 1.0.1 published to PyPI with PolyForm license metadata. README license notice moved from top to bottom on both repos.** The 2026-09-01 relicense to `PolyForm-Noncommercial-1.0.0` landed in git but never got a re-release; PyPI stayed at `1.0.0` from `2026-07-25T02:02:34` — the pre-relicense build with no license metadata (JSON `license: None`, empty classifier list). Version bumped to `1.0.1`, `uv build` produced both wheel and sdist, `twine check` passed, `twine upload` succeeded; live at `https://pypi.org/project/substrate-kernel/1.0.1/`. The live SPDX `license_expression` now reads `PolyForm-Noncommercial-1.0.0` (PEP 639 form); legacy `license` and classifier are correctly empty because the SPDX expression replaces both. **README format change on both repos:** the 26-line `## Licensing and use` block that opened the README (five lines about permitted uses, four about position on machine learning, three about AI-mediated derivation, one pointer to LICENSE Sections A and B) moved from top to the bottom of both READMEs. Rationale from the Architect: the notice at the top read as confusing and negressive; the banner + badges + intro line lead again, and the notice sits under the same `## Licensing and use` header at the bottom. **Security note:** the PyPI upload token pasted into the session lands in shell history + the tool-result log for that upload; rotating it via PyPI account settings + revoking the old one closes the residue.
@@ -533,7 +546,64 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
-### K322–K324: statements judged, delegate children as sessions, the handoff setting (2026-10-14)
+### The create-topology tool zeroed: K335–K338 withdrawn, K339 kept (2026-10-14)
+- **Why.** The tool gave a model a plan language of the agent's own in place of Substrate's primitives (Surfaced for review above; postmortem `process/planning/POSTMORTEM-2026-10-14-create-topology-without-substrate-r2.md`). The Architect: "undo all those changes and zero them out."
+- **How.** Kernel `src/` and `tests/` were checked out from `a76adace` (the commit before K335). K339's patch, cut against K338's `hold.py`, was reapplied with a three-way merge and went on cleanly. Commit `7380a0c4`: 33 files, 127 lines in, 3,170 out.
+- **Removed.**
+  - `topologies/compose/` whole: `vocabulary.py`, `plan.py`, `parts.py`, `wire.py`, `check.py`, `run.py`, `tools.py`, six `.plan` files.
+  - `test_compose_vocabulary_335.py`, `test_compose_parts_plans_336.py`, `test_compose_checks_337.py`, `test_compose_tools_338.py`, `test_app_started_runs_u187.py`.
+  - `ComposedResult`, `TopologyRunEnded.result`, `TopologyRunStarted.record_root`.
+  - In the run table: `HeldRun.plan` and `pending_start`, `wait`, `drain_started`, `start_notice`, `_composed_end`, `composed_said`, the run listing's `record_root`, `RunStopRequested` in `stop`.
+  - `TopologyRunStarted` in the model producer's schemas, and the model step writing app-started starts.
+  - `TOOL_NAME_TOPOLOGY_HELP`, `_PLAN`, `_RUN`.
+  - The `session` and `daily` CI records return to their K330 form.
+- **Kept.** K339 in `runs/build.py`, `runs/review.py`, `runs/hold.py` (run tool text, `_next_moves`, the miss listing, the events page) and `tool_loop/delegate.py`, with `test_tools_on_the_pattern_339.py` and the updated K330–K332 tests.
+- **Withdrawn.** Session vocabulary v0.16–v0.16.3: a status line opens the document, § AA and the § Z.1 additions stay as history. Cards K335–K338 are marked `withdrawn` with the reason; K339 notes it was kept.
+- **Verified.** `ruff`, `mypy --strict src/substrate` (158 files) clean. 42 run, build, review, delegate, vocabulary and CI-record tests pass. No source names `topologies.compose`, `ComposedResult`, `RunStopRequested`, `drain_started` or the three tool names. The full kernel suite after the zero-out: 1,684 passed, 14 skipped, in 6 min 55 s.
+- **Open, found during the work and not fixed.**
+  - `finalise_on(K)` misses `K` when a trigger also subscribes to `K`: `_consult_termination` reads `st.last_event`, which is the trigger's `TriggerFired` once the control queue drains; the docstring promises "when the event just appended is of kind".
+  - Held runs have no pause or resume (roadmap r3 closes K330 on them; K330's result says they were left out).
+
+### K335–K339: the create-topology tool, built on a language of its own (2026-10-14; K335–K338 withdrawn)
+- **Plan.** `process/planning/RESEARCH-2026-10-14-create-topology.md`, `ROADMAP-2026-10-14-create-topology.md`; both stay as history.
+- **K335** (`3f1f6c69`, 01:42): vocabulary v0.16 § AA: the plan, the five parts and their payloads, the kind from the step id, ends, `if` tests, the plan in `RunStarted.baseline`, `ComposedResult`, nine finding codes, two strengths, three tool names.
+- **K336** (`8c4cbca7`, 01:42): `plan.py` (JSON and lines, defaults, lines written back), `parts.py` (five producers over `Deps`), `wire.py` (one producer kind per step, `PerEvent` triggers, the hidden `FiredCounts`, `Gather` and latest views, `first K` as `threshold_count(K, 1)`).
+- **K337** (`fbe6e591`, 01:45): `check.py`: static findings, the kernel's `build()`, a dry run on stand-in answers twice, a fixed plan.
+- **K338** (`458497be`, 01:53): `tools.py`, `run.py`, six shipped plans, the run table's composed runs, `RunStopRequested`; vocabulary v0.16.1; the app session lost its four older run and list tools.
+- **K339** (`66f2746b`, 01:56): next-move text for `build`, `review`, `run`, `delegate`. **Kept.**
+- **Later, under U187 and U189:**
+  - `66e61dde` and `e9da2597`: `record_root`, and app-started starts (v0.16.2).
+  - `f1f4e166`: `ComposedResult` moved for the session-kinds guard.
+  - `0da3ccd2`: `if` with no field; an unreadable `if` stops the plan (v0.16.3).
+  - `8cecc507`: a repeated `with`/`on` adds to the list.
+- **What the checks said.** 35 compose tests, the full kernel suite (1,718 passed, one failure fixed) and every app gate passed. The first real model (`glm-5.2:cloud`, in the installed app) found three faults in the language in one run. No check asked whether a model could build with Substrate's parts.
+- **Status.** K335–K338 withdrawn and removed; K339 kept.
+
+### K327–K334: the core topologies rebuilt from research round 9 (2026-10-14)
+- **Plan.** Research round 9 (`process/planning/RESEARCH-2026-10-14-core-topologies-r9.md`), roadmap r3 (`ROADMAP-2026-10-14-core-topologies-r3.md`). A topology takes its input, does the work and reports back; nothing grades it.
+- **K327** (`c7f3f9cf`): vocabulary v0.14 § Z.
+  - The run's start and end in the caller's record; a first message the topology writes and a report when the turn ends.
+  - `RunOutcome` (`done`, `failed`, `stopped`), `RunRole`, `RunSession`, `SessionEndReason.caller_stop`.
+  - No card form, checks, limits, judge, pause or resume.
+- **K328** (`ec1508ff`): every workspace a git repository (Substrate runs `git init` and a first commit); worktrees from the kernel.
+- **K329** (`df8be6ee`): `runs/run.py`, `RunSpec`. A run session's first message is written by the topology; its turn's end writes `ReportWritten` (reply, files, branch, commits) and ends it.
+- **K330** (`59b08275`): `runs/hold.py`, `RunTable`.
+  - A run returns at once; its start is posted at the caller's `ToolCall`, its end written at the caller's next model step, once.
+  - `stop` (`caller_stop`), `events` from a seq, `replay` (level 2), `listing`; ending the caller ends its runs.
+  - The `run(run_id, action=stop|events|replay)` tool. Pause and resume were left out.
+- **K331** (`2cab28ae`): Review. `review(target, styles, focus)`: one read-only, one-turn reviewer per style (defects, design, security) in a worktree detached at the target.
+- **K332** (`d73adcc0`): Build. `build(task, files?, read_first?, notes?, card?, card_file?)`.
+  - Only `task` is required.
+  - One session on `build/<run id>` in its own worktree, with the role prompt and guidance of its model class, and no memory or parent context.
+  - The report and branch come back; nothing merges, refuses or grades.
+  - The Architect's picture, a stone shape that channels water, is recorded in the card.
+- **K333** (`e15c70e5`): delegate children are registry sessions on the caller's model.
+- **K334** (`19db77c6`): the handoff setting, ratified as v0.15.
+- **Also.** `4eee4f58`: `DriverParamKey.SCRIPT`. `a76adace`: `substrate.app` exports `build`, `review` and `run_hold` for the daemon.
+- **Live** (U185 in the app, 2026-10-14, `glm-5.2:cloud`): the review named `mean([])`'s `ZeroDivisionError`; `build/r_b87e3cc7fa29` has one commit and passes both card commands.
+- **Tests.** Kernel suite 1,680 passed, 14 skipped at K334.
+
+### [SUPERSEDED 2026-10-14: the code is reverted by `615d9d32`; see Surfaced for review] K322–K324: statements judged, delegate children as sessions, the handoff setting (2026-10-14)
 - **Roadmap round 2** `process/planning/ROADMAP-2026-10-13-core-topologies-r2.md`; its check found round 1 built the command half of r8 § 3.4 and not the statement half.
 - **K322** vocabulary v0.12.4: a card's statement checks are judged by one model call apart from the worker (card, diff, the worker's reply), recorded as `ChecksRun.judge`; a failed statement keeps the run going with its reason; a review's statement is now judged.
 - **K323** every delegate child is a registry session on the caller's model (unless named), in its workspace, with its bundle, controls and tools, `composite_of` the caller; no six-step cap; depth and tree budget from the registry; `descendants` for the nested end/delete cascades. The bare `tool_loop` child, its runner and seven test files that tested it are gone.
@@ -541,7 +611,7 @@
 - **Open.** Live, `glm-5.2:cloud` and `kimi-k2.7-code:cloud` made 0 topology calls at `rare` and at `eager` on a build-shaped task; each edited the files itself. `build` hands back a branch it never merges, so a model asked to change a file here does it directly. The setting's effect depends on what `build` returns.
 - **Tests.** Kernel suite 1,704 passed, 14 skipped; mypy --strict and lint-imports clean.
 
-### K314–K321: topologies that run work, held by their caller (2026-10-13)
+### [SUPERSEDED 2026-10-14: the code is reverted by `615d9d32`; see Surfaced for review] K314–K321: topologies that run work, held by their caller (2026-10-13)
 - **Plan.** Research rounds 1–8 `process/planning/RESEARCH-2026-10-13-core-topologies*.md` (round 8 approved), roadmap `ROADMAP-2026-10-13-core-topologies.md`. A run takes a card (what to do, where, how to tell it is done; the SDD card is accepted, never required), reports in a fixed shape, is checked by a role that did not do the work, and is held by the session that started it.
 - **K314** session vocabulary v0.12 § X (run started and ended, card, checks, report; outcomes; roles). **K315** `topologies/workspace.py`: every workspace a git repository; worktrees per session or run. **K316** cards, plain and SDD; a card missing one of the three is refused, naming it. **K317** checks run with the gate's core in the worktree, the record checked against the vocabulary, the report written from the card, checks and git. **K318** the driven session: the checks write its next message; ends done, stuck, failed or stopped. **K319, K319b** the caller's hold: a run returns at once, its end is told once at the caller's next model step; stop, pause, resume, step, replay; the `run` tool.
 - **K320 Review**: three styles (defects, design, security) from published practice, sources in `runs/review_styles/README.md`; one read-only, one-turn reviewer per style in a worktree detached at the target; the `review` tool. The `code_review` application is removed; its library topology and bundle stay. **K321 Build**: one card on a new branch `build/<run id>` in its own worktree, the role prompt and guidance of its model class, no memory and no parent context; a card bigger than the model holds is refused; never merges; the `build` tool.

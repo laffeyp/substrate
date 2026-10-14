@@ -19,6 +19,62 @@
 
 ---
 
+### 2026-10-14 (late) — A tool that built in its own language, not Substrate's, and every check said it worked
+
+**Context.** K335–K339 and U185–U189: the create-topology tool, built from 01:42 to 03:23 and zeroed the same night. Postmortem `process/planning/POSTMORTEM-2026-10-14-create-topology-without-substrate-r2.md`.
+
+**What the Architect asked.** A tool through which any model builds topologies out of Substrate's standardized parts, the way the music tools in `tweett` let a model make music without knowing music. "Substrate is fully known, nothing needs to be inferred. All the pieces are easy to use." He had already corrected the agent once, when it described the tool as "building topology from a description": "It's the tool as the intermediary that allows it to build the topology via standardized parts."
+
+**What the agent did.**
+- It read every kernel and app file first, and wrote in its notes that `TopologyBuilder`'s methods are the vocabulary.
+- Then it designed a vocabulary of its own: five parts, four step fields, three ends.
+- It ratified that vocabulary as v0.16 and built a compiler from it to `TopologyBuilder`, nine findings, a dry run, three tools, six shipped plans, a pane, and a Studio editor.
+- It closed nine cards in one hour and forty-one minutes.
+- When its language lacked something Substrate already has, it built a substitute and kept going:
+  - a `FiredCounts` view in place of firing policies and budgets;
+  - `with` over views in place of routes;
+  - a bare model call in place of the session producer;
+  - a count in place of `finalise_on`.
+
+**What got in the way.**
+- **A word read as permission to invent.** "Standardized parts" named Substrate's primitives. The agent read "parts" as something to define. The earlier correction — via standardized parts, not from a description — was taken as a note about input format, not about whose units the tool speaks.
+- **A pattern copied in shape.** The tracksheet tools' form (plan then apply, findings and fixes, help, next moves) was copied whole. Their substance was dropped: the model there writes tracks, clips and notes, music's own units.
+- **Shorter mistaken for easier.** "All the pieces are easy to use" was heard as "hide the pieces". Each default the agent added took a Substrate choice away from the model.
+- **The worked example ignored.** The session topology, the Architect's daily driver, is built from producers, triggers, views and termination through `TopologyBuilder`. So is every bundled topology. So was the Studio's own spec builder, recovered and read. The agent studied all three and built a fourth thing.
+- **Checks that could only agree.** Every test, gate and dry run used stand-ins written by the author of the language. They checked the language's internal consistency. Nothing checked the one property asked for: that the model builds with Substrate. The first real model found three faults in the language in one run, and the agent fixed them and went on, instead of asking what the faults said about the language.
+- **Vocabulary written after code.** v0.16 was ratified the minute the build began. v0.16.1, v0.16.2 and v0.16.3 each described code already written. The vocabulary step happened, but it fixed nothing: it was written to match code the agent had already chosen.
+- **A replacement of the one surface that was right.** The Studio's form spoke Substrate's granularity. The agent called it a relic on the strength of a 2026-09-27 note and its own misreading of the surface's state, and replaced it.
+- **The same error, twice in a day.** Round 9 had just removed machinery the agent added to rounds 1–8 unasked. The lesson was recorded as "tools are functions, not tests". The narrower error that repeated here was missed: the agent puts its own design where the asked-for thing should be.
+
+**What the kit could say.**
+1. When a project already has a builder that every artefact of a kind is made with, a tool that makes that kind of artefact speaks that builder's terms. A design that introduces new terms for the same artefacts states, before any code, which of the builder's terms it drops, and the Architect reads that list.
+2. A design doc that says "parts", "primitives", "pieces" or "units" names them by the identifiers in the code.
+3. A tool's observation contract includes one run in which a real model uses the tool for the stated purpose, before any second card is built on the tool. The live run that found three faults came after nine cards.
+4. When a live run finds faults in a new language, the next step is to ask whether the language is the right one, not to patch the three faults.
+5. Vocabulary ratified in the same minute as the first code, and amended to match code three times in an hour, is a signal to stop, not to continue.
+
+---
+
+### 2026-10-14 — Rounds 1–8 of the core topologies built a test for the model; round 9 took it out
+
+**Context.** K314–K324 (built 2026-10-13 to 10-14), reverted by `615d9d32`; research round 9 and roadmap r3; K327–K334 rebuilt.
+
+**What happened.** Across eight research rounds the agent added to the topologies:
+- a card that had to say how to tell it was done, or was refused;
+- a role that ran the card's commands after each turn and graded them;
+- a loop that sent failed checks back to the worker as its next message, up to limits, ending `stuck`;
+- in round 8, a second model call that judged the card's sentences.
+
+The Architect asked for none of these. Asked "What input constraints did you hallucinate?", the agent could name them. The Architect: "This was supposed to be something very simple … You've ruined this." Round 9 kept the input (a sprint card's fields as the tool's parameters, only the task required), the work and the report, and removed every grade.
+
+**What got in the way.**
+- **Machinery grew one research round at a time.** Each round added one plausible check. No round asked whether any of it had been asked for.
+- **The kit's own words were turned on the work.** SDD's checks and dual contract were applied to the user's topologies as if they were the user's process. In the kit, checks are how the agent verifies its own work, not a gate set for a worker model.
+
+**What the kit could say.** The kit's discipline governs how the agent builds, not what it builds for the user; a topology's own checks come from the Architect's words. A research round that adds a mechanism quotes the request it serves; a mechanism with no quote is cut before code.
+
+---
+
 ### 2026-10-14 — Three hand-written lists, and a setting that changed the prompt and not the behaviour
 
 **Context.** K322–K324, U178–U179.
