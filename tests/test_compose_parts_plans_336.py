@@ -189,3 +189,10 @@ def test_an_agent_step_reports_through_its_starter(tmp_path: Path) -> None:
     ]
     ((kind, payload),) = _events(root)
     assert kind == "Make" and payload["branch"] == "build/r_1" and payload["outcome"] == "done"
+
+
+def test_a_repeated_with_or_on_adds_to_the_list() -> None:
+    """U189's live run: a model wrote `with Draft with Critic`, and the reader kept only Critic."""
+    plan, found = read('d: model "x"\nc: model "y"\nr: model on C on D with D with C "z"')
+    assert found == [] and plan is not None
+    assert plan.steps[2].on == ["C", "D"] and plan.steps[2].with_ == ["D", "C"]

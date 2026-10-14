@@ -490,7 +490,7 @@ def read_lines(text: str) -> dict[str, Any]:
                 ):
                     names += _names(toks[i][0])
                     i += 1
-                step[word] = names
+                step[word] = [*step.get(word, []), *names]  # `with A with B` reads both
             elif word == "if":
                 parts: list[str] = []
                 while i < len(toks) and len(parts) < 4:
