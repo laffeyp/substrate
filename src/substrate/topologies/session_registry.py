@@ -137,8 +137,8 @@ class SessionManifest(Struct, frozen=True):
     # sessions. For a child sub-agent in a session composite (e.g.
     # sprint 225c's pair_coding reviewer), holds the parent's session_id.
     # POST /end and DELETE on the parent cascade to every child via
-    # list_children(parent_id). The relationship is one level deep — a
-    # child of a child is not a supported shape.
+    # list_children(parent_id). Kernel K333: delegate children nest, so the
+    # cascades walk `descendants(parent_id)`, deepest first.
     composite_of: str | None = None
     # Sprint 032c (piece-G mechanical translation): per-session driver
     # params. `OllamaResponder.__init__` accepts think/max_tokens/timeout/
@@ -768,6 +768,23 @@ class SessionRegistry:
         catalog — a small n; the daemon holds sessions in the hundreds, not
         millions."""
         return [m for m in self.list_all() if m.composite_of == parent_id]
+
+    def descendants(self, parent_id: str) -> list[SessionManifest]:
+        """Every session under `parent_id` through `composite_of`, deepest first, so ending them in
+        order ends a child before its parent (kernel K333: delegate children nest)."""
+        out: list[SessionManifest] = []
+        seen = {parent_id}
+
+        def walk(pid: str) -> None:
+            for child in self.list_children(pid):
+                if child.session_id in seen:
+                    continue
+                seen.add(child.session_id)
+                walk(child.session_id)
+                out.append(child)
+
+        walk(parent_id)
+        return out
 
     # ── standing-session turn (delegate path 1 + POST /api/session/<id>/turn) ─
 

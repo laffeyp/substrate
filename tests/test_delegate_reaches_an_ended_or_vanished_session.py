@@ -104,9 +104,8 @@ def test_unknown_session_name_raises_typed_failure(tmp_path: Path) -> None:
     registry = SessionRegistry(base=base, session_topology_factory=_factory)
 
     d = make_delegate(
-        responder=DeterministicResponder(seed=0),
-        root=tmp_path / "parent",
         session_registry=registry,
+        parent_session_id="s_parent",
     )
     with pytest.raises(ValueError, match="unknown session name"):
         d.run([{"task": "hi", "child_session_name": "no-such-name"}])

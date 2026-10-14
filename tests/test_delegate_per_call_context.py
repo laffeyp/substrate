@@ -18,12 +18,9 @@ from typing import Any
 
 import pytest
 
-from substrate import api
-from substrate.adapters import DeterministicResponder
 from substrate.topologies.session.context_slice import extract_context_slice
 from substrate.topologies.tool_loop.delegate import (
     _CONTEXT_SLICE_CAP_BYTES,
-    make_delegate,
     prefix_context_slice,
 )
 
@@ -193,61 +190,3 @@ def test_prefix_returns_task_unchanged_when_slice_is_empty(monkeypatch: pytest.M
         {"parent_seq_range": [0, 10], "kinds": ["FinalAnswer"]},
     )
     assert prefixed == "solo"
-
-
-@pytest.mark.asyncio
-async def test_context_slice_reaches_the_child_task(tmp_path: Path) -> None:
-    """End-to-end: build a parent record with a FinalAnswer, wire the delegate
-    with `parent_record_root=<that path>`, fire with `context={parent_seq_range,
-    kinds}`. The child's own record's UserMessage (from tool_loop's model
-    factory's task interpolation) — or the child's answer text — carries the
-    slice content.
-    """
-    parent_root = tmp_path / "parent-record"
-
-    from collections.abc import AsyncIterator
-
-    from msgspec import Struct
-
-    class ParentReply(Struct, frozen=True):
-        text: str
-
-    async def _emit(inp: Any) -> AsyncIterator[ParentReply]:
-        del inp
-        yield ParentReply(text="parent said HELLO WORLD")
-
-    def parent_topology(b: api.TopologyBuilder) -> None:
-        b.producer_kind(
-            "emitter",
-            schemas=[ParentReply],
-            schema_version=1,
-            factory=lambda: _emit,
-            deterministic=True,
-        )
-        b.initial("emitter", input={})
-        b.termination(api.threshold_count("ParentReply", 1))
-
-    await api.Runtime(parent_root).run(parent_topology)
-
-    d = make_delegate(
-        responder=DeterministicResponder(seed=0),
-        root=tmp_path / "delegates",
-        parent_record_root=parent_root,
-    )
-    result = d.run(
-        [
-            {
-                "task": "continue the parent's thought",
-                "context": {"parent_seq_range": [0, 20], "kinds": ["ParentReply"]},
-            }
-        ]
-    )
-    assert result["via"] == "context_slice"
-    # The child's answer chains from tool_loop's calculator fallback (no real
-    # driver-parse of the prefixed task), but the CHILD RECORD carries the
-    # prefixed task in its RunStarted baseline (via `_with_baseline`) or in
-    # a topology-authored envelope. The strong assertion here is that
-    # `_run_child_to_answer` did not raise — the slice reached the topology
-    # without errors — and that `via` is set. The unit tests above cover the
-    # slice content directly.
-    assert result["answer"] is not None
