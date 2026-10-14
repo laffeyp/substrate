@@ -32,8 +32,11 @@ from ..tool_loop import _tool_factory as _tool_loop_tool_factory
 from ..tool_loop.background import TaskStatus
 from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
+from ...language.drift import Direction
 from .vocabulary import (
     Control,
+    LanguagePairing,
+    LanguageStream,
     PromptSource,
     COMPACTION_REASON_WINDOW_EXCEEDED,
     COMPACTION_ROLLING_WINDOW,
@@ -51,6 +54,7 @@ from .vocabulary import (
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
     PRODUCER_KIND_SKILL_FRAGMENT,
     PRODUCER_KIND_MODEL,
+    PRODUCER_KIND_LANGUAGE,
     PRODUCER_KIND_RETURN,
     PRODUCER_KIND_SESSION_END,
     PRODUCER_KIND_SESSION_PROMPT,
@@ -73,6 +77,8 @@ from .vocabulary import (
     TRIGGER_ID_MODEL_ON_USER_MESSAGE,
     TRIGGER_ID_RETURN_ON_INTERRUPT,
     TRIGGER_ID_RETURN_ON_MODEL_ERROR,
+    TRIGGER_ID_LANGUAGE_ON_REPLY,
+    TRIGGER_ID_RETURN_ON_LANGUAGE,
     TRIGGER_ID_RETURN_ON_REPLY,
     TRIGGER_ID_TOOL_ON_TOOL_CALL,
     TRIGGER_ID_MODEL_WRAP_UP_ON_TOOL_RESULT,
@@ -282,6 +288,33 @@ class PromptComposed(Struct, frozen=True):
     # Session vocabulary v0.4 (§ P.3): the text sent on the driver's system channel. `system`
     # and `text` together are what the driver read. Records before v0.4 have none.
     system: str = ""
+
+
+# Session vocabulary v0.11 (§ W.2, K309): one text's measures, or one turn's relation, recorded by the
+# `language` producer between a turn's final reply and Returned.
+class LanguageProfile(Struct, frozen=True):
+    stream: LanguageStream
+    turn_index: int
+    source_seq: int  # the measured UserMessage or ModelReply; for a relation, the final reply
+    step: int | None  # the reply's step (stream "model" only)
+    pairing: LanguagePairing | None  # stream "relation" only
+    library: str
+    preprocessing: str
+    instrument_sha256: str  # parameters, window minimums, lexicon versions and compressor
+    measures: dict[str, float | None]
+
+
+# § W.2: a change the Page-Hinkley detector found on the newest value of one stream's series.
+class LanguageDrift(Struct, frozen=True):
+    stream: LanguageStream
+    measure: str  # one of substrate.language.drift.WATCHED
+    direction: Direction
+    statistic: float  # in warm-up standard deviations
+    source_seq: int  # the text whose value raised it
+    series_length: int
+    delta: float
+    threshold: float
+    warmup: int
 
 
 # The core producer bodies. The model producer reads the just-appended UserMessage /
@@ -938,6 +971,7 @@ def session_topology(
     driver_context_source: str = "",
     length: str | None = None,
     tone: str | None = None,
+    language: bool = False,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -1420,12 +1454,52 @@ def session_topology(
         def _turn_open(ctx: Any) -> bool:
             return int(ctx.views["returned_turns"].value()) < int(ctx.views["user_turns"].value())
 
+        def _final_reply(ctx: Any) -> bool:
+            return ctx.event.payload.get("stop_reason") != StopReason.TOOL_USE and _turn_open(ctx)
+
+        if language:
+            # v0.11 (§ W.3-W.4): the final reply starts the measurement; its end starts return. The
+            # measurement sits in the turn's chain because the session pauses on Returned and a
+            # pause cancels every producer still running.
+            b.producer_kind(
+                PRODUCER_KIND_LANGUAGE,
+                schemas=[LanguageProfile, LanguageDrift],
+                schema_version=1,
+                factory=language_producer_factory(_own_record),
+                deterministic=True,
+            )
+            b.trigger(
+                TRIGGER_ID_LANGUAGE_ON_REPLY,
+                subscription=api.Subscription(kinds=frozenset({MODEL_REPLY})),
+                predicate=_final_reply,
+                starts=PRODUCER_KIND_LANGUAGE,
+                input_builder=lambda ctx: language_input(
+                    _turn_index(ctx),
+                    ctx.views["turn_history"].value().turns[-1][0],
+                    int(ctx.event.seq),
+                ),
+                policy=api.PerEvent(),
+            )
+            b.trigger(
+                TRIGGER_ID_RETURN_ON_LANGUAGE,
+                subscription=api.Subscription(
+                    kinds=frozenset({api.PRODUCER_COMPLETED, api.PRODUCER_FAILED})
+                ),
+                predicate=lambda ctx: (
+                    _producer_kind_from_ref(ctx) == PRODUCER_KIND_LANGUAGE and _turn_open(ctx)
+                ),
+                starts=PRODUCER_KIND_RETURN,
+                input_builder=lambda ctx: {
+                    "turn_index": _turn_index(ctx),
+                    "reason": ReturnReason.REPLIED,
+                },
+                policy=api.PerEvent(),
+            )
         b.trigger(
             TRIGGER_ID_RETURN_ON_REPLY,
             subscription=api.Subscription(kinds=frozenset({MODEL_REPLY})),
-            predicate=lambda ctx: (
-                ctx.event.payload.get("stop_reason") != StopReason.TOOL_USE and _turn_open(ctx)
-            ),
+            # § W.4: with `language` on, return-on-language returns the turn instead.
+            predicate=lambda ctx: not language and _final_reply(ctx),
             starts=PRODUCER_KIND_RETURN,
             input_builder=lambda ctx: {
                 "turn_index": _turn_index(ctx),
@@ -1570,6 +1644,7 @@ def session_topology(
 # session Structs so the file reads top-down: session's own vocabulary first, then
 # the tool_loop borrow. tool_loop's schemas are already frozen msgspec Structs.
 from ..tool_loop import FinalAnswer, ToolCall, ToolResult  # noqa: E402
+from .language_producer import language_input, language_producer_factory  # noqa: E402  # K310
 from .interrupt_fragment_producer import (  # noqa: E402  # phase 8 item 7
     interrupt_fragment_producer_factory,
 )
@@ -1598,6 +1673,8 @@ from .views import (  # noqa: E402
 
 __all__ = [
     "BackgroundTaskEnded",
+    "LanguageDrift",
+    "LanguageProfile",
     "FinalAnswer",
     "ModelReply",
     "Park",

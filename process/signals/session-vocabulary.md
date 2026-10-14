@@ -251,6 +251,70 @@ New optional payload field:
 
 **Composer / model behavior after a fragment-source failure.** The per-turn composer chain (`per_turn_fragment → user_message_fragment → composer`) subscribes to `{substrate.ProducerCompleted, substrate.ProducerFailed}` from sprint 068 onward. A failed link still advances the chain; the composer's cohort simply lacks the failed fragment. `PromptComposed.text` emits truncated. Model runs. Session runs to completion. The SessionWarning is the operator-visible signal that the composed prompt was degraded.
 
+## W. v0.11 — language measured live (2026-10-13, sprints K309–K311)
+
+Research: `process/planning/RESEARCH-2026-10-13-language-metrics-r5.md`. Library: `substrate.language` 0.2.0. Adds two event kinds, one producer kind, two triggers; narrows `return-on-reply`.
+
+### W.1 What is measured live, and when
+
+With `session_topology(language=True)`, each turn that ends in a reply is measured before it returns: the user's message (stream `user`, or `delegate` for a message a parent model wrote), each of the turn's replies (stream `model`), and the turn's relation twice (stream `relation`, pairing `final`: the message with the final reply; `turn`: with all the turn's replies joined). Then the change detector runs on the session's series and records any change it finds.
+
+The measurement sits in the turn's chain, between the final reply and `Returned`. The session pauses on `Returned`, and a pause cancels every producer still running (`Runtime.run` cancels the remaining tasks on exit), so a measurement running beside the turn would sometimes be cut off.
+
+Measured later from the record, not live: a turn that ends in a model error or an interrupt (it has no final reply); composed prompts; trailing windows across messages and sessions. `substrate language <record>` and the app's process do these.
+
+### W.2 Events
+
+`LanguageProfile` — one text's measures, or one turn's relation:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `stream` | `LanguageStream` | `user`, `delegate`, `model` or `relation` |
+| `turn_index` | int | the turn |
+| `source_seq` | int | the seq of the measured `UserMessage` or `ModelReply`; for `relation`, of the final reply |
+| `step` | int or null | the reply's step (`model` only) |
+| `pairing` | `Pairing` or null | `final` or `turn` (`relation` only) |
+| `library` | str | `substrate.language` version |
+| `preprocessing` | str | `substrate-text-1` |
+| `instrument_sha256` | str | SHA-256 of the canonical JSON of the parameters, window minimums, lexicon versions and compressor |
+| `measures` | map of str to number or null | the profile's measures (`values.text` of a `substrate language` line for the same text), or the relation's |
+
+`LanguageDrift` — a change found on the newest value of one series:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `stream` | `LanguageStream` | `user` or `model` |
+| `measure` | str | one of `drift.WATCHED` |
+| `direction` | `Direction` | `up` or `down` |
+| `statistic` | number | the Page–Hinkley value, in warm-up standard deviations |
+| `source_seq` | int | the seq of the text whose value raised it |
+| `series_length` | int | values in the series, this one included |
+| `delta`, `threshold`, `warmup` | number, number, int | the detector's parameters |
+
+The series of a stream is its `LanguageProfile` measures in record order: user messages, and model replies whose stop reason is not `tool_use`. The detector starts again after a change, as in research round 5.
+
+### W.3 The producer
+
+`language` (deterministic): one run per measured turn. Its input is the turn's seq range (from the turn's `UserMessage` to its final `ModelReply`) and nothing else; it reads the turn's events, and the session's earlier `LanguageProfile` events, from its own record with `api.read_range`, as the model step reads its history (§ L). It emits the `LanguageProfile` events in the order of § W.1, then any `LanguageDrift`.
+
+### W.4 Triggers
+
+| Trigger | Fires on | Starts |
+|---|---|---|
+| `language-on-reply` (added) | a `ModelReply` whose stop reason is not `tool_use`, while the turn is open, with `language` on | `language` with the turn's seq range |
+| `return-on-language` (added) | `language` ending (`ProducerCompleted` or `ProducerFailed`) while the turn is open | `return`, reason `replied` |
+| `return-on-reply` (narrowed) | as before, with `language` off | `return` |
+
+A failed measurement still returns the turn: the failure is on the record as `substrate.ProducerFailed`.
+
+### W.5 The turn's record
+
+With `language` on: … `ModelReply` (final), `LanguageProfile` (the message), `LanguageProfile` (each reply), `LanguageProfile` ×2 (relation), `LanguageDrift` ×0 or more, `Returned`.
+
+### W.6 The switch
+
+`session_topology(language=False)` is v0.10 unchanged. The app's sessions turn it on (`SessionRegistry`). The record names it: the topology registration in `substrate.RunStarted` lists the `language` producer and its triggers.
+
 ### Ratification signature
 
 - **v0.2.1** — Sprint 068 close, 2026-09-02. Additive extension for fragment-source failure surfacing. § A-J byte-preserved from prior locks.
@@ -797,3 +861,4 @@ On the message on which a change is made: UserMessage, SessionChanged (one per f
 - **v0.8** — Sprint K296, 2026-10-11, by the Architect's direction of the same day (Length and Tone rows, substrate-ui OPEN-ITEMS 16). §§ A–S byte-preserved.
 - **v0.9** — Sprint K298, 2026-10-12, decided by the Architect ("let's make it happen", after research round 2), recorded by the Agent. §§ A–T byte-preserved.
 - **v0.10** — Sprint K299, 2026-10-12, decided by the Architect ("let's go", after roadmap round 2), recorded by the Agent. §§ A–U byte-preserved.
+- **v0.11** — Sprints K309–K311, 2026-10-13, decided by the Architect ("go… make sure we have the right design"), recorded by the Agent. §§ A–V byte-preserved.

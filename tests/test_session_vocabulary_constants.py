@@ -18,6 +18,7 @@ from substrate.topologies.session.vocabulary import (
     PRODUCER_KIND_FIRST_MESSAGE,
     PRODUCER_KIND_INTERRUPT_FRAGMENT,
     PRODUCER_KIND_SKILL_FRAGMENT,
+    PRODUCER_KIND_LANGUAGE,
     PRODUCER_KIND_MODEL,
     PRODUCER_KIND_RETURN,
     PRODUCER_KIND_SESSION_END,
@@ -117,6 +118,7 @@ def test_session_producer_kinds_frozenset_covers_all() -> None:
         PRODUCER_KIND_INTERRUPT_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
         PRODUCER_KIND_SKILL_FRAGMENT,
+        PRODUCER_KIND_LANGUAGE,
     }
     assert SESSION_PRODUCER_KINDS == expected
 
@@ -144,7 +146,7 @@ def test_session_trigger_ids_frozenset_covers_all() -> None:
     skill-fragment-on-user-message and model-on-skill-fragment. K299 replaced
     session-prompt-on-session-changed with session-prompt-on-user-message-change,
     model-on-session-prompt-change and skill-fragment-on-session-prompt-change (§ V)."""
-    assert len(SESSION_TRIGGER_IDS) == 18
+    assert len(SESSION_TRIGGER_IDS) == 20  # v0.11 (§ W.4): language-on-reply, return-on-language
     assert "session-prompt-on-session-changed" not in SESSION_TRIGGER_IDS
     assert {
         "session-prompt-on-user-message-change",

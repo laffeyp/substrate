@@ -1,0 +1,77 @@
+[lexicon]
+name = "boosters-hyland-2005"
+version = 1
+preprocessing = "substrate-text-1"
+kind = "terms"
+description = "Hyland's boosters: words and phrases that express certainty and close off alternatives."
+source = "Hyland (2005), Metadiscourse: Exploring Interaction in Writing, Continuum, p. 218, as reproduced in Vázquez Orta & Giner (2009), 'Writing with conviction: the use of boosters in modelling persuasion in academic discourses', Revista Alicantina de Estudios Ingleses 22, 219-237 doi 10.14198/raei.2009.22.14"
+licence = "published list, used as published"
+construction = "Transcribed from Vázquez Orta & Giner (2009), pp. 225-226, case-folded. Hyland's 'must (possibility)' is entered as 'must'."
+notes = "63 items. Hyland marks 'must' as a booster only in its sense of logical possibility ('it must be'); a token count includes its obligation sense. 'think', 'believe' and 'know' boost in Hyland's academic corpus; in conversation 'i think' often hedges."
+
+[entries]
+terms = [
+  "actually",
+  "always",
+  "believe",
+  "believed",
+  "believes",
+  "beyond doubt",
+  "certain",
+  "certainly",
+  "clear",
+  "clearly",
+  "conclusively",
+  "decidedly",
+  "definite",
+  "definitely",
+  "demonstrate",
+  "demonstrated",
+  "demonstrates",
+  "doubtless",
+  "establish",
+  "established",
+  "evident",
+  "evidently",
+  "find",
+  "finds",
+  "found",
+  "in fact",
+  "incontestable",
+  "incontrovertible",
+  "incontrovertibly",
+  "indeed",
+  "indisputable",
+  "indisputably",
+  "know",
+  "known",
+  "must",
+  "never",
+  "no doubt",
+  "obvious",
+  "obviously",
+  "of course",
+  "prove",
+  "proved",
+  "proves",
+  "realize",
+  "realized",
+  "realizes",
+  "really",
+  "show",
+  "showed",
+  "shown",
+  "shows",
+  "sure",
+  "surely",
+  "think",
+  "thinks",
+  "thought",
+  "truly",
+  "true",
+  "undeniable",
+  "undeniably",
+  "undisputedly",
+  "undoubtedly",
+  "without doubt",
+]

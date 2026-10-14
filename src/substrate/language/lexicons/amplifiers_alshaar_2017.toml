@@ -1,0 +1,39 @@
+[lexicon]
+name = "amplifiers-alshaar-2017"
+version = 1
+preprocessing = "substrate-text-1"
+kind = "word-categories"
+description = "Amplifiers in American English: boosters (scale upward) and maximizers (the top of the scale), in Quirk et al.'s (1985) sense."
+source = "Alshaar (2017), corpus-based study of amplifiers in American English, as reproduced in Liu, Salvi, Schoenegger et al. (2025), 'When Large Language Models are More Persuasive Than Incentivized Humans, and Why', arXiv 2505.09662, appendix, figure S2 word lists"
+licence = "published list, used as published"
+construction = "Transcribed from the arXiv appendix, which used these lists to measure model and human persuaders."
+notes = "'boosters' here are Quirk's degree amplifiers ('very', 'highly'), not Hyland's certainty boosters (boosters_hyland_2005.toml). 'so', 'right', 'well' and 'too' have many uses that are not amplifiers; counts include them."
+
+[categories]
+boosters = [
+  "deeply",
+  "heavily",
+  "highly",
+  "increasingly",
+  "largely",
+  "much",
+  "really",
+  "right",
+  "significantly",
+  "so",
+  "strongly",
+  "too",
+  "very",
+  "well",
+  "widely",
+]
+maximizers = [
+  "absolutely",
+  "completely",
+  "entirely",
+  "extremely",
+  "fully",
+  "perfectly",
+  "totally",
+  "ultimately",
+]

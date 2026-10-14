@@ -25,6 +25,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any, Final
 
+from ...language.drift import Direction
 from ..tool_loop.kinds import FINAL_ANSWER
 
 # Sprint 070 (2026-09-02): closed-set string values as StrEnum. Each class
@@ -104,6 +105,9 @@ COMPACTION_REASON_WINDOW_EXCEEDED: Final[str] = "driver_window_exceeded"
 # v0.3 (session-vocabulary.md § K, sprint K259, 2026-10-09). `Returned` ends a turn; `Park` ends a
 # turn on records written before v0.3. Readers accept both (§ K.3).
 RETURNED = "Returned"
+# v0.11 (§ W, sprint K309): language measured live.
+LANGUAGE_PROFILE = "LanguageProfile"
+LANGUAGE_DRIFT = "LanguageDrift"
 TURN_END_KINDS: Final[frozenset[str]] = frozenset({RETURNED, PARK})
 # Kinds a session record written before v0.3 carries and v0.3 no longer writes (§ K.3); a reader
 # of session records accepts them.
@@ -120,6 +124,23 @@ class StopReason(StrEnum):
     END_TURN = "end_turn"
     TOOL_USE = "tool_use"
     WRAP_UP = "wrap_up"
+
+
+class LanguageStream(StrEnum):
+    """LanguageProfile.stream (§ W.2), and the stream of a `substrate language` line."""
+
+    USER = "user"
+    DELEGATE = "delegate"  # a UserMessage a parent model wrote (slash_source "delegate")
+    MODEL = "model"
+    RELATION = "relation"
+    COMPOSED = "composed"  # `substrate language` only: not measured live (§ W.1)
+
+
+class LanguagePairing(StrEnum):
+    """A relation's pairing (§ W.2): the user's text with the final reply, or with all replies."""
+
+    FINAL = "final"
+    TURN = "turn"
 
 
 class ToolMode(StrEnum):
@@ -179,6 +200,8 @@ SESSION_KINDS: frozenset[str] = frozenset(
         SESSION_CHANGED,
         HARNESS_TOOL_CALL,
         HARNESS_TOOL_RESULT,
+        LANGUAGE_PROFILE,
+        LANGUAGE_DRIFT,
     }
 )
 
@@ -301,6 +324,30 @@ TONE_TEXTS: Final[dict[TonePosition, str]] = {
     TonePosition.DRY: "Keep the tone dry: understated and factual, without enthusiasm or exclamation.",
 }
 
+# K312: the measures each length and tone text names a direction for, read from the texts above (the
+# language page states a setting's intent only where its text states one). Normal and neutral write
+# no text and state none.
+LANGUAGE_INTENTS: Final[dict[tuple[Control, str], tuple[tuple[str, Direction], ...]]] = {
+    # "Keep replies short… Leave out background, restatement and offers of more."
+    (Control.LENGTH, LengthPosition.TERSE): (
+        ("words", Direction.DOWN),
+        ("rate_padding_restatement_opening", Direction.DOWN),
+        ("rate_padding_background_opening", Direction.DOWN),
+        ("rate_padding_offer_of_more_closing", Direction.DOWN),
+    ),
+    # "Give complete replies: the reasoning, the alternatives you weighed, and what you left out."
+    (Control.LENGTH, LengthPosition.FULL): (("words", Direction.UP),),
+    # "Do not soften criticism, and hedge only where the evidence is uncertain."
+    (Control.TONE, TonePosition.BLUNT): (("rate_hedges_hyland", Direction.DOWN),),
+    # "full sentences, no slang"
+    (Control.TONE, TonePosition.FORMAL): (("rate_contractions", Direction.DOWN),),
+    # "understated and factual, without enthusiasm or exclamation."
+    (Control.TONE, TonePosition.DRY): (
+        ("rate_liwc_positive_emotion", Direction.DOWN),
+        ("format_exclamations", Direction.DOWN),
+    ),
+}
+
 # Session vocabulary § P.3 (UI sprint 121): with `driver_params.cache_layout`, these session-stable
 # sources also go on the system channel. Off by default; never part of the default layout.
 CACHE_LAYOUT_SOURCES: Final[frozenset[PromptSource]] = frozenset(
@@ -356,6 +403,8 @@ PRODUCER_KIND_SKILL_FRAGMENT: Final[str] = "skill_fragment"
 # Also declared by the CI wrapper (ci.py); listed here so the frozenset
 # below covers every kind a session-shape topology can emit.
 PRODUCER_KIND_DRIVER_STEPPER: Final[str] = "driver_stepper"
+# v0.11 (§ W.3): measures a turn's texts between its final reply and Returned.
+PRODUCER_KIND_LANGUAGE: Final[str] = "language"
 
 SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
     {
@@ -369,6 +418,7 @@ SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
         PRODUCER_KIND_INTERRUPT_FRAGMENT,
         PRODUCER_KIND_SKILL_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
+        PRODUCER_KIND_LANGUAGE,
     }
 )
 
@@ -383,6 +433,9 @@ TRIGGER_ID_MODEL_WRAP_UP_ON_TOOL_RESULT: Final[str] = "model-wrap-up-on-tool-res
 TRIGGER_ID_RETURN_ON_REPLY: Final[str] = "return-on-reply"
 TRIGGER_ID_RETURN_ON_MODEL_ERROR: Final[str] = "return-on-model-error"
 TRIGGER_ID_RETURN_ON_INTERRUPT: Final[str] = "return-on-interrupt"
+# v0.11 (§ W.4): with `language` on, the final reply starts the measurement and its end starts return.
+TRIGGER_ID_LANGUAGE_ON_REPLY: Final[str] = "language-on-reply"
+TRIGGER_ID_RETURN_ON_LANGUAGE: Final[str] = "return-on-language"
 TRIGGER_ID_END_ON_EXIT: Final[str] = "end-on-exit"
 TRIGGER_ID_END_ON_TURN_CAP: Final[str] = "end-on-turn-cap"
 TRIGGER_ID_END_ON_END_REQUEST: Final[str] = "end-on-end-request"
@@ -424,6 +477,8 @@ SKILL_SLASH_PREFIX: Final[str] = "skill:"
 # UI sprint 123 (§ P.11): a UserMessage the operator sent with `//`. The model step passes its text
 # to the driver as written, and the history leaves the turn out.
 DRIVER_SLASH_SOURCE: Final[str] = "driver"
+# A sub-session's opening message, written by the parent model through the `delegate` tool.
+DELEGATE_SLASH_SOURCE: Final[str] = "delegate"
 
 SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -433,6 +488,8 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_RETURN_ON_REPLY,
         TRIGGER_ID_RETURN_ON_MODEL_ERROR,
         TRIGGER_ID_RETURN_ON_INTERRUPT,
+        TRIGGER_ID_LANGUAGE_ON_REPLY,
+        TRIGGER_ID_RETURN_ON_LANGUAGE,
         TRIGGER_ID_END_ON_EXIT,
         TRIGGER_ID_END_ON_TURN_CAP,
         TRIGGER_ID_END_ON_END_REQUEST,
@@ -480,17 +537,26 @@ __all__ = [
     "TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT",
     "SKILL_SLASH_PREFIX",
     "DRIVER_SLASH_SOURCE",
+    "DELEGATE_SLASH_SOURCE",
     "PRODUCER_KIND_SKILL_FRAGMENT",
     "CACHE_LAYOUT_SOURCES",
     "TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE",
     "TRIGGER_ID_MODEL_ON_SESSION_PROMPT_CHANGE",
     "TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE",
     "SESSION_CHANGE_FIELDS",
+    "LANGUAGE_INTENTS",
     "SESSION_CHANGED",
     "HARNESS_TOOL_CALL",
     "HARNESS_TOOL_RESULT",
     "ToolMode",
     "RETURNED",
+    "LanguagePairing",
+    "LanguageStream",
+    "TRIGGER_ID_RETURN_ON_LANGUAGE",
+    "TRIGGER_ID_LANGUAGE_ON_REPLY",
+    "PRODUCER_KIND_LANGUAGE",
+    "LANGUAGE_DRIFT",
+    "LANGUAGE_PROFILE",
     "ReturnReason",
     "SESSION_ENDED",
     "SESSION_END_REQUESTED",
