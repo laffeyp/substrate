@@ -156,11 +156,21 @@ class SessionManifest(Struct, frozen=True):
     # (normal, neutral). Set at creation; mutable via PATCH /api/session/<id> {length, tone}.
     length: str | None = None
     tone: str | None = None
+    handoff: str | None = None  # Kernel K334 (§ Y); None is the default (normal)
 
 
-def _check_controls(length: str | None, tone: str | None) -> None:
-    """Refuse an unknown Length or Tone position (§ T): ValueError, a 400 at the daemon."""
-    from .session.vocabulary import LengthPosition, TonePosition
+def _check_controls(length: str | None, tone: str | None, handoff: str | None = None) -> None:
+    """Refuse an unknown Length, Tone or Handoff position (§ T, § Y): ValueError, a 400 at the
+    daemon."""
+    from .session.vocabulary import HandoffPosition, LengthPosition, TonePosition
+
+    if handoff is not None:
+        try:
+            HandoffPosition(handoff)
+        except ValueError as exc:
+            raise ValueError(
+                f"handoff must be one of {[p.value for p in HandoffPosition]}; got {handoff!r}"
+            ) from exc
 
     if length is not None:
         try:
@@ -461,6 +471,7 @@ class SessionRegistry:
         length: str | None = None,
         tone: str | None = None,
         branch: str | None = None,
+        handoff: str | None = None,
     ) -> SessionManifest:
         """Register a new session. Atomic against by-name.json under `fcntl.flock`.
 
@@ -472,7 +483,7 @@ class SessionRegistry:
         worktree of that repository, on that branch, under `<base>/wt/<session_id>`, and its
         manifest names the worktree with shape `worktree`.
         """
-        _check_controls(length, tone)
+        _check_controls(length, tone, handoff)
         from .workspace import ensure_repository, make_worktree
 
         ensure_repository(Path(workspace))
@@ -496,6 +507,7 @@ class SessionRegistry:
             driver_params=driver_params,
             length=length,
             tone=tone,
+            handoff=handoff,
         )
         # Sprint 223e race fix: bridge finds a session by_name and dispatches
         # a turn immediately after create. Under flock, the by-name.json write
@@ -715,7 +727,12 @@ class SessionRegistry:
         return self._update_manifest(session_id, bundle=bundle)
 
     def set_controls(
-        self, session_id: str, *, length: str | None, tone: str | None
+        self,
+        session_id: str,
+        *,
+        length: str | None,
+        tone: str | None,
+        handoff: str | None = None,
     ) -> SessionManifest:
         """Kernel K296: change the Length and Tone positions. The next turn's topology carries them;
         the model step writes `SessionChanged` for each that differs from the record, and
@@ -723,8 +740,8 @@ class SessionRegistry:
         session, ValueError on an unknown position."""
         if session_id not in self._manifests:
             raise KeyError(f"unknown session_id {session_id!r}")
-        _check_controls(length, tone)
-        return self._update_manifest(session_id, length=length, tone=tone)
+        _check_controls(length, tone, handoff)
+        return self._update_manifest(session_id, length=length, tone=tone, handoff=handoff)
 
     def set_driver(self, session_id: str, driver: str) -> SessionManifest:
         """Change the driver for a session. In-memory catalog and manifest.json
@@ -1611,6 +1628,7 @@ def _manifest_to_dict(m: SessionManifest) -> dict[str, Any]:
         # Kernel K296: the Length and Tone positions; None is the default.
         Control.LENGTH: m.length,
         Control.TONE: m.tone,
+        Control.HANDOFF: m.handoff,
     }
 
 
@@ -1654,6 +1672,7 @@ def _manifest_from_dict(d: dict[str, Any]) -> SessionManifest:
         driver_params=(dict(d["driver_params"]) if d.get("driver_params") is not None else None),
         length=str(d[Control.LENGTH]) if d.get(Control.LENGTH) is not None else None,
         tone=str(d[Control.TONE]) if d.get(Control.TONE) is not None else None,
+        handoff=str(d[Control.HANDOFF]) if d.get(Control.HANDOFF) is not None else None,
     )
 
 

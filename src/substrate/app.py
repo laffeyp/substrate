@@ -24,6 +24,7 @@ from .topologies import bundled
 from .topologies import workspace
 from .topologies.instruments.grader import score_grades
 from .topologies.instruments.scoring import select_scoring_rule
+from .topologies.session.handoff import handoff_calls
 from .topologies.session.language_lines import language_lines, line_json
 from .topologies.session.language_view import language_view
 from .topologies.session.vocabulary import MODEL_REPLY
@@ -60,6 +61,7 @@ __all__ = [
     "TornRecordOnResume",
     "bundled",
     "daemon_client",
+    "handoff_calls",
     "language_catalog",
     "language_drift",
     "language_lines",

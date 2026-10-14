@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.15 (2026-10-14).** Sprint K334 restores § Y as written under v0.13 (the `handoff` control, its texts and its measure), now ratified on v0.14. § Y's "v0.13" labels read as v0.15.
+
 **Status: RATIFIED — v0.14 (2026-10-14).** Sprint K327 adds § Z, the topology runs rebuilt from research round 9: a run's start and end in its caller's record, and in the run's own record a first message the topology writes and a report when its turn ends. No card form, checks, limits, judge or pause: round 9 removes them. Agent-resolved; additive to v0.11.
 
 **Status: v0.11 IN FORCE — v0.12 to v0.13 WITHDRAWN (2026-10-14).** The code of kernel sprints K314–K324 is reverted, and the topologies are rebuilt from research round 9 (`process/planning/RESEARCH-2026-10-14-core-topologies-r9.md`), which removes the card's done-condition, the checks, the retry loop and the judge. § X (v0.12–v0.12.4) and § Y (v0.13) stay below as history; the rebuild proposes its events as a new version before any code.

@@ -140,6 +140,7 @@ class SessionStarted(Struct, frozen=True):
     # § T (K296): the Length and Tone positions the session opened with; empty before v0.8.
     length: str = ""
     tone: str = ""
+    handoff: str = ""  # v0.15 (§ Y, K334): the Handoff position; empty before it
 
 
 class UserMessage(Struct, frozen=True):
@@ -362,9 +363,8 @@ _MAX_CONSECUTIVE_FAILS = 3
 _REWRITTEN_ON_CHANGE: dict[str, tuple[str, ...]] = {
     "bundle": ("bundle_style", "bundle_methodology", "per_turn"),
     "per_turn": ("per_turn",),
-    # § T (K296): either control changed writes the `control` source again.
-    Control.LENGTH: (PromptSource.CONTROL,),
-    Control.TONE: (PromptSource.CONTROL,),
+    # § T (K296), § Y (K334): any control changed writes the `control` source again.
+    **{control: (PromptSource.CONTROL,) for control in Control},
 }
 
 
@@ -424,6 +424,7 @@ def _session_started_factory(
     driver_context_source: str = "",
     length: str = "",
     tone: str = "",
+    handoff: str = "",
 ) -> Callable[[], Any]:
     """Sprint 240 — the SessionStarted instrument's producer body.
 
@@ -456,6 +457,7 @@ def _session_started_factory(
             driver_context_source=driver_context_source,
             length=length,
             tone=tone,
+            handoff=handoff,
         )
 
     return lambda: _session_started
@@ -1010,6 +1012,7 @@ def session_topology(
     driver_context_source: str = "",
     length: str | None = None,
     tone: str | None = None,
+    handoff: str | None = None,  # v0.15 (§ Y, K334)
     language: bool = False,
     run: "RunSpec | None" = None,
 ) -> Callable[[api.TopologyBuilder], None]:
@@ -1178,6 +1181,8 @@ def session_topology(
         current_settings[Control.LENGTH] = length
     if tone is not None:
         current_settings[Control.TONE] = tone
+    if handoff is not None:
+        current_settings[Control.HANDOFF] = handoff
 
     # Sprint 240: freeze the tool_names tuple at build time so the
     # SessionStarted instrument's closure captures a snapshot even if the
@@ -1219,6 +1224,7 @@ def session_topology(
                 driver_context_source=driver_context_source,
                 length=length or "",
                 tone=tone or "",
+                handoff=handoff or "",
             ),
             deterministic=True,
         )
@@ -1303,6 +1309,7 @@ def session_topology(
             memory=memory,
             length=length,
             tone=tone,
+            handoff=handoff,
         )
         # K299: always present, even with no sources, because it records every mid-session change.
         has_session_prompt = True

@@ -6,7 +6,7 @@ parity W2.1; kernel sprint 323, research r8 § 4.6).
 Every child is a session in the registry: it has a record, a pane a person can write to, and its
 caller as its parent (`composite_of`), so ending or deleting the caller ends or deletes it. A child
 runs on the model the call names, else on the caller's; in the caller's workspace; with the caller's
-guidance bundle, length, tone and tool allow-list (a read-only caller makes a read-only child). Its
+guidance bundle, length, tone, handoff and tool allow-list (a read-only caller makes a read-only child). Its
 turn runs to the session's own step limit, and its answer is the tool's result. A call can instead
 route the task to a standing session by name, or fan out to several children at once.
 
@@ -144,6 +144,7 @@ def _session_child(
             driver_params=None,  # a parent's knobs (or its script) are not the child's
             length=parent.length,
             tone=parent.tone,
+            handoff=parent.handoff,
         )
     except Exception as exc:  # noqa: BLE001 — surfaced as this child's failure
         return {
