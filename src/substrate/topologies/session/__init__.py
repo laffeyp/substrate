@@ -550,6 +550,7 @@ def _model_factory(
         | ModelReply
         | TranscriptCompacted
         | BackgroundTaskEnded
+        | TopologyRunEnded
         | PromptComposed
         | SessionChanged
         | HarnessToolCall
@@ -614,6 +615,12 @@ def _model_factory(
                 )
                 yield ended
                 notices.append(background_notice(ended))
+            # v0.12 (§ X.2, K319): this session's runs that ended since the last step, each once.
+            from ..runs import hold as _hold
+
+            for run_ended in _hold.TABLE.drain_ended(session_id):
+                yield run_ended
+                notices.append(_hold.run_notice(run_ended))
 
         # K299 (§ V): a change is recorded, and its text written, by session_prompt before this
         # step starts; the history draws its line beside the message.
@@ -1240,6 +1247,7 @@ def session_topology(
                 ModelReply,
                 TranscriptCompacted,
                 BackgroundTaskEnded,
+                TopologyRunEnded,
                 PromptComposed,
                 HarnessToolCall,
                 HarnessToolResult,
@@ -1669,8 +1677,10 @@ def session_topology(
             starts=PRODUCER_KIND_SESSION_END,
             input_builder=lambda ctx: {
                 "reason": (
-                    SessionEndReason.DAEMON_SHUTDOWN
-                    if (ctx.event.payload or {}).get("source") == SessionEndReason.DAEMON_SHUTDOWN
+                    # v0.12 (§ X.3): a run's caller stopping it ends it `caller_stop`.
+                    SessionEndReason(str((ctx.event.payload or {}).get("source")))
+                    if (ctx.event.payload or {}).get("source")
+                    in (SessionEndReason.DAEMON_SHUTDOWN, SessionEndReason.CALLER_STOP)
                     else SessionEndReason.USER_END
                 ),
                 "total_turns": int(ctx.views["user_turns"].value()),

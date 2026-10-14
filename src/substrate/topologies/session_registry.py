@@ -1282,9 +1282,12 @@ def _record_has_envelopes(record_root: Path) -> bool:
 def _stop_background_tasks(session_id: str, because: str) -> None:
     """Stop the bash tool's background tasks this session owns (UI sprint 103). The daemon builds
     session tools with owner=session_id."""
+    from .runs import hold
     from .tool_loop.background import TABLE
 
     TABLE.stop_owner(session_id, because)
+    # v0.12 (§ X, K319): the topology runs this session started end with it.
+    hold.TABLE.stop_owner(session_id)
 
 
 _STOP_GRACE_S = 10.0
