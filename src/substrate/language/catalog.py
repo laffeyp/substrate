@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from .measures import MIN_WORDS_LSM
+
 
 class Group(StrEnum):
     """The setting a watched measure is meant to answer to; OTHER for the rest."""
@@ -821,3 +823,5 @@ RELATION_LANES: Final[tuple[str, ...]] = (
     "ncd",
     "window_lsm",
 )
+# The words each side's window needs before style match is measured (docs/language/windows-r2.md).
+LSM_MIN_WORDS: Final[int] = MIN_WORDS_LSM
