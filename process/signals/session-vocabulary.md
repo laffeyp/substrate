@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.16.3 (2026-10-14).** UI sprint U189's live run, as built: an `if` test may leave out its field, and then reads its kind's main field; a test the plan tool cannot read stops the plan instead of being dropped. Agent-resolved.
+
 **Status: RATIFIED — v0.16.2 (2026-10-14).** UI sprint U187 adds to § Z.1 for runs the app starts: `TopologyRunStarted.record_root`, and the start of a run the person started (not the session's model) written at the session's next model step with `call_seq` -1. Agent-resolved; additive.
 
 **Status: RATIFIED — v0.16.1 (2026-10-14).** Sprint K338 amends § AA as built: a composed run's stop is an event in its own record (§ AA.3); a quiet end reports the run's last step event (§ AA.4); the three tools join the app's session tools and the four older run and list tools leave them, staying in the CLI (§ AA.6). Agent-resolved; additive.
@@ -1106,7 +1108,7 @@ Research: `process/planning/RESEARCH-2026-10-14-create-topology.md` § 3–§ 5.
 
 A step's event kind is its id in CamelCase (`critic_a` writes `CriticA`). An id that is not a word, repeats, is `input`, or names a kind Substrate already writes (a session kind or a `substrate.` lifecycle kind) is refused as `bad_id`.
 
-`Test`: `kind` (str), `field` (str), `op` (`TestOp`), `value` (str). `has` and `has no` test whether the field's text contains the value; `is` and `is not` compare the field's text with it.
+`Test`: `kind` (str), `field` (str), `op` (`TestOp`), `value` (str). v0.16.3: with no field (`if Critic has no NONE`), a test reads its kind's main field: `text`, `reply`, `output`, `items` or `item` by the part that writes it. A test the plan tool cannot read is a finding and gives no plan: a step run without its test would do what nobody asked. `has` and `has no` test whether the field's text contains the value; `is` and `is not` compare the field's text with it.
 
 `End`: `when` (`EndWhen`), `kind` (str; empty for `quiet`), `count` (int; `after` only, default 1). `first K` ends at the first `K`; `after n K` at the n-th; `quiet` when nothing is running and nothing is left to start.
 
@@ -1171,6 +1173,7 @@ As built (v0.16.1): the three tools are in every app session's tools, and `run_t
 
 ### Ratification signature
 
+- **v0.16.3** — UI sprint U189, 2026-10-14, recorded by the Agent.
 - **v0.16.2** — UI sprint U187, 2026-10-14, recorded by the Agent. §§ A–Z byte-preserved but for § Z.1's added paragraph.
 - **v0.16.1** — Sprint K338, 2026-10-14, as built, recorded by the Agent. §§ A–Z byte-preserved.
 - **v0.16** — Sprint K335, 2026-10-14, decided by the Architect ("lets go Recenter on the create topology tool… We'll work based on this going forward"), recorded by the Agent. §§ A–Z byte-preserved.

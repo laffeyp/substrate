@@ -96,3 +96,18 @@ def test_a_clean_plan_has_no_findings_and_commands_do_not_run() -> None:
     assert c.findings == []
     assert c.dry_run[1] == "1 test → Test: test output"
     assert c.dry_run[-1] == "ended: quiet, after 2 events"
+
+
+def test_a_test_without_a_field_reads_the_main_field_and_an_unreadable_one_stops_the_plan() -> None:
+    """U189's live run: a model wrote `if Critic is not NONE`; the tool dropped the test and the
+    step ran when it should not have. Now the short form reads Critic's text, and a test the tool
+    cannot read gives no plan (vocabulary v0.16.3)."""
+    c = check(
+        'draft: model "d"\ncritic: model "c"\nfix: model on Critic with Draft if Critic is not NONE "f"'
+    )
+    assert c.plan is not None and c.plan.steps[2].if_ is not None
+    assert c.plan.steps[2].if_.field == "text"
+    assert c.lines[3].startswith('fix: model on Critic with Draft if Critic.text is not "NONE"')
+    bad = check('a: model "x"\nb: model if A sometimes "y"')
+    assert bad.plan is None and [f.code for f in bad.findings] == [Finding.UNKNOWN_FIELD]
+    assert "`if Critic has no" in bad.findings[0].fix

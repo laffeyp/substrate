@@ -96,7 +96,7 @@ def _names(value: Any) -> list[str]:
 
 
 _TEST: Final[re.Pattern[str]] = re.compile(
-    r"^\s*([A-Za-z][A-Za-z0-9]*)\.([a-z_][a-z0-9_]*)\s+(is not|has no|is|has)\s+(.+?)\s*$"
+    r"^\s*([A-Za-z][A-Za-z0-9]*)(?:\.([a-z_][a-z0-9_]*))?\s+(is not|has no|is|has)\s+(.+?)\s*$"
 )
 
 
@@ -107,7 +107,7 @@ def _test(value: Any, step: str, found: list[Found]) -> Test | None:
         try:
             return Test(
                 kind=str(value["kind"]),
-                field=str(value["field"]),
+                field=str(value.get("field") or ""),
                 op=TestOp(str(value["op"])),
                 value=str(value["value"]),
             )
@@ -119,13 +119,14 @@ def _test(value: Any, step: str, found: list[Found]) -> Test | None:
             raw = m.group(4)
             if len(raw) >= 2 and raw[0] == raw[-1] == '"':
                 raw = json.loads(raw)
-            return Test(kind=m.group(1), field=m.group(2), op=TestOp(m.group(3)), value=raw)
+            return Test(kind=m.group(1), field=m.group(2) or "", op=TestOp(m.group(3)), value=raw)
     found.append(
         Found(
             Finding.UNKNOWN_FIELD,
             step,
             f"`if` reads {value!r}, which is not a test.",
-            'write `if Kind.field is|is not|has|has no value`, e.g. `if Critic.text has no "NONE"`',
+            'write `if Kind is|is not|has|has no value`, e.g. `if Critic has no "NONE"`; '
+            "`Kind.field` names another field",
         )
     )
     return None
@@ -329,6 +330,9 @@ def read(source: str | Mapping[str, Any]) -> tuple[Plan | None, list[Found]]:
         if not on:
             on = [INPUT] if not steps else [kind_of(steps[-1].id)]
         explicit[sid] = {k for k in ("max", "n") if r.get(k) not in (None, "")}
+        test = _test(r.get("if"), sid, found)
+        if test is None and r.get("if") not in (None, ""):
+            fatal = True  # a step run without the test it was given would do what nobody asked
         steps.append(
             Step(
                 id=sid,
@@ -337,7 +341,7 @@ def read(source: str | Mapping[str, Any]) -> tuple[Plan | None, list[Found]]:
                 on=on,
                 with_=_names(r.get("with")),
                 input=str(r.get("input", "")),
-                if_=_test(r.get("if"), sid, found),
+                if_=test,
                 max=_int(r.get("max"), 1, "max", sid, found),
                 model=str(r.get("model", "")),
                 as_=as_,
@@ -357,7 +361,7 @@ def read(source: str | Mapping[str, Any]) -> tuple[Plan | None, list[Found]]:
             )
         )
         fatal = True
-    steps = _fan_out_defaults(steps, explicit)
+    steps = _fan_out_defaults(_test_fields(steps), explicit)
     end = _ends(d.get("end"), found)
     max_minutes = _int(d.get("max_minutes"), 30, "max_minutes", "", found)
     if fatal:
@@ -365,6 +369,28 @@ def read(source: str | Mapping[str, Any]) -> tuple[Plan | None, list[Found]]:
     return Plan(
         name=str(d.get("name") or "plan"), steps=steps, end=end, max_minutes=max_minutes
     ), found
+
+
+# The field a test with none names reads: its kind's main field, by the part that writes it.
+_PART_MAIN: Final[dict[Part, str]] = {
+    Part.MODEL: "text",
+    Part.AGENT: "reply",
+    Part.COMMAND: "output",
+    Part.COLLECT: "items",
+    Part.SPLIT: "item",
+}
+
+
+def _test_fields(steps: list[Step]) -> list[Step]:
+    """`if Critic has no NONE` reads Critic's main field (§ AA.1, v0.16.3)."""
+    parts = {kind_of(s.id): s.part for s in steps}
+    out = []
+    for s in steps:
+        if s.if_ is not None and not s.if_.field:
+            field = _PART_MAIN.get(parts.get(s.if_.kind, Part.MODEL), "text")
+            s = msgspec.structs.replace(s, if_=msgspec.structs.replace(s.if_, field=field))
+        out.append(s)
+    return out
 
 
 def _fan_out_defaults(steps: list[Step], explicit: dict[str, set[str]]) -> list[Step]:
