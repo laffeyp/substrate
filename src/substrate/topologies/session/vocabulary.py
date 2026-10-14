@@ -25,6 +25,8 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any, Final
 
+from msgspec import Struct
+
 from ...language.drift import Direction
 from ..tool_loop.kinds import FINAL_ANSWER
 
@@ -43,6 +45,7 @@ class SessionEndReason(StrEnum):
     USER_END = "user_end"
     TURN_CAP = "turn_cap"  # "timeout" before v0.3.4; see LEGACY_SESSION_END_REASONS
     DAEMON_SHUTDOWN = "daemon_shutdown"
+    CALLER_STOP = "caller_stop"  # v0.12 (§ X.3): a run's caller stopped it
 
 
 class ParkReason(StrEnum):
@@ -108,6 +111,12 @@ RETURNED = "Returned"
 # v0.11 (§ W, sprint K309): language measured live.
 LANGUAGE_PROFILE = "LanguageProfile"
 LANGUAGE_DRIFT = "LanguageDrift"
+# v0.12 (§ X): topology runs. The first two in the caller's record, the rest in a run session's.
+TOPOLOGY_RUN_STARTED = "TopologyRunStarted"
+TOPOLOGY_RUN_ENDED = "TopologyRunEnded"
+CARD_ACCEPTED = "CardAccepted"
+CHECKS_RUN = "ChecksRun"
+REPORT_WRITTEN = "ReportWritten"
 TURN_END_KINDS: Final[frozenset[str]] = frozenset({RETURNED, PARK})
 # Kinds a session record written before v0.3 carries and v0.3 no longer writes (§ K.3); a reader
 # of session records accepts them.
@@ -150,6 +159,65 @@ class ToolMode(StrEnum):
     NATIVE = "native"  # the driver's own tool-calling API (Ollama)
     TEXT = "text"  # the tool list and the JSON directive in the prompt
     MCP = "mcp"  # registered tools over Substrate's MCP server (harness drivers)
+
+
+class RunOutcome(StrEnum):
+    """How a topology run ended (§ X.4); carried by ReportWritten and TopologyRunEnded."""
+
+    DONE = "done"
+    PARTLY_DONE = "partly_done"  # done, with something deferred
+    NEEDS_USER = "needs_user"  # stopped on a question only the user can answer
+    STUCK = "stuck"  # out of its limits without passing
+    FAILED = "failed"  # an error it could not continue past
+    STOPPED = "stopped"  # its caller stopped it
+
+
+class RunRole(StrEnum):
+    """A session's part in a run (§ X.4). Further roles are added by proposal."""
+
+    WORKER = "worker"
+    REVIEWER = "reviewer"
+
+
+class CardForm(StrEnum):
+    """How a card was written (§ X.4)."""
+
+    PLAIN = "plain"  # what, where, how to tell it is done
+    SDD = "sdd"  # the SDD kit's sprint card
+
+
+class CheckKind(StrEnum):
+    """One way a card says how to tell it is done (§ X.4)."""
+
+    COMMAND = "command"  # a command that must exit 0
+    STATEMENT = "statement"  # a thing that must be true, judged by a reviewer
+
+
+# § X.2–X.3: the payload parts of a run's events.
+class RunSession(Struct, frozen=True):
+    session_id: str
+    role: RunRole
+    record_root: str
+    driven: bool  # the topology, not a person, writes its next message
+
+
+class RunLimits(Struct, frozen=True):
+    max_stops: int  # turn ends before the run stops
+    stall_stops: int  # turn ends in a row with no new commit and no change in the checks
+
+
+class CardCheck(Struct, frozen=True):
+    kind: CheckKind
+    text: str
+
+
+class CheckResult(Struct, frozen=True):
+    index: int  # the card check it reports
+    kind: CheckKind
+    passed: bool | None  # None: not run (a statement check awaiting a reviewer)
+    exit: int | None
+    output_tail: str
+    note: str
 
 
 class ReturnReason(StrEnum):
@@ -202,6 +270,11 @@ SESSION_KINDS: frozenset[str] = frozenset(
         HARNESS_TOOL_RESULT,
         LANGUAGE_PROFILE,
         LANGUAGE_DRIFT,
+        TOPOLOGY_RUN_STARTED,
+        TOPOLOGY_RUN_ENDED,
+        CARD_ACCEPTED,
+        CHECKS_RUN,
+        REPORT_WRITTEN,
     }
 )
 
@@ -405,6 +478,11 @@ PRODUCER_KIND_SKILL_FRAGMENT: Final[str] = "skill_fragment"
 PRODUCER_KIND_DRIVER_STEPPER: Final[str] = "driver_stepper"
 # v0.11 (§ W.3): measures a turn's texts between its final reply and Returned.
 PRODUCER_KIND_LANGUAGE: Final[str] = "language"
+# v0.12 (§ X.5): the producers of a driven session.
+PRODUCER_KIND_CARD: Final[str] = "card"
+PRODUCER_KIND_CHECKS: Final[str] = "checks"
+PRODUCER_KIND_CONTINUE: Final[str] = "continue"
+PRODUCER_KIND_REPORT: Final[str] = "report"
 
 SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
     {
@@ -419,6 +497,10 @@ SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
         PRODUCER_KIND_SKILL_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
         PRODUCER_KIND_LANGUAGE,
+        PRODUCER_KIND_CARD,
+        PRODUCER_KIND_CHECKS,
+        PRODUCER_KIND_CONTINUE,
+        PRODUCER_KIND_REPORT,
     }
 )
 
@@ -436,6 +518,14 @@ TRIGGER_ID_RETURN_ON_INTERRUPT: Final[str] = "return-on-interrupt"
 # v0.11 (§ W.4): with `language` on, the final reply starts the measurement and its end starts return.
 TRIGGER_ID_LANGUAGE_ON_REPLY: Final[str] = "language-on-reply"
 TRIGGER_ID_RETURN_ON_LANGUAGE: Final[str] = "return-on-language"
+# v0.12 (§ X.5): a driven session's turn end.
+TRIGGER_ID_CHECKS_ON_RETURNED: Final[str] = "checks-on-returned"
+TRIGGER_ID_CONTINUE_ON_CHECKS: Final[str] = "continue-on-checks"
+TRIGGER_ID_REPORT_ON_CHECKS: Final[str] = "report-on-checks"
+# The triggers only a driven session registers (§ X.5); an undriven session registers the rest.
+DRIVEN_SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
+    {TRIGGER_ID_CHECKS_ON_RETURNED, TRIGGER_ID_CONTINUE_ON_CHECKS, TRIGGER_ID_REPORT_ON_CHECKS}
+)
 TRIGGER_ID_END_ON_EXIT: Final[str] = "end-on-exit"
 TRIGGER_ID_END_ON_TURN_CAP: Final[str] = "end-on-turn-cap"
 TRIGGER_ID_END_ON_END_REQUEST: Final[str] = "end-on-end-request"
@@ -479,6 +569,8 @@ SKILL_SLASH_PREFIX: Final[str] = "skill:"
 DRIVER_SLASH_SOURCE: Final[str] = "driver"
 # A sub-session's opening message, written by the parent model through the `delegate` tool.
 DELEGATE_SLASH_SOURCE: Final[str] = "delegate"
+# v0.12 (§ X.3): a driven session's next message, written by its `continue` producer.
+DRIVEN_SLASH_SOURCE: Final[str] = "driven"
 
 SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -502,6 +594,9 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE,
         TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
         TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
+        TRIGGER_ID_CHECKS_ON_RETURNED,
+        TRIGGER_ID_CONTINUE_ON_CHECKS,
+        TRIGGER_ID_REPORT_ON_CHECKS,
     }
 )
 
@@ -538,6 +633,28 @@ __all__ = [
     "SKILL_SLASH_PREFIX",
     "DRIVER_SLASH_SOURCE",
     "DELEGATE_SLASH_SOURCE",
+    "DRIVEN_SLASH_SOURCE",
+    "TOPOLOGY_RUN_STARTED",
+    "TOPOLOGY_RUN_ENDED",
+    "CARD_ACCEPTED",
+    "CHECKS_RUN",
+    "REPORT_WRITTEN",
+    "PRODUCER_KIND_CARD",
+    "PRODUCER_KIND_CHECKS",
+    "PRODUCER_KIND_CONTINUE",
+    "PRODUCER_KIND_REPORT",
+    "TRIGGER_ID_CHECKS_ON_RETURNED",
+    "TRIGGER_ID_CONTINUE_ON_CHECKS",
+    "TRIGGER_ID_REPORT_ON_CHECKS",
+    "RunOutcome",
+    "RunRole",
+    "CardForm",
+    "CheckKind",
+    "RunSession",
+    "RunLimits",
+    "CardCheck",
+    "CheckResult",
+    "DRIVEN_SESSION_TRIGGER_IDS",
     "PRODUCER_KIND_SKILL_FRAGMENT",
     "CACHE_LAYOUT_SOURCES",
     "TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE",

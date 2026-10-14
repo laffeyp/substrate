@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.12 (2026-10-13).** Sprint K314 adds section X: the events of a topology run in its caller's record and in its own, the producers and triggers of a driven session, the ordering rules, and the report. The vocabulary session for the topology layer of `process/planning/RESEARCH-2026-10-13-core-topologies-r8.md` (approved by the Architect, 2026-10-13). Agent-resolved on the grounds in § X.8. §§ A–W byte-preserved.
+
 **Status: RATIFIED — v0.8 (2026-10-11).** Sprint K296 adds section T: two controls a session opens with, Length and Tone, each a typed set of positions whose text reaches the model as a `control` fragment. Directed by the Architect, 2026-10-11 (substrate-ui OPEN-ITEMS 16). §§ A–S byte-preserved.
 
 **Status: RATIFIED — v0.7 (2026-10-11).** Sprint K291 adds section S: history compaction clears old tool outputs before it drops turns, and records a cut only when it changes. Directed by the Architect, 2026-10-11; research in `process/planning/RESEARCH-2026-10-11-compaction.md`. §§ A–R byte-preserved; where S differs from D, S governs records written from v0.7 on.
@@ -250,6 +252,115 @@ New optional payload field:
 **Cadence.** At most once per `(session_id, source_name)` pair per session. A repeated failure on the same source (e.g., a bundle whose slot ambiguity trips on every turn) fires the SessionWarning ONCE, not per turn — the trigger uses PerEvent policy but the source_name-keyed dedup lives on the reader's side. The grader invariant carries over from § F #7 (v0.1's per-kind cadence).
 
 **Composer / model behavior after a fragment-source failure.** The per-turn composer chain (`per_turn_fragment → user_message_fragment → composer`) subscribes to `{substrate.ProducerCompleted, substrate.ProducerFailed}` from sprint 068 onward. A failed link still advances the chain; the composer's cohort simply lacks the failed fragment. `PromptComposed.text` emits truncated. Model runs. Session runs to completion. The SessionWarning is the operator-visible signal that the composed prompt was degraded.
+
+## X. v0.12 — topology runs (2026-10-13, sprint K314)
+
+Research: `process/planning/RESEARCH-2026-10-13-core-topologies-r8.md`; roadmap `process/planning/ROADMAP-2026-10-13-core-topologies.md`. Adds five event kinds, four producer kinds, three triggers, four enums, one message source and one end reason. The kinds name what a product user sees in plain words (a card, checks, a report); the SDD terms they carry are in § X.7.
+
+### X.1 A run
+
+A topology run is started by a session, its caller, through a topology's tool. It is one or more sessions, each with its own record, under one `run_id`. A session in a run is driven when its topology writes its next `UserMessage`, and interactive when a person does. The caller's record holds the run's start and end; each session's record holds its card, its checks and its report.
+
+### X.2 Events in the caller's record
+
+`TopologyRunStarted` — written when the topology's tool starts the run:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | str | the run |
+| `topology` | str | the topology's name |
+| `call_seq` | int | the seq of the caller's `ToolCall` that started it |
+| `sessions` | list of `RunSession` | each session in the run: `session_id`, `role` (`RunRole`), `record_root`, `driven` (bool) |
+
+`TopologyRunEnded` — written when the run ends, before the caller's next model step, and told to the model once:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id`, `topology` | str, str | as at the start |
+| `outcome` | `RunOutcome` | how it ended |
+| `report_seq` | int or null | the seq of the run's `ReportWritten`; null when the run ended without one |
+| `report` | `ReportWritten` or null | a copy of that report, for the caller's model |
+
+### X.3 Events in a run session's record
+
+`CardAccepted` — the run's input, the first application event of a driven session:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `form` | `CardForm` | `plain` (what, where, how to tell it is done) or `sdd` (the kit's sprint card) |
+| `what` | str | the work |
+| `where` | list of str | the files or parts of the project it touches, and what to read first |
+| `checks` | list of `CardCheck` | how to tell it is done: `kind` (`CheckKind`) and `text` |
+| `text` | str | the card as given |
+| `limits` | `RunLimits` | `max_stops`: turn ends before the run stops; `stall_stops`: turn ends in a row with no new commit and no change in the checks before it counts as stuck |
+
+`ChecksRun` — the checks after a turn ends:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `after_seq` | int | the `Returned` they follow |
+| `results` | list of `CheckResult` | per card check: `index`, `kind`, `passed` (bool, or null when not run), `exit` (int or null), `output_tail`, `note` |
+| `record_problems` | list of str | what the check of the session's own events against this vocabulary found |
+| `passed` | bool | every command check passed and `record_problems` is empty |
+
+A `statement` check is judged by a reviewer, not run; until a reviewer judges it (K320) its `passed` is null and its note says so.
+
+`ReportWritten` — the run's report, its last application event:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `outcome` | `RunOutcome` | how it ended |
+| `asked` | str | what the card asked for, as the worker understood it |
+| `done` | str | what was done |
+| `files` | list of str | the files changed |
+| `checks` | list of `CheckResult` | the last checks |
+| `left` | str | what is left and why; empty when nothing is |
+| `branch` | str or null | the branch the work is on |
+| `commits` | list of str | its commits |
+
+A `UserMessage` the `continue` producer writes carries `slash_source` `driven`. `SessionEnded.reason` gains `caller_stop`, for a run its caller stopped.
+
+### X.4 Enums
+
+- `RunOutcome`: `done`, `partly_done` (done, with something deferred), `needs_user` (stopped on a question only the user can answer), `stuck` (out of its limits without passing), `failed` (an error it could not continue past), `stopped` (its caller stopped it).
+- `RunRole`: `worker`, `reviewer`.
+- `CardForm`: `plain`, `sdd`.
+- `CheckKind`: `command` (a command that must exit 0), `statement` (a thing that must be true, judged by a reviewer).
+
+### X.5 Producers and triggers of a driven session
+
+| Producer | Writes |
+|---|---|
+| `card` | `CardAccepted`, then the first `UserMessage`, composed from the card |
+| `checks` | `ChecksRun` |
+| `continue` | the next `UserMessage` (`slash_source` `driven`), carrying what failed |
+| `report` | `ReportWritten` |
+
+| Trigger | Fires on | Starts |
+|---|---|---|
+| `checks-on-returned` | `Returned` in a driven session | `checks` |
+| `continue-on-checks` | `ChecksRun` not passed, within the card's limits | `continue` |
+| `report-on-checks` | `ChecksRun` passed, or the limits reached | `report` |
+
+A driven session finalises on `ReportWritten`, or on `SessionEnded`. An undriven session is v0.11 unchanged.
+
+### X.6 Order
+
+- In the caller's record, a run's `TopologyRunEnded` follows its `TopologyRunStarted`, and each appears once per `run_id`.
+- In a driven session, `CardAccepted` is the first application event; every `ChecksRun` follows a `Returned`; `ReportWritten` appears once, and nothing but `SessionEnded` and the kernel's finalisation follows it.
+
+### X.7 The report and the kit
+
+The report carries the SDD kit's Signal Report (`sdd-kit-3/templates/SIGNAL_REPORT.md`) under plain names: `asked` is its `scope_confirmation`; `done` and `files` its `work_performed` and `artifact_payloads` by reference; `checks` its `dual_contract_self_grade`; `outcome` and `left` its `status_and_blockers` (`done` = complete, `partly_done` = complete-partial, `needs_user` = blocked-on-user, `stuck` and `failed` = failed). Its `signal_trace` is the session's record itself, read by `record_root`. The card's `command` checks are the kit's command exit codes; `statement` checks its content assertions and observations; `record_problems` the signal contract and the review of the run.
+
+### X.8 Decisions and candidates not adopted
+
+Agent-resolved on the grounds (project: the research r8 and its approval; SDD: `grammar/PRINCIPLES.md` commitments 1–3 and BOOTSTRAP Step 2's over-decomposition check; practice: the session topology's existing kinds), and recorded in the kernel board's Decisions:
+
+- **No `CardRefused`.** A refused card is the tool call's `ToolResult` with `ok: false` naming what is missing; the record already holds it. A second event would say the same fact twice.
+- **No `RunStopped`.** A stop is `SessionEnded` with reason `caller_stop` in the run's record, and `outcome` `stopped` in the caller's. Pause, resume and step are operations on the record and need no events of their own until K319 shows otherwise.
+- **Two roles, not five.** Foundation 03 names five roles; the cards through K321 need a worker and a reviewer. The others (checker, integrator, planner) are added by proposal when a shape needs them; the checks of K317 are a deterministic producer, not a session.
+- **Plain kind names.** The product shows these events; `CardAccepted` and `ReportWritten` say what happened in words a user reads, per r8 § 3.10.
 
 ## W. v0.11 — language measured live (2026-10-13, sprints K309–K311)
 

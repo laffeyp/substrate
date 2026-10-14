@@ -111,6 +111,7 @@ def test_session_kinds_is_exactly_the_session_structs() -> None:
     import msgspec
 
     import substrate.topologies.session as session
+    from substrate.topologies.session import vocabulary
 
     structs = {
         name
@@ -118,6 +119,9 @@ def test_session_kinds_is_exactly_the_session_structs() -> None:
         if isinstance(obj, type)
         and issubclass(obj, msgspec.Struct)
         and obj.__module__.startswith(session.__name__)
+        # v0.12 (§ X): the payload parts of a run's events (RunSession, RunLimits, CardCheck,
+        # CheckResult) are defined in the vocabulary module, which defines no events.
+        and obj.__module__ != vocabulary.__name__
     }
     assert structs == set(SESSION_KINDS)
     assert is_session_kind("BackgroundTaskEnded")

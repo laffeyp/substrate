@@ -34,7 +34,13 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
+    CardCheck,
+    CardForm,
+    CheckResult,
     Control,
+    RunLimits,
+    RunOutcome,
+    RunSession,
     LanguagePairing,
     LanguageStream,
     PromptSource,
@@ -315,6 +321,50 @@ class LanguageDrift(Struct, frozen=True):
     delta: float
     threshold: float
     warmup: int
+
+
+# § X (v0.12): topology runs. The events of a run session (its card, its checks, its report) and of
+# its caller (the run's start and end). Their payload parts are in the vocabulary.
+class CardAccepted(Struct, frozen=True):
+    form: CardForm
+    what: str
+    where: list[str]
+    checks: list[CardCheck]
+    text: str  # the card as given
+    limits: RunLimits
+
+
+class ChecksRun(Struct, frozen=True):
+    after_seq: int  # the Returned they follow
+    results: list[CheckResult]
+    record_problems: list[str]
+    passed: bool
+
+
+class ReportWritten(Struct, frozen=True):
+    outcome: RunOutcome
+    asked: str
+    done: str
+    files: list[str]
+    checks: list[CheckResult]
+    left: str
+    branch: str | None
+    commits: list[str]
+
+
+class TopologyRunStarted(Struct, frozen=True):
+    run_id: str
+    topology: str
+    call_seq: int  # the caller's ToolCall
+    sessions: list[RunSession]
+
+
+class TopologyRunEnded(Struct, frozen=True):
+    run_id: str
+    topology: str
+    outcome: RunOutcome
+    report_seq: int | None
+    report: ReportWritten | None
 
 
 # The core producer bodies. The model producer reads the just-appended UserMessage /
@@ -1673,6 +1723,11 @@ from .views import (  # noqa: E402
 
 __all__ = [
     "BackgroundTaskEnded",
+    "CardAccepted",
+    "ChecksRun",
+    "ReportWritten",
+    "TopologyRunEnded",
+    "TopologyRunStarted",
     "LanguageDrift",
     "LanguageProfile",
     "FinalAnswer",
