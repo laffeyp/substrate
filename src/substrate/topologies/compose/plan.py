@@ -25,6 +25,7 @@ from .vocabulary import (
     DEFAULT_COLLECT_N,
     FAN_OUT_MAX,
     INPUT,
+    RUN_STOP_REQUESTED,
     STEP_ID,
     AgentAs,
     End,
@@ -66,7 +67,7 @@ ALL_FIELDS: Final[frozenset[str]] = frozenset().union(*PART_FIELDS.values())
 _PLAN_FIELDS: Final[frozenset[str]] = frozenset({"name", "steps", "end", "max_minutes"})
 # Kinds a step may not write: the session's, the kernel's, and the run's input.
 RESERVED_KINDS: Final[frozenset[str]] = (
-    SESSION_KINDS | frozenset(LIFECYCLE_KINDS) | {kind_of(INPUT)}
+    SESSION_KINDS | frozenset(LIFECYCLE_KINDS) | {kind_of(INPUT), RUN_STOP_REQUESTED}
 )
 # The defaults of the fields only some parts take; JSON written by `msgspec` carries them.
 _UNSET: Final[dict[str, tuple[Any, ...]]] = {

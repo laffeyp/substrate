@@ -1,0 +1,4 @@
+# A builder works the task; a reviewer reads its branch.
+name: build_and_review
+build: agent as build "Do the task. Commit your work on this branch."
+review: agent as review on Build input "{Build.branch}" "Find the defects in this branch."

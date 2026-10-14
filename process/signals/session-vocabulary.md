@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.16.1 (2026-10-14).** Sprint K338 amends § AA as built: a composed run's stop is an event in its own record (§ AA.3); a quiet end reports the run's last step event (§ AA.4); the three tools join the app's session tools and the four older run and list tools leave them, staying in the CLI (§ AA.6). Agent-resolved; additive.
+
 **Status: RATIFIED — v0.16 (2026-10-14).** Sprint K335 adds § AA, composed topologies: a plan of five standard parts, the events each part writes, how a composed run's start and end reach its caller, and the closed set of findings the plan tool returns. Agent-resolved; additive to v0.15.
 
 **Status: RATIFIED — v0.15 (2026-10-14).** Sprint K334 restores § Y as written under v0.13 (the `handoff` control, its texts and its measure), now ratified on v0.14. § Y's "v0.13" labels read as v0.15.
@@ -1120,6 +1122,12 @@ The main field a step reads when it has no `input`: `text`, `reply`, `output`, `
 
 `RunStarted.baseline.plan` is the plan with every default filled, as JSON. The run's input reaches the steps `on` `input` as their first input. Each step's events are the kind of AA.1 with the payload of AA.2; the kernel's own lifecycle events surround them.
 
+`RunStopRequested` (v0.16.1) — injected into a composed run's record when the run is stopped; the run finalises at it and its running steps are cancelled:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `source` | `StopSource` | `caller_stop` (its caller stopped it) or `max_minutes` (its time ran out) |
+
 ### AA.4 In the caller's record
 
 A composed run starts and ends as a § Z run: `TopologyRunStarted` with `topology` the plan's name and no `sessions`; `TopologyRunEnded` with `report` null and the new optional field `result`:
@@ -1127,7 +1135,7 @@ A composed run starts and ends as a § Z run: `TopologyRunStarted` with `topolog
 | `ComposedResult` field | Type | Meaning |
 |---|---|---|
 | `ended_on` | str or null | the kind of the end that matched; null when the run went quiet or did not end |
-| `event` | object or null | that event's payload |
+| `event` | object or null | that event's payload; for a run that went quiet (v0.16.1), the last step event's |
 | `counts` | map of str to int | how many events each step wrote |
 | `record_root` | str | the run's record |
 
@@ -1155,6 +1163,9 @@ A composed run starts and ends as a § Z run: `TopologyRunStarted` with `topolog
 
 `topology_help`, `topology_plan`, `topology_run` (`TOOL_NAME_TOPOLOGY_HELP`, `_PLAN`, `_RUN`). They replace `run_topology`, `run_topology_poll`, `list_topologies` and `list_applications`, whose runs blocked their caller or were polled; the code topologies stay runnable by name through `topology_run`.
 
+As built (v0.16.1): the three tools are in every app session's tools, and `run_topology`, `run_topology_poll`, `list_topologies` and `list_applications` are not; those four stay in the kernel for the CLI. The applications a session uses ship as plans (`review`, `best_of_n`, `map_reduce`); the simulation topologies (`game_of_life`, `debate` and the rest) run from the CLI, not through `topology_run`.
+
 ### Ratification signature
 
+- **v0.16.1** — Sprint K338, 2026-10-14, as built, recorded by the Agent. §§ A–Z byte-preserved.
 - **v0.16** — Sprint K335, 2026-10-14, decided by the Architect ("lets go Recenter on the create topology tool… We'll work based on this going forward"), recorded by the Agent. §§ A–Z byte-preserved.

@@ -83,6 +83,22 @@ class Strength(StrEnum):
     DRY_RUN = "dry_run"  # it rests on the run with stand-in answers
 
 
+class StopSource(StrEnum):
+    """Why a composed run was stopped (§ AA.3, v0.16.1)."""
+
+    CALLER_STOP = "caller_stop"  # its caller stopped it
+    MAX_MINUTES = "max_minutes"  # its time ran out
+
+
+class RunStopRequested(Struct, frozen=True):
+    """Injected into a composed run's record to stop it; the run finalises at it (§ AA.3)."""
+
+    source: StopSource
+
+
+RUN_STOP_REQUESTED: Final[str] = "RunStopRequested"
+
+
 class Test(Struct, frozen=True):
     """One test on a step's starting event (§ AA.1)."""
 
@@ -154,6 +170,9 @@ def kind_of(step_id: str) -> str:
 
 
 __all__ = [
+    "RUN_STOP_REQUESTED",
+    "RunStopRequested",
+    "StopSource",
     "COLLECT_ALL",
     "DEFAULT_COLLECT_N",
     "FAN_OUT_MAX",

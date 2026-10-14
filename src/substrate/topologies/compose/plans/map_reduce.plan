@@ -1,0 +1,6 @@
+# The input's lines are items; each is worked apart; the results are combined.
+name: map_reduce
+items: split
+work: model "Do the task for this item."
+all: collect
+combine: model input "Task: {input}\n\nResults:\n{All.items}" "Combine these results into one answer."

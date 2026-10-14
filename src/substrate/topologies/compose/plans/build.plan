@@ -1,0 +1,3 @@
+# One builder works the task on a new branch; the report and branch come back.
+name: build
+build: agent as build "Do the task. Commit your work on this branch."

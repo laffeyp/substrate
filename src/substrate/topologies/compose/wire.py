@@ -18,8 +18,20 @@ import msgspec
 from ... import api
 from ...constants import TRIGGER_FIRED
 from ...types import Event, Subscription
-from .parts import Deps, event_class, main_field, producer
-from .vocabulary import COLLECT_ALL, INPUT, End, EndWhen, Part, Plan, Step, Test, TestOp, kind_of
+from .parts import Deps, event_class, main_field, numbered, producer
+from .vocabulary import (
+    COLLECT_ALL,
+    INPUT,
+    RUN_STOP_REQUESTED,
+    End,
+    EndWhen,
+    Part,
+    Plan,
+    Step,
+    Test,
+    TestOp,
+    kind_of,
+)
 
 FIRED_VIEW: Final[str] = "fired"
 PLACEHOLDER: Final[re.Pattern[str]] = re.compile(
@@ -103,6 +115,8 @@ def lay_out(
         if field is None:
             return main_field(payload)
         value = payload.get(field, "")
+        if isinstance(value, list):
+            return numbered(value)
         return value if isinstance(value, str) else msgspec.json.encode(value).decode()
 
     if step.input:
@@ -120,7 +134,7 @@ def termination(ends: list[End]) -> Any:
     is a count of one, not `finalise_on`: the runtime consults termination with the last event
     of a cycle, which is a `TriggerFired` whenever a step waits on `K`, so `finalise_on(K)`
     would miss it."""
-    policies = []
+    policies = [api.threshold_count(RUN_STOP_REQUESTED, 1)]  # a stop ends the run (§ AA.3)
     for e in ends:
         if e.when is EndWhen.FIRST:
             policies.append(api.threshold_count(e.kind, 1))
@@ -128,7 +142,18 @@ def termination(ends: list[End]) -> Any:
             policies.append(api.threshold_count(e.kind, e.count))
         else:
             policies.append(api.quiescence())
-    return policies[0] if len(policies) == 1 else api.any_of(*policies)
+    return api.any_of(*policies)
+
+
+def which_end(ends: list[End], counts: Mapping[str, int]) -> End | None:
+    """The end that held, read from how many events of each kind the run wrote; None for a run
+    that went quiet. The kernel's `TerminationMatched` names only the whole policy."""
+    for e in ends:
+        if e.when is EndWhen.FIRST and counts.get(e.kind, 0) >= 1:
+            return e
+        if e.when is EndWhen.AFTER and counts.get(e.kind, 0) >= e.count:
+            return e
+    return None
 
 
 def latest_view(kind: str) -> str:
@@ -274,4 +299,5 @@ __all__ = [
     "passes",
     "termination",
     "topology",
+    "which_end",
 ]

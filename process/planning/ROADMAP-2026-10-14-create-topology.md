@@ -7,7 +7,7 @@
 | K335 | Vocabulary v0.16: composed topologies | the five parts' payloads, the nine finding codes with their fixes, and the plan in `RunStarted` baseline (`plan`) are ratified with a rationale |
 | K336 | Parts and plans | a plan in JSON or in lines becomes a kernel topology with every default filled; each of the five parts runs; the plan's lines read back as the same plan |
 | K337 | The plan's checks | each finding code fires on a plan built to cause it and names its fix; the dry run shows the steps in order and how the run ended, both ways through an `if`; a plan whose findings all have certain fixes returns a checked fixed plan |
-| K338 | The three tools | `topology_help`, `topology_plan`, `topology_run`; a run held by its caller, its end told once; `save` writes the workspace file; the shipped plans; the code topologies run by name; the four old run and list tools gone |
+| K338 | The three tools | `topology_help`, `topology_plan`, `topology_run`; a run held by its caller, its end told once; `save` writes the workspace file; the shipped plans; a stop ends the run `stopped`; the four old run and list tools out of the app's session tools |
 | K339 | The built tools on the pattern | `build`, `review`, `run` and `delegate` say what comes next in their results and notices; an unknown run id lists the session's runs |
 | U186 | Housekeeping from the read | the dead `src/` tree and its two generators gone; `builder.py` out of the packaging; the sample code out of the shell; ⌘F counts the real transcript |
 | U187 | A composed run in the app | the daemon's plan and run endpoints for a session; a composed run's pane shows each step's event as a row; agent steps open their panes |

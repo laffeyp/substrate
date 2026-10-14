@@ -36,7 +36,7 @@ from .vocabulary import (
     TestOp,
     kind_of,
 )
-from .wire import PLACEHOLDER, topology
+from .wire import PLACEHOLDER, topology, which_end
 
 DRY_RUN_SECONDS: Final[float] = 10.0
 DRY_RUN_INPUT: Final[str] = "item one\nitem two"
@@ -318,13 +318,10 @@ async def _run(plan: Plan, failing: bool, run_input: str) -> tuple[list[str], se
 
 
 def _ended(plan: Plan, counts: Mapping[str, int]) -> str:
-    """Which end held, read from what the run wrote: the kernel names only the whole policy."""
-    for e in plan.end:
-        if e.when is EndWhen.FIRST and counts.get(e.kind, 0) >= 1:
-            return f"first {e.kind}"
-        if e.when is EndWhen.AFTER and counts.get(e.kind, 0) >= e.count:
-            return f"after {e.count} {e.kind}"
-    return f"quiet, after {sum(counts.values())} events"
+    end = which_end(plan.end, counts)
+    if end is None:
+        return f"quiet, after {sum(counts.values())} events"
+    return f"first {end.kind}" if end.when is EndWhen.FIRST else f"after {end.count} {end.kind}"
 
 
 def _passes_through_if(plan: Plan) -> bool:

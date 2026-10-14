@@ -11,6 +11,8 @@ session and on stand-in answers in the plan tool's dry run.
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,15 +58,36 @@ def event_class(step: Step) -> type[Struct]:
 
 
 def main_field(payload: Mapping[str, Any]) -> str:
-    """The text a step reads from an event when it lays out nothing else (§ AA.2)."""
+    """The text a step reads from an event when it lays out nothing else (§ AA.2); a collect's
+    items read as a numbered list of theirs."""
     for name in MAIN_FIELDS:
         value = payload.get(name)
         if isinstance(value, str):
             return value
+    items = payload.get("items")
+    if isinstance(items, list):
+        return numbered(items)
     return msgspec.json.encode(dict(payload)).decode()
 
 
+def numbered(items: list[Any]) -> str:
+    """Items as `1. …`, one per paragraph, each its main field."""
+    return "\n\n".join(
+        f"{i}. {main_field(item) if isinstance(item, Mapping) else item}"
+        for i, item in enumerate(items, 1)
+    )
+
+
 Producer = Callable[[Any], AsyncIterator[Any]]
+
+
+async def _end_group(proc: asyncio.subprocess.Process) -> None:
+    """Kill a command's process group and reap it."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:  # it had ended
+        pass
+    await proc.wait()
 
 
 def producer(step: Step, cls: type[Struct], deps: Deps) -> Producer:
@@ -91,26 +114,31 @@ def producer(step: Step, cls: type[Struct], deps: Deps) -> Producer:
     if step.part is Part.COMMAND:
 
         async def command(inp: Any) -> AsyncIterator[Any]:
+            # Its own process group, so a stop or a time-out ends the command and its children,
+            # not just the shell that started them.
             proc = await asyncio.create_subprocess_shell(
                 step.command,
                 cwd=str(deps.workdir),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
             )
             try:
                 out, _ = await asyncio.wait_for(
                     proc.communicate(inp["text"].encode()), COMMAND_TIMEOUT_SECONDS
                 )
             except TimeoutError:
-                proc.kill()
-                await proc.wait()
+                await _end_group(proc)
                 yield cls(
                     ok=False,
                     exit=-1,
                     output=f"stopped after {COMMAND_TIMEOUT_SECONDS:.0f} s: {step.command}",
                 )
                 return
+            except asyncio.CancelledError:  # the run was stopped
+                await _end_group(proc)
+                raise
             text = out.decode(errors="replace")[-COMMAND_OUTPUT_CHARS:]
             code = proc.returncode if proc.returncode is not None else -1
             yield cls(ok=code == 0, exit=code, output=text)
@@ -145,5 +173,6 @@ __all__ = [
     "Producer",
     "event_class",
     "main_field",
+    "numbered",
     "producer",
 ]
