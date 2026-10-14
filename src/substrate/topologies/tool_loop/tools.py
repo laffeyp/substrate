@@ -64,6 +64,10 @@ TOOL_NAME_BASH_OUTPUT: Final[str] = "bash_output"
 TOOL_NAME_BASH_STOP: Final[str] = "bash_stop"
 TOOL_NAME_BASH_TASKS: Final[str] = "bash_tasks"
 TOOL_NAME_DELEGATE: Final[str] = "delegate"
+# Kernel K330-K332: the tool that controls a session's runs, and the tools that start them.
+TOOL_NAME_RUN: Final[str] = "run"
+TOOL_NAME_REVIEW: Final[str] = "review"
+TOOL_NAME_BUILD: Final[str] = "build"
 # Substrate tools (implementations at substrate_tools.py).
 TOOL_NAME_INSPECT_RECORD: Final[str] = "inspect_record"
 TOOL_NAME_LIST_RECORDS: Final[str] = "list_records"
