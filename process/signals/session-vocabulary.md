@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.14 (2026-10-14).** Sprint K327 adds § Z, the topology runs rebuilt from research round 9: a run's start and end in its caller's record, and in the run's own record a first message the topology writes and a report when its turn ends. No card form, checks, limits, judge or pause: round 9 removes them. Agent-resolved; additive to v0.11.
+
 **Status: v0.11 IN FORCE — v0.12 to v0.13 WITHDRAWN (2026-10-14).** The code of kernel sprints K314–K324 is reverted, and the topologies are rebuilt from research round 9 (`process/planning/RESEARCH-2026-10-14-core-topologies-r9.md`), which removes the card's done-condition, the checks, the retry loop and the judge. § X (v0.12–v0.12.4) and § Y (v0.13) stay below as history; the rebuild proposes its events as a new version before any code.
 
 **Status: RATIFIED — v0.13 (2026-10-13).** Sprint K324 adds § Y: a third control, `handoff`, for how readily the model hands work to a topology (`delegate`, `review`, `build`) instead of doing it itself (research r8 § 5), and the measure of its effect, topology calls per turn. Agent-resolved; additive.
@@ -1016,3 +1018,54 @@ On the message on which a change is made: UserMessage, SessionChanged (one per f
 - **v0.9** — Sprint K298, 2026-10-12, decided by the Architect ("let's make it happen", after research round 2), recorded by the Agent. §§ A–T byte-preserved.
 - **v0.10** — Sprint K299, 2026-10-12, decided by the Architect ("let's go", after roadmap round 2), recorded by the Agent. §§ A–U byte-preserved.
 - **v0.11** — Sprints K309–K311, 2026-10-13, decided by the Architect ("go… make sure we have the right design"), recorded by the Agent. §§ A–V byte-preserved.
+
+## Z. v0.14 — topology runs (2026-10-14, sprint K327)
+
+Research: `process/planning/RESEARCH-2026-10-14-core-topologies-r9.md` § 3, § 4, § 7. A topology run is one or more sessions a session starts through a tool (`build`, `review`); the caller holds it. Each run session takes one turn: the topology writes its first message, the model works, and when its turn ends the run writes its report and ends.
+
+### Z.1 In the caller's record
+
+`TopologyRunStarted` — written when the run starts, by the caller's tool call:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | str | the run |
+| `topology` | str | `build` or `review` |
+| `call_seq` | int | the caller's `ToolCall` that started it |
+| `sessions` | list of `RunSession` | each: `session_id`, `role` (`RunRole`), `record_root` |
+
+`TopologyRunEnded` — written at the caller's first model step after the run ends, once:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id`, `topology` | str | as at its start |
+| `outcome` | `RunOutcome` | how it ended |
+| `report_seq` | int or null | the `ReportWritten` in the run's record; null when none was written |
+| `report` | `ReportWritten` or null | the report itself |
+
+The caller's model is told the end in one line with the report's reply. Ending the caller ends its runs; a run its caller stopped ends with `SessionEnded.reason` `caller_stop`.
+
+### Z.2 In a run's record
+
+The run's first `UserMessage` has `slash_source` `run` (`RUN_SLASH_SOURCE`): what the topology gave the session (a build's card, a review's style and target).
+
+`ReportWritten` — written once, after the first `Returned`:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `outcome` | `RunOutcome` | `done` when the turn replied; `failed` on a model error; `stopped` on an interrupt |
+| `reply` | str | the session's last words |
+| `files` | list of str | the files changed in its worktree since it began, committed or not |
+| `branch` | str or null | its worktree's branch; null when detached |
+| `commits` | list of str | the commits made since it began |
+
+The producer `report` writes it, started by the trigger `report-on-returned`; the session finalises on `ReportWritten` or `SessionEnded`.
+
+### Z.3 Enums
+
+`RunOutcome`: `done`, `failed`, `stopped`. `RunRole`: `worker` (a build's session), `reviewer` (a review's session). `SessionEndReason` adds `caller_stop`.
+
+### Z.4 Order
+
+In a run's record: the `run` `UserMessage` is the first message; `ReportWritten` follows the first `Returned`, once; only `SessionEnded` and the kernel's finalisation follow it. In the caller's: a run's `TopologyRunEnded` follows its `TopologyRunStarted`, once.
+

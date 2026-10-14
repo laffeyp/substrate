@@ -34,6 +34,8 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
+    RunOutcome,
+    RunSession,
     Control,
     LanguagePairing,
     LanguageStream,
@@ -315,6 +317,31 @@ class LanguageDrift(Struct, frozen=True):
     delta: float
     threshold: float
     warmup: int
+
+
+# § Z (v0.14): topology runs. A run session's report, and the run's start and end in its caller's
+# record. Their payload part RunSession is in the vocabulary.
+class ReportWritten(Struct, frozen=True):
+    outcome: RunOutcome
+    reply: str  # the session's last words
+    files: list[str]  # changed in its worktree since it began, committed or not
+    branch: str | None  # null when its worktree is detached
+    commits: list[str]
+
+
+class TopologyRunStarted(Struct, frozen=True):
+    run_id: str
+    topology: str
+    call_seq: int  # the caller's ToolCall
+    sessions: list[RunSession]
+
+
+class TopologyRunEnded(Struct, frozen=True):
+    run_id: str
+    topology: str
+    outcome: RunOutcome
+    report_seq: int | None
+    report: ReportWritten | None
 
 
 # The core producer bodies. The model producer reads the just-appended UserMessage /
@@ -1673,6 +1700,9 @@ from .views import (  # noqa: E402
 
 __all__ = [
     "BackgroundTaskEnded",
+    "ReportWritten",
+    "TopologyRunEnded",
+    "TopologyRunStarted",
     "LanguageDrift",
     "LanguageProfile",
     "FinalAnswer",

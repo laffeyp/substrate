@@ -18,6 +18,7 @@ from substrate.adapters import DeterministicResponder
 from substrate.topologies.session import UserMessage, session_topology
 from substrate.topologies.session.ci import ci_session_topology
 from substrate.topologies.session.vocabulary import (
+    RUN_SESSION_TRIGGER_IDS,
     LEGACY_SESSION_END_REASONS,
     SESSION_TRIGGER_IDS,
     SessionEndReason,
@@ -57,7 +58,8 @@ def test_the_registered_triggers_are_the_declared_ones(tmp_path: Path) -> None:
     ids = set(_trigger_ids(session)) | set(_trigger_ids(ci_session_topology()))
     # The SessionStarted instrument's trigger is the kernel's, named after its producer.
     ids.discard("session_started")
-    assert ids == set(SESSION_TRIGGER_IDS)
+    # v0.14 (§ Z.2): only a run session registers its report trigger (kernel sprint 329).
+    assert ids | RUN_SESSION_TRIGGER_IDS == set(SESSION_TRIGGER_IDS)
 
 
 def test_the_turn_cap_reason_names_turns_and_old_records_still_read() -> None:

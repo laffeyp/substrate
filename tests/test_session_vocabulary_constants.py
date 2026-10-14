@@ -53,11 +53,13 @@ def test_session_end_reason_values() -> None:
     assert SessionEndReason.USER_END.value == "user_end"
     assert SessionEndReason.TURN_CAP.value == "turn_cap"
     assert SessionEndReason.DAEMON_SHUTDOWN.value == "daemon_shutdown"
+    assert SessionEndReason.CALLER_STOP.value == "caller_stop"  # v0.14 (§ Z.1)
     assert set(SessionEndReason) == {
         SessionEndReason.USER_EXIT,
         SessionEndReason.USER_END,
         SessionEndReason.TURN_CAP,
         SessionEndReason.DAEMON_SHUTDOWN,
+        SessionEndReason.CALLER_STOP,
     }
 
 
@@ -119,6 +121,7 @@ def test_session_producer_kinds_frozenset_covers_all() -> None:
         PRODUCER_KIND_DRIVER_STEPPER,
         PRODUCER_KIND_SKILL_FRAGMENT,
         PRODUCER_KIND_LANGUAGE,
+        "report",  # v0.14 (§ Z.2): a run session's report
     }
     assert SESSION_PRODUCER_KINDS == expected
 
@@ -146,7 +149,8 @@ def test_session_trigger_ids_frozenset_covers_all() -> None:
     skill-fragment-on-user-message and model-on-skill-fragment. K299 replaced
     session-prompt-on-session-changed with session-prompt-on-user-message-change,
     model-on-session-prompt-change and skill-fragment-on-session-prompt-change (§ V)."""
-    assert len(SESSION_TRIGGER_IDS) == 20  # v0.11 (§ W.4): language-on-reply, return-on-language
+    # v0.11 (§ W.4): language-on-reply, return-on-language; v0.14 (§ Z.2): report-on-returned.
+    assert len(SESSION_TRIGGER_IDS) == 21
     assert "session-prompt-on-session-changed" not in SESSION_TRIGGER_IDS
     assert {
         "session-prompt-on-user-message-change",

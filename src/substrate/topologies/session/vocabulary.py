@@ -25,6 +25,8 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any, Final
 
+from msgspec import Struct
+
 from ...language.drift import Direction
 from ..tool_loop.kinds import FINAL_ANSWER
 
@@ -43,6 +45,7 @@ class SessionEndReason(StrEnum):
     USER_END = "user_end"
     TURN_CAP = "turn_cap"  # "timeout" before v0.3.4; see LEGACY_SESSION_END_REASONS
     DAEMON_SHUTDOWN = "daemon_shutdown"
+    CALLER_STOP = "caller_stop"  # v0.14 (§ Z.1): a run's caller stopped it
 
 
 class ParkReason(StrEnum):
@@ -108,6 +111,10 @@ RETURNED = "Returned"
 # v0.11 (§ W, sprint K309): language measured live.
 LANGUAGE_PROFILE = "LanguageProfile"
 LANGUAGE_DRIFT = "LanguageDrift"
+# v0.14 (§ Z): topology runs. The first two in the caller's record, the report in the run's.
+TOPOLOGY_RUN_STARTED = "TopologyRunStarted"
+TOPOLOGY_RUN_ENDED = "TopologyRunEnded"
+REPORT_WRITTEN = "ReportWritten"
 TURN_END_KINDS: Final[frozenset[str]] = frozenset({RETURNED, PARK})
 # Kinds a session record written before v0.3 carries and v0.3 no longer writes (§ K.3); a reader
 # of session records accepts them.
@@ -150,6 +157,29 @@ class ToolMode(StrEnum):
     NATIVE = "native"  # the driver's own tool-calling API (Ollama)
     TEXT = "text"  # the tool list and the JSON directive in the prompt
     MCP = "mcp"  # registered tools over Substrate's MCP server (harness drivers)
+
+
+class RunOutcome(StrEnum):
+    """How a topology run ended (§ Z.3)."""
+
+    DONE = "done"  # its turn replied
+    FAILED = "failed"  # the model failed
+    STOPPED = "stopped"  # interrupted, or stopped by its caller
+
+
+class RunRole(StrEnum):
+    """A run session's part (§ Z.3)."""
+
+    WORKER = "worker"  # a build's session
+    REVIEWER = "reviewer"  # a review's session
+
+
+class RunSession(Struct, frozen=True):
+    """One session of a run, as its caller's record names it (§ Z.1)."""
+
+    session_id: str
+    role: RunRole
+    record_root: str
 
 
 class ReturnReason(StrEnum):
@@ -202,6 +232,9 @@ SESSION_KINDS: frozenset[str] = frozenset(
         HARNESS_TOOL_RESULT,
         LANGUAGE_PROFILE,
         LANGUAGE_DRIFT,
+        TOPOLOGY_RUN_STARTED,
+        TOPOLOGY_RUN_ENDED,
+        REPORT_WRITTEN,
     }
 )
 
@@ -405,6 +438,8 @@ PRODUCER_KIND_SKILL_FRAGMENT: Final[str] = "skill_fragment"
 PRODUCER_KIND_DRIVER_STEPPER: Final[str] = "driver_stepper"
 # v0.11 (§ W.3): measures a turn's texts between its final reply and Returned.
 PRODUCER_KIND_LANGUAGE: Final[str] = "language"
+# v0.14 (§ Z.2): writes a run session's report when its turn ends.
+PRODUCER_KIND_REPORT: Final[str] = "report"
 
 SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
     {
@@ -419,6 +454,7 @@ SESSION_PRODUCER_KINDS: Final[frozenset[str]] = frozenset(
         PRODUCER_KIND_SKILL_FRAGMENT,
         PRODUCER_KIND_DRIVER_STEPPER,
         PRODUCER_KIND_LANGUAGE,
+        PRODUCER_KIND_REPORT,
     }
 )
 
@@ -436,6 +472,9 @@ TRIGGER_ID_RETURN_ON_INTERRUPT: Final[str] = "return-on-interrupt"
 # v0.11 (§ W.4): with `language` on, the final reply starts the measurement and its end starts return.
 TRIGGER_ID_LANGUAGE_ON_REPLY: Final[str] = "language-on-reply"
 TRIGGER_ID_RETURN_ON_LANGUAGE: Final[str] = "return-on-language"
+# v0.14 (§ Z.2): a run session's turn end starts its report; only a run session registers it.
+TRIGGER_ID_REPORT_ON_RETURNED: Final[str] = "report-on-returned"
+RUN_SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset({TRIGGER_ID_REPORT_ON_RETURNED})
 TRIGGER_ID_END_ON_EXIT: Final[str] = "end-on-exit"
 TRIGGER_ID_END_ON_TURN_CAP: Final[str] = "end-on-turn-cap"
 TRIGGER_ID_END_ON_END_REQUEST: Final[str] = "end-on-end-request"
@@ -479,6 +518,8 @@ SKILL_SLASH_PREFIX: Final[str] = "skill:"
 DRIVER_SLASH_SOURCE: Final[str] = "driver"
 # A sub-session's opening message, written by the parent model through the `delegate` tool.
 DELEGATE_SLASH_SOURCE: Final[str] = "delegate"
+# v0.14 (§ Z.2): a run session's first message, written by the topology that started it.
+RUN_SLASH_SOURCE: Final[str] = "run"
 
 SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -502,6 +543,7 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE,
         TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
         TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
+        TRIGGER_ID_REPORT_ON_RETURNED,
     }
 )
 
@@ -518,6 +560,16 @@ def is_session_kind(kind: str) -> bool:
 
 
 __all__ = [
+    "RUN_SESSION_TRIGGER_IDS",
+    "RunSession",
+    "RunRole",
+    "RunOutcome",
+    "RUN_SLASH_SOURCE",
+    "TRIGGER_ID_REPORT_ON_RETURNED",
+    "PRODUCER_KIND_REPORT",
+    "REPORT_WRITTEN",
+    "TOPOLOGY_RUN_ENDED",
+    "TOPOLOGY_RUN_STARTED",
     "END_ON_EXIT_SENTINEL",
     "LEGACY_PARK_REASONS",
     "LEGACY_SESSION_END_REASONS",
