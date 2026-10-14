@@ -260,6 +260,7 @@ class RunTable:
                     "sessions": [msgspec.to_builtins(s) for s in held.sessions],
                     "running": not held.done.is_set(),
                     "outcome": self._ended(held).outcome.value if ended else None,
+                    "record_root": str(held.record_root),  # U187: a composed run's pane reads it
                 }
             )
         return out
