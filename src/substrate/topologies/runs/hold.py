@@ -65,6 +65,9 @@ class HeldRun:
     reported: bool = False
     # Session vocabulary § AA: a composed run carries its plan; it has no sessions of its own.
     plan: Plan | None = None
+    # v0.16.2: the start of a run the person started from the app, written at the caller's next
+    # model step; None once written, or when the caller's tool call wrote it.
+    pending_start: TopologyRunStarted | None = None
 
 
 def _caller_call_seq() -> tuple[Any, int] | None:
@@ -121,13 +124,31 @@ class RunTable:
             runs[run_id] = held
         self._run_on_thread(held, lambda runtime: runtime.run(factory, name=topology))
         caller = _caller_call_seq()
+        started = TopologyRunStarted(
+            run_id=run_id,
+            topology=topology,
+            call_seq=caller[1] if caller is not None else -1,
+            sessions=sessions,
+            record_root=str(record_root),
+        )
         if caller is not None:
-            runtime, call_seq = caller
-            started = TopologyRunStarted(
-                run_id=run_id, topology=topology, call_seq=call_seq, sessions=sessions
-            )
+            runtime = caller[0]
             runtime._loop.call_soon_threadsafe(runtime.inject_event, started)  # noqa: SLF001 — as emit_tool_progress
+        else:
+            held.pending_start = started
         return held
+
+    def drain_started(self, owner: str) -> list[TopologyRunStarted]:
+        """The starts of `owner`'s runs the person started from the app, not yet written, once
+        each (v0.16.2): the caller's next model step writes them, before any end."""
+        with self._lock:
+            runs = list(self._runs.get(owner, {}).values())
+        out: list[TopologyRunStarted] = []
+        for held in runs:
+            if held.pending_start is not None:
+                out.append(held.pending_start)
+                held.pending_start = None
+        return out
 
     @staticmethod
     def _run_on_thread(held: HeldRun, body: Callable[[Any], Any]) -> None:
@@ -374,6 +395,11 @@ def _next_moves(e: TopologyRunEnded) -> str:
     return ""
 
 
+def start_notice(s: TopologyRunStarted) -> str:
+    """What the caller's model reads about a run the person started from the app."""
+    return f"[run {s.run_id} ({s.topology}) was started from the app; its end will come to you]"
+
+
 def composed_said(r: ComposedResult) -> str:
     """A composed run's end in words: which end held, the event's main field, each step's count."""
     on = f"on {r.ended_on}" if r.ended_on else "when nothing was left to run"
@@ -453,4 +479,5 @@ __all__ = [
     "RunTable",
     "make_run_tool",
     "run_notice",
+    "start_notice",
 ]

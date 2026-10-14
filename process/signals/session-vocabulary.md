@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.16.2 (2026-10-14).** UI sprint U187 adds to § Z.1 for runs the app starts: `TopologyRunStarted.record_root`, and the start of a run the person started (not the session's model) written at the session's next model step with `call_seq` -1. Agent-resolved; additive.
+
 **Status: RATIFIED — v0.16.1 (2026-10-14).** Sprint K338 amends § AA as built: a composed run's stop is an event in its own record (§ AA.3); a quiet end reports the run's last step event (§ AA.4); the three tools join the app's session tools and the four older run and list tools leave them, staying in the CLI (§ AA.6). Agent-resolved; additive.
 
 **Status: RATIFIED — v0.16 (2026-10-14).** Sprint K335 adds § AA, composed topologies: a plan of five standard parts, the events each part writes, how a composed run's start and end reach its caller, and the closed set of findings the plan tool returns. Agent-resolved; additive to v0.15.
@@ -1051,6 +1053,8 @@ Research: `process/planning/RESEARCH-2026-10-14-core-topologies-r9.md` § 3, § 
 
 The caller's model is told the end in one line with the report's reply. Ending the caller ends its runs; a run its caller stopped ends with `SessionEnded.reason` `caller_stop`.
 
+v0.16.2 (UI sprint U187): `TopologyRunStarted` adds `record_root` (str; empty in records before v0.16.2), the run's own record, where a composed run's events are, since it has no sessions. A run the person starts from the app, not inside the session's tool call, has no `ToolCall`: its `TopologyRunStarted` is written at the session's next model step, before that run's `TopologyRunEnded`, with `call_seq` -1, and the model is told it in one line. § Z.4's order holds: a run's start precedes its end.
+
 ### Z.2 In a run's record
 
 The run's first `UserMessage` has `slash_source` `run` (`RUN_SLASH_SOURCE`): what the topology gave the session (a build's card, a review's style and target).
@@ -1167,5 +1171,6 @@ As built (v0.16.1): the three tools are in every app session's tools, and `run_t
 
 ### Ratification signature
 
+- **v0.16.2** — UI sprint U187, 2026-10-14, recorded by the Agent. §§ A–Z byte-preserved but for § Z.1's added paragraph.
 - **v0.16.1** — Sprint K338, 2026-10-14, as built, recorded by the Agent. §§ A–Z byte-preserved.
 - **v0.16** — Sprint K335, 2026-10-14, decided by the Architect ("lets go Recenter on the create topology tool… We'll work based on this going forward"), recorded by the Agent. §§ A–Z byte-preserved.
