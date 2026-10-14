@@ -301,7 +301,7 @@ Executes one topology and produces one run record (single-use).
 - `resume(self, topology: 'Callable[[TopologyBuilder], None]', *, resume_event: 'Any') -> 'RunResult'` — Resume a PAUSED persistent-bus run at its existing record (F-TERM-3 / F-PERS-2).
 - `run(self, topology: 'Callable[[TopologyBuilder], None]', *, name: 'str | None' = None) -> 'RunResult'` — Run a topology to a fresh run record.
 
-### `RunResult(run_id: str, record_root: str, status: substrate.constants.RunStatus, final_event: substrate.types.Event | None, elapsed_seconds: float, finalisation_payload: Any | None)`
+### `RunResult(run_id: str, record_root: str, status: substrate.constants.RunStatus, final_event: substrate.types.Event | None, elapsed_seconds: float, finalisation_payload: typing.Any | None)`
 
 What `Runtime.run()` / `.resume()` returns: the run's outcome and where its record lives.
 
