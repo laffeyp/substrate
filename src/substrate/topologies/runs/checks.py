@@ -28,6 +28,7 @@ from ..session.vocabulary import (
     RETURNED,
     SESSION_ENDED,
     SESSION_KINDS,
+    USER_MESSAGE,
     CheckKind,
     CheckResult,
     RunOutcome,
@@ -49,8 +50,13 @@ def check_record(events: Iterable[Mapping[str, Any]]) -> list[str]:
     for e in app:
         if e.get("kind") not in KNOWN_KINDS:
             problems.append(f"seq {e.get('seq')}: kind {e.get('kind')!r} is not in the vocabulary")
-    if any(e.get("kind") == CARD_ACCEPTED for e in app) and app[0].get("kind") != CARD_ACCEPTED:
-        problems.append("CardAccepted is not the first application event")
+    kinds = [e.get("kind") for e in app]
+    if (
+        CARD_ACCEPTED in kinds
+        and USER_MESSAGE in kinds
+        and kinds.index(USER_MESSAGE) < kinds.index(CARD_ACCEPTED)
+    ):
+        problems.append("CardAccepted does not precede the first UserMessage")
     for i, e in enumerate(app):
         if e.get("kind") == CHECKS_RUN and not any(p.get("kind") == RETURNED for p in app[:i]):
             problems.append(f"seq {e.get('seq')}: ChecksRun with no Returned before it")
@@ -96,7 +102,10 @@ def run_checks(
     ]
     problems = check_record(events)
     passed = not problems and all(r.passed for r in results if r.kind is CheckKind.COMMAND)
-    return ChecksRun(after_seq=after_seq, results=results, record_problems=problems, passed=passed)
+    head = _git(cwd, "rev-parse", "HEAD") or None
+    return ChecksRun(
+        after_seq=after_seq, results=results, record_problems=problems, passed=passed, head=head
+    )
 
 
 def _git(cwd: Path, *args: str) -> str:

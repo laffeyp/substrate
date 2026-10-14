@@ -58,9 +58,31 @@ def test_the_registered_triggers_are_the_declared_ones(tmp_path: Path) -> None:
     ids = set(_trigger_ids(session)) | set(_trigger_ids(ci_session_topology()))
     # The SessionStarted instrument's trigger is the kernel's, named after its producer.
     ids.discard("session_started")
-    # v0.12 (§ X.5): only a driven session registers the driven triggers; K318 builds it and
-    # extends this check to a driven session.
+    # v0.12 (§ X.5): only a driven session registers the driven triggers (K318).
     assert ids == set(SESSION_TRIGGER_IDS) - DRIVEN_SESSION_TRIGGER_IDS
+    from substrate.topologies.runs.card import read_card
+    from substrate.topologies.runs.driven import DrivenRun
+    from substrate.topologies.session.vocabulary import RunLimits
+
+    card = read_card(
+        what="w", where=["a"], commands=["true"], statements=[], limits=RunLimits(5, 2)
+    )
+    driven = session_topology(
+        driver=DeterministicResponder(seed=0),
+        driver_name="deterministic",
+        driver_context_tokens=8_192,
+        seed="SEED",
+        tools=dict(CALCULATOR),
+        session_id="s264d",
+        workspace_path=str(tmp_path),
+        driven=DrivenRun(
+            card=card, worktree=tmp_path, base="HEAD", check_timeout_s=1, first_message="go"
+        ),
+    )
+    driven_ids = set(_trigger_ids(driven))
+    driven_ids.discard("session_started")
+    assert DRIVEN_SESSION_TRIGGER_IDS <= driven_ids
+    assert ids | driven_ids == set(SESSION_TRIGGER_IDS)
 
 
 def test_the_turn_cap_reason_names_turns_and_old_records_still_read() -> None:

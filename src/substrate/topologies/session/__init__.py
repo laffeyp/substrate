@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from msgspec import Struct
 
@@ -54,6 +54,7 @@ from .vocabulary import (
     DRIVER_SLASH_SOURCE,
     SYSTEM_SOURCES,
     MODEL_REPLY,
+    REPORT_WRITTEN,
     RETURNED,
     PROMPT_STRATEGY_MODEL_INPUT,
     PRODUCER_KIND_FIRST_MESSAGE,
@@ -95,6 +96,9 @@ from .vocabulary import (
     ToolMode,
     SessionWarningKind,
 )
+
+if TYPE_CHECKING:
+    from ..runs.driven import DrivenRun
 
 
 def _refuse_all_completed(policy: TerminationPolicy) -> None:
@@ -339,6 +343,7 @@ class ChecksRun(Struct, frozen=True):
     results: list[CheckResult]
     record_problems: list[str]
     passed: bool
+    head: str | None = None  # v0.12.2: the worktree's commit at the check
 
 
 class ReportWritten(Struct, frozen=True):
@@ -1022,6 +1027,7 @@ def session_topology(
     length: str | None = None,
     tone: str | None = None,
     language: bool = False,
+    driven: "DrivenRun | None" = None,
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -1033,6 +1039,8 @@ def session_topology(
     `(tool_name, args)` the model fires in order, matching `tool_loop`'s script convention;
     omit for the driver-parse path.
     """
+    if driven is not None and first_turn_user_message is not None:
+        raise ValueError("a driven session's first message comes from its card, not the caller")
     # `driver_name`, `workspace_path`, `parent_session_id`, `parent_seq_at_call` are
     # placeholders on the daemon's call-site contract; sprint 213/217/225 bind them.
     # They ride the signature so the outer daemon does not shift when they wire up.
@@ -1669,15 +1677,31 @@ def session_topology(
             },
             policy=api.Once(),
         )
-        termination = api.any_of(
-            api.pause_await_input(
-                when=lambda tctx: tctx.event is not None and tctx.event.kind == RETURNED,
-                resume_condition=USER_MESSAGE,
-            ),
-            # Not threshold_count(SESSION_ENDED, 1): a resume restores counts from the whole
-            # record, so an ended-then-resumed session would finalise on its next event.
-            api.finalise_on(SESSION_ENDED),
-        )
+        if driven is not None:
+            # v0.12 (§ X.5): a driven session's turn end runs its checks and writes the next
+            # message or its report; it finalises on the report instead of pausing for a person.
+            from ..runs.driven import compose_driven
+
+            compose_driven(
+                b,
+                driven,
+                own_record=_own_record,
+                user_turns=lambda ctx: int(ctx.views["user_turns"].value()),
+                has_session_prompt=has_session_prompt,
+            )
+            termination = api.any_of(
+                api.finalise_on(REPORT_WRITTEN), api.finalise_on(SESSION_ENDED)
+            )
+        else:
+            termination = api.any_of(
+                api.pause_await_input(
+                    when=lambda tctx: tctx.event is not None and tctx.event.kind == RETURNED,
+                    resume_condition=USER_MESSAGE,
+                ),
+                # Not threshold_count(SESSION_ENDED, 1): a resume restores counts from the whole
+                # record, so an ended-then-resumed session would finalise on its next event.
+                api.finalise_on(SESSION_ENDED),
+            )
         _refuse_all_completed(termination)
         b.termination(termination)
 

@@ -88,7 +88,7 @@ def test_the_record_check_finds_unknown_kinds_and_broken_order() -> None:
         ]
     )
     assert any("Mystery" in p for p in problems)
-    assert any("CardAccepted" in p and "first" in p for p in problems)
+    assert any("CardAccepted" in p and "precede" in p for p in problems)  # v0.12.2
     assert any("ChecksRun" in p and "Returned" in p for p in problems)
     assert any("ReportWritten" in p and "once" in p for p in problems)
 

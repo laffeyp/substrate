@@ -520,12 +520,18 @@ TRIGGER_ID_RETURN_ON_INTERRUPT: Final[str] = "return-on-interrupt"
 TRIGGER_ID_LANGUAGE_ON_REPLY: Final[str] = "language-on-reply"
 TRIGGER_ID_RETURN_ON_LANGUAGE: Final[str] = "return-on-language"
 # v0.12 (§ X.5): a driven session's turn end.
+TRIGGER_ID_CARD_ON_SESSION_PROMPT: Final[str] = "card-on-session-prompt"  # v0.12.2
 TRIGGER_ID_CHECKS_ON_RETURNED: Final[str] = "checks-on-returned"
 TRIGGER_ID_CONTINUE_ON_CHECKS: Final[str] = "continue-on-checks"
 TRIGGER_ID_REPORT_ON_CHECKS: Final[str] = "report-on-checks"
 # The triggers only a driven session registers (§ X.5); an undriven session registers the rest.
 DRIVEN_SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
-    {TRIGGER_ID_CHECKS_ON_RETURNED, TRIGGER_ID_CONTINUE_ON_CHECKS, TRIGGER_ID_REPORT_ON_CHECKS}
+    {
+        TRIGGER_ID_CARD_ON_SESSION_PROMPT,
+        TRIGGER_ID_CHECKS_ON_RETURNED,
+        TRIGGER_ID_CONTINUE_ON_CHECKS,
+        TRIGGER_ID_REPORT_ON_CHECKS,
+    }
 )
 TRIGGER_ID_END_ON_EXIT: Final[str] = "end-on-exit"
 TRIGGER_ID_END_ON_TURN_CAP: Final[str] = "end-on-turn-cap"
@@ -595,6 +601,7 @@ SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
         TRIGGER_ID_SKILL_FRAGMENT_ON_SESSION_PROMPT_CHANGE,
         TRIGGER_ID_SKILL_FRAGMENT_ON_USER_MESSAGE,
         TRIGGER_ID_MODEL_ON_SKILL_FRAGMENT,
+        TRIGGER_ID_CARD_ON_SESSION_PROMPT,
         TRIGGER_ID_CHECKS_ON_RETURNED,
         TRIGGER_ID_CONTINUE_ON_CHECKS,
         TRIGGER_ID_REPORT_ON_CHECKS,
@@ -644,6 +651,7 @@ __all__ = [
     "PRODUCER_KIND_CHECKS",
     "PRODUCER_KIND_CONTINUE",
     "PRODUCER_KIND_REPORT",
+    "TRIGGER_ID_CARD_ON_SESSION_PROMPT",
     "TRIGGER_ID_CHECKS_ON_RETURNED",
     "TRIGGER_ID_CONTINUE_ON_CHECKS",
     "TRIGGER_ID_REPORT_ON_CHECKS",

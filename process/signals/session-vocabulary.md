@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.12.2 (2026-10-13).** Sprint K318 adds `ChecksRun.head` (the worktree's commit at the check, so a stall is read from the record), the trigger `card-on-session-prompt` (the card waits for a session prompt, as `first_message` does), and restates the card's order rule in § X.6: `CardAccepted` precedes the first `UserMessage` (a session prompt's fragments may come first). Agent-resolved; additive except the restated rule, which loosens it.
+
 **Status: RATIFIED — v0.12.1 (2026-10-13).** Sprint K316 adds `CardCheck.expect_exit` (§ X.3): a command check's expected exit code, 0 unless the card says otherwise. `PAYLOAD_FIELD_PROPOSED` from the SDD kit's own example card 003 ("`python -m wordcount tests/fixtures/sample_tree/` returns 2"); additive.
 
 **Status: RATIFIED — v0.12 (2026-10-13).** Sprint K314 adds section X: the events of a topology run in its caller's record and in its own, the producers and triggers of a driven session, the ordering rules, and the report. The vocabulary session for the topology layer of `process/planning/RESEARCH-2026-10-13-core-topologies-r8.md` (approved by the Architect, 2026-10-13). Agent-resolved on the grounds in § X.8. §§ A–W byte-preserved.
@@ -304,6 +306,7 @@ A topology run is started by a session, its caller, through a topology's tool. I
 | `results` | list of `CheckResult` | per card check: `index`, `kind`, `passed` (bool, or null when not run), `exit` (int or null), `output_tail`, `note` |
 | `record_problems` | list of str | what the check of the session's own events against this vocabulary found |
 | `passed` | bool | every command check passed and `record_problems` is empty |
+| `head` | str or null | the worktree's commit at the check (v0.12.2); a stall is read from it |
 
 A `statement` check is judged by a reviewer, not run; until a reviewer judges it (K320) its `passed` is null and its note says so.
 
@@ -340,6 +343,7 @@ A `UserMessage` the `continue` producer writes carries `slash_source` `driven`. 
 
 | Trigger | Fires on | Starts |
 |---|---|---|
+| `card-on-session-prompt` (v0.12.2) | the session prompt ending, on a fresh record, in a driven session that has one | `card` (without a session prompt, `card` starts with the run) |
 | `checks-on-returned` | `Returned` in a driven session | `checks` |
 | `continue-on-checks` | `ChecksRun` not passed, within the card's limits | `continue` |
 | `report-on-checks` | `ChecksRun` passed, or the limits reached | `report` |
@@ -349,7 +353,7 @@ A driven session finalises on `ReportWritten`, or on `SessionEnded`. An undriven
 ### X.6 Order
 
 - In the caller's record, a run's `TopologyRunEnded` follows its `TopologyRunStarted`, and each appears once per `run_id`.
-- In a driven session, `CardAccepted` is the first application event; every `ChecksRun` follows a `Returned`; `ReportWritten` appears once, and nothing but `SessionEnded` and the kernel's finalisation follows it.
+- In a driven session, `CardAccepted` precedes the first `UserMessage` (v0.12.2; a session prompt's fragments may come before it); every `ChecksRun` follows a `Returned`; `ReportWritten` appears once, and nothing but `SessionEnded` and the kernel's finalisation follows it.
 
 ### X.7 The report and the kit
 
