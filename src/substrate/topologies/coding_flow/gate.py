@@ -111,10 +111,10 @@ def sanitize_candidate_artifacts(artifacts: dict[str, str]) -> dict[str, str]:
     return safe
 
 
-def _normalize(output: str, sandbox: Path) -> str:
-    """Make the gate output reproducible: drop the per-run temp path and wall-clock timings, and cap
+def _normalize(output: str, sandbox: Path, label: str = "<sandbox>") -> str:
+    """Make the gate output reproducible: drop the directory's path and wall-clock timings, and cap
     length. Two runs of the same candidate then produce the same summary, so the record is stable."""
-    cleaned = output.replace(str(sandbox), "<sandbox>").replace(str(sandbox.resolve()), "<sandbox>")
+    cleaned = output.replace(str(sandbox), label).replace(str(sandbox.resolve()), label)
     cleaned = _TIMING.sub("in <t>s", cleaned)
     cleaned = cleaned.strip()
     return (
@@ -176,38 +176,51 @@ def run_gate(artifacts: dict[str, str], gate: str, *, timeout: float = 60.0) -> 
                 )
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content)
-        # The gate runs in its own process group and a timeout kills the whole group: a plain
-        # `subprocess.run(shell=True, timeout=…)` kills only the shell, and the candidate's runaway
-        # pytest lived on in the deleted sandbox (lens audit F176, measured: `sleep` grandchildren
-        # survived a 1 s timeout).
-        proc = subprocess.Popen(  # noqa: S602 — the gate is a shell command line by design
-            gate,
-            shell=True,
-            cwd=sandbox,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=_gate_env(),
-            start_new_session=True,
-        )
-        try:
-            out, err = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _kill_group(proc)
-            return GateResult(
-                passed=False, returncode=-1, summary=f"gate timed out after {timeout:g}s"
-            )
-        if proc.returncode == 127:
-            # `command not found`: the gate's TOOL is missing from this environment. That is not
-            # the candidate failing; say so, so it is never graded as a bad candidate.
-            return GateResult(
-                passed=False,
-                returncode=127,
-                summary="gate tool not installed in this environment: "
-                + _normalize(out + err, sandbox),
-            )
+        return run_command(gate, sandbox, timeout=timeout, env=_gate_env())
+
+
+def run_command(
+    command: str,
+    cwd: Path,
+    *,
+    timeout: float,
+    env: dict[str, str] | None = None,
+    label: str = "<sandbox>",
+) -> GateResult:
+    """Run `command` in `cwd` and return its normalised verdict: the gate's core, shared by
+    `run_gate` and a topology run's checks (K317). A timeout or a non-zero exit is a fail, never an
+    exception to the caller. `env` is the command's environment (the caller's when None); `label`
+    stands for `cwd` in the output."""
+    # The command runs in its own process group and a timeout kills the whole group: a plain
+    # `subprocess.run(shell=True, timeout=…)` kills only the shell, and the candidate's runaway
+    # pytest lived on in the deleted sandbox (lens audit F176, measured: `sleep` grandchildren
+    # survived a 1 s timeout).
+    proc = subprocess.Popen(  # noqa: S602 — a check is a shell command line by design
+        command,
+        shell=True,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        return GateResult(passed=False, returncode=-1, summary=f"gate timed out after {timeout:g}s")
+    if proc.returncode == 127:
+        # `command not found`: the gate's TOOL is missing from this environment. That is not
+        # the candidate failing; say so, so it is never graded as a bad candidate.
         return GateResult(
-            passed=proc.returncode == 0,
-            returncode=proc.returncode,
-            summary=_normalize(out + err, sandbox),
+            passed=False,
+            returncode=127,
+            summary="gate tool not installed in this environment: "
+            + _normalize(out + err, cwd, label),
         )
+    return GateResult(
+        passed=proc.returncode == 0,
+        returncode=proc.returncode,
+        summary=_normalize(out + err, cwd, label),
+    )
