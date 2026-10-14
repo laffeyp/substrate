@@ -16,6 +16,7 @@
   - **What it hid.** A model writing a plan could name none of Substrate's primitives: producer kinds and their schemas; views; triggers with predicates, firing policies and cooldowns; routes into staged slots; termination recipes; instruments; initial inputs; budgets; embedded substrates. Those are what `TopologyBuilder` takes and what the session topology is built from (10 producers, 20 triggers, 7 views). The agent's own notes from the code read said "TopologyBuilder methods ARE the vocabulary."
   - **The Studio.** U188 replaced the Studio's form, which spoke those primitives (producers, views with `≥ n` predicates, triggers, routes into slots, termination policies), with an editor for the new language. The Architect found the failure there: "This is not what the studio is … you've lost the granularity of substrate."
   - **The zero-out.** Kernel `7380a0c4`: 33 files, 3,170 lines removed; `src/` and `tests/` equal `a76adace` except for K339. App `dd8f390`: 17 files, 566 lines removed. Studio revert `3b2ed96`. Vocabulary v0.16–v0.16.3 withdrawn; v0.15 in force. Kept: K339's next-move text for `build`, `review`, `run`, `delegate`.
+  - **Where everything stands, and the open work:** the Sprint tail's entry "The create-topology tool zeroed" (below), and the open-items list `../substrate-ui/process/planning/OPEN-ITEMS-2026-10-10.md`.
   - **Recurrence.** The same day, research round 9 had removed machinery the agent added in rounds 1–8 without being asked (entry below). Both times the agent built its own design in place of the thing asked for.
 
 - **2026-10-14 Claude — Round 8's topology code reverted; round 9 rebuilt it plainly.** Commit `615d9d32` reverted the topology code of K314–K324.
@@ -563,6 +564,29 @@
 - **Open, found during the work and not fixed.**
   - `finalise_on(K)` misses `K` when a trigger also subscribes to `K`: `_consult_termination` reads `st.last_event`, which is the trigger's `TriggerFired` once the control queue drains; the docstring promises "when the event just appended is of kind".
   - Held runs have no pause or resume (roadmap r3 closes K330 on them; K330's result says they were left out).
+
+- **Where everything stands (2026-10-14, after the zero-out).**
+  - **The list we work from:** `../substrate-ui/process/planning/OPEN-ITEMS-2026-10-10.md` (one list for both repos). Its section "Where the list stands (2026-10-14)" holds the current state; an item leaves the list when its card closes.
+  - **Open, by item number on that list:**
+    - **25. Substrate makes the topology the user needs.** Open again. A tool that builds with Substrate's own parts: producer kinds and their schemas, views, triggers with predicates and policies, routes, terminations, instruments, composition. The zeroed attempt and why it failed: `substrate/process/planning/POSTMORTEM-2026-10-14-create-topology-without-substrate-r2.md`.
+    - **31. Pause and resume for held runs.** Roadmap r3 closes K330 on them; `run` refuses `pause`.
+    - **32. The autonomous build and the swarm.** Research r9 § 8.2, § 8.4; the last line of roadmap r3.
+    - **19. Child runs inside Substrate.** Half done: run panes (U182) and delegate panes (U183) exist; the depth view and breaking out do not.
+    - **30.** A window of its own for a run with several sessions.
+    - **33.** `finalise_on(K)` misses `K` when a trigger also waits on `K`.
+    - **34.** The footer reads "● live" in every state.
+    - **35.** The Studio is inert, and its calls go to `/api/validate` and `/api/build`, which the server does not handle.
+    - **6.** The `deterministic` stand-in compacts every turn.
+    - **11.** The parallel test suite, kernel K269.
+    - **12.** Distribution.
+    - **18.** A terminal opened with ⌘T.
+    - **29.** Excluding turns from what is sent to the model.
+  - **The code as it stands:**
+    - Kernel `main` at `8398561b`: K327–K334 (round 9's rebuild) and K339 in force; K335–K338 withdrawn; session vocabulary v0.15 in force, v0.16–v0.16.3 withdrawn.
+    - App `main` at `ea4d178`: U182–U184 and U186 (without its footer change) in force, plus the scroll fix; U187 and U189 withdrawn; U188 reverted.
+    - Nothing pushed since the push before round 9.
+  - **The installed app:** `/Applications/Substrate.app`, built from these commits (kernel `8398561b`), signed with the Developer ID; notarization skipped (no credentials in the build shell).
+  - **Tests and gates at this state:** kernel suite 1,684 passed, 14 skipped; app Python 257 passed, 5 skipped; `gates:electron` passes whole; `gen_kinds --check` current.
 
 ### K335–K339: the create-topology tool, built on a language of its own (2026-10-14; K335–K338 withdrawn)
 - **Plan.** `process/planning/RESEARCH-2026-10-14-create-topology.md`, `ROADMAP-2026-10-14-create-topology.md`; both stay as history.
