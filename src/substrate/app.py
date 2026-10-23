@@ -13,6 +13,8 @@ registry lived at the package root beside the kernel (F051).
 from __future__ import annotations
 
 from . import _daemon as daemon_client
+from .adapters.process import ProcessFailed, process_producer, schemas_from_file
+from .adapters.topology_file import TopologyFileError, topology_from_file
 from .conformance.conformance import CheckResult, ConformanceReport, Status, run_conformance
 from .templates.interpolate import parse_template_header
 from .templates.interpolate import render as render_template
@@ -35,6 +37,11 @@ from .topologies.session_registry import (
 from .topologies.tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 
 __all__ = [
+    "ProcessFailed",
+    "TopologyFileError",
+    "process_producer",
+    "schemas_from_file",
+    "topology_from_file",
     "CheckResult",
     "ConformanceReport",
     "Status",

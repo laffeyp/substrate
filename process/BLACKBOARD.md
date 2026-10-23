@@ -529,6 +529,10 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Sprint K270 (2026-10-23, closed) — a process as a Producer, a topology from a file
+- A program in any language can now put events on a record: `substrate.app.process_producer` runs it and checks each line it writes (`{"kind", "payload"}`) against Structs built from a JSON schema file; `substrate run --file` takes a topology in TOML. Built on the public surface; the kernel is unchanged. Asked by w2m, rewritten in Rust with substrate as its harness. Reference: `docs/process-producer.md`.
+- The local gate fails under py3.12 and py3.13 on two tests that fail on the clean HEAD too (the api page under 3.12; a real-model test 2 of 3 runs): named in the card, not this card's.
+
 ### Sprint K266 (2026-10-09, closed) — the session's documents match the code
 - Session docstrings no longer state counts or name retired parts; `SESSION_KINDS` now lists every session event Struct, with a test that keeps it so.
 - The Docker test tier is now gated once, in `tests/conftest.py`: before, one Docker test ran or skipped depending on how fast Docker answered, which moved the default suite's skip count between 4 and 5. The default run now always skips the same 5 tests, each named.

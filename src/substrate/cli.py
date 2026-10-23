@@ -259,6 +259,13 @@ def main(ctx: click.Context) -> None:
     help="path/to/module.py:func — EXECUTES that module as code with your privileges "
     "(no sandbox); only point it at code you trust",
 )
+@click.option(
+    "--file",
+    "topology_file",
+    default=None,
+    help="a topology described in TOML: process Producers, initial starts, triggers, termination "
+    "(Sprint 270); its commands run with your privileges",
+)
 @click.option("--root", "root", default=None, help="record root (default: ./runs/<run-id>)")
 @click.option("--persistent", is_flag=True, help="persistent-bus mode (exclusive lock)")
 @click.option("--writer-stats", is_flag=True, help="emit the off-bus writer_stats sidecar")
@@ -275,6 +282,7 @@ def main(ctx: click.Context) -> None:
 def run(
     topology_name: str | None,
     topology_module: str | None,
+    topology_file: str | None,
     root: str | None,
     persistent: bool,
     writer_stats: bool,
@@ -291,18 +299,24 @@ def run(
     follower (F-PERS-4) — the run record is the source of truth, never the runtime's
     internals."""
     spec = topology_module or topology_name
-    if not spec:
+    if bool(spec) == bool(topology_file) or (topology_module and topology_name):
         # an arg error before any run is contemplated — no record root exists to print.
-        _err.print("[config] one of --topology or --topology-module is required")
+        _err.print("[config] exactly one of --topology, --topology-module or --file is required")
         sys.exit(EXIT_CONFIG)
     # Compute the record root up front so it can be printed on EVERY exit that contemplates
     # a run (design §5.1: "the record root path is printed to stdout on every exit"), incl.
     # the topology-load / registration / lock failure paths below.
     record_root = Path(root) if root else Path("runs") / str(uuid.uuid4())
     try:
-        topology = _load_topology(spec)
+        topology = (
+            app.topology_from_file(topology_file) if topology_file else _load_topology(spec or "")
+        )
     except click.ClickException as exc:
         _err.print(f"[config] {exc.message}")
+        click.echo(str(record_root))
+        sys.exit(EXIT_CONFIG)
+    except (app.TopologyFileError, ValueError, OSError) as exc:
+        _err.print(f"[config] {type(exc).__name__}: {exc}")
         click.echo(str(record_root))
         sys.exit(EXIT_CONFIG)
 
