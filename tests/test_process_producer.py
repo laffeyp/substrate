@@ -250,3 +250,72 @@ def test_a_bad_topology_file_is_refused_before_a_run(tmp_path: Path, text: str, 
     path.write_text(text)
     with pytest.raises(app.TopologyFileError, match=__import__("re").escape(names)):
         app.topology_from_file(path)
+
+
+# Sprint 271: a list field, its items checked by their own spec
+LIST_SCHEMAS = {
+    "schema_version": 1,
+    "kinds": {
+        "CONTRACT_PROPOSED": {
+            "evidence_ids": {"type": "list", "items": {"type": "str", "min_length": 1}},
+            "steps": {"type": "list", "items": {"type": "str", "enum": ["download", "launch"]}},
+            "depot_ids": {"type": "list", "items": {"type": "int", "ge": 0}, "min_length": 1},
+        },
+    },
+}
+PROPOSED = {"evidence_ids": ["ev1", "ev2"], "steps": ["launch"], "depot_ids": [228981]}
+
+
+def _list_schemas(tmp_path: Path) -> Path:
+    path = tmp_path / "schemas.json"
+    path.write_text(json.dumps(LIST_SCHEMAS))
+    return path
+
+
+@pytest.mark.asyncio
+async def test_a_list_field_reaches_the_record_item_for_item(tmp_path: Path) -> None:
+    empty = PROPOSED | {"evidence_ids": []}
+    command = _printf(_line("CONTRACT_PROPOSED", PROPOSED), _line("CONTRACT_PROPOSED", empty))
+    await api.Runtime(tmp_path / "r").run(_topology(command, _list_schemas(tmp_path)))
+    assert _app_events(tmp_path / "r") == [
+        ("CONTRACT_PROPOSED", PROPOSED),
+        ("CONTRACT_PROPOSED", empty),
+    ]
+    assert _failures(tmp_path / "r") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bad", "names"),
+    [
+        (PROPOSED | {"evidence_ids": "ev1"}, "evidence_ids"),
+        (PROPOSED | {"evidence_ids": ["ev1", ""]}, "evidence_ids[1]"),
+        (PROPOSED | {"steps": ["fishing"]}, "steps[0]"),
+        (PROPOSED | {"depot_ids": [-1]}, "depot_ids[0]"),
+        (PROPOSED | {"depot_ids": []}, "depot_ids"),
+    ],
+    ids=["not-a-list", "item-too-short", "item-not-in-enum", "item-below-ge", "list-too-short"],
+)
+async def test_a_bad_list_fails_the_producer_naming_the_item(
+    tmp_path: Path, bad: dict[str, Any], names: str
+) -> None:
+    command = _printf(_line("CONTRACT_PROPOSED", PROPOSED), _line("CONTRACT_PROPOSED", bad))
+    await api.Runtime(tmp_path / "r").run(_topology(command, _list_schemas(tmp_path)))
+    failures = _failures(tmp_path / "r")
+    assert len(failures) == 1 and "line 2" in failures[0] and names in failures[0], failures
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"type": "list"},
+        {"type": "list", "items": "str"},
+        {"type": "list", "items": {"type": "str", "optional": True}},
+    ],
+    ids=["no-items", "items-not-a-spec", "optional-items"],
+)
+def test_a_list_without_an_items_spec_is_refused(tmp_path: Path, spec: dict[str, Any]) -> None:
+    path = tmp_path / "schemas.json"
+    path.write_text(json.dumps({"schema_version": 1, "kinds": {"K": {"xs": spec}}}))
+    with pytest.raises(ValueError, match=r"field K\.xs: a list needs an `items` spec"):
+        app.schemas_from_file(path)

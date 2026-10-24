@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import types
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
@@ -38,11 +39,16 @@ def _field_type(name: str, spec: Mapping[str, Any]) -> Any:
         if not isinstance(values, list) or not values:
             raise ValueError(f"field {name}: enum must be a non-empty list")
         t: Any = Literal[tuple(values)]
+    elif base == "list":
+        items = spec.get("items")
+        if not isinstance(items, Mapping) or items.get("optional", False):
+            raise ValueError(f"field {name}: a list needs an `items` spec, not optional")
+        t = types.GenericAlias(tuple, (_field_type(f"{name}[]", items), ...))
     elif base in _BASE:
         t = _BASE[base]
     else:
         raise ValueError(
-            f"field {name}: type must be one of {sorted(_BASE)} or an enum, not {base!r}"
+            f"field {name}: type must be one of {sorted([*_BASE, 'list'])} or an enum, not {base!r}"
         )
     meta = {k: spec[k] for k in ("pattern", "min_length", "ge", "le") if k in spec}
     if meta:
@@ -55,10 +61,11 @@ def _field_type(name: str, spec: Mapping[str, Any]) -> Any:
 def schemas_from_file(path: Path | str) -> tuple[int, dict[str, type[msgspec.Struct]]]:
     """(schema_version, kind -> Struct) from a JSON schema file:
 
-    {"schema_version": n, "kinds": {K: {field: {"type": "str"|"int"|"float"|"bool", "optional": bool,
-    "pattern": re, "min_length": n, "ge": n, "le": n, "enum": [...]}}}}
+    {"schema_version": n, "kinds": {K: {field: {"type": "str"|"int"|"float"|"bool"|"list", "optional": bool,
+    "pattern": re, "min_length": n, "ge": n, "le": n, "enum": [...], "items": {spec}}}}}
 
-    Each Struct is frozen, forbids unknown fields, and is named K, so the event kind on the record is K. An optional
+    A list's `items` is a field spec, not optional; the field is a tuple of them (Sprint 271). Each
+    Struct is frozen, forbids unknown fields, and is named K, so the event kind on the record is K. An optional
     field defaults to None; the rest are required."""
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
     version = doc.get("schema_version")

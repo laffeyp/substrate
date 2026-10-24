@@ -30,8 +30,10 @@ record; nothing after it is read. A cancelled Producer sends the process SIGTERM
          "elapsed_seconds": {"type": "float"},
          "note": {"type": "str", "optional": true}}}}
 
-Each field has a `type` (`str`, `int`, `float`, `bool`) or an `enum` (a list of allowed values), and optionally
-`pattern` (a regular expression), `min_length`, `ge`, `le` (msgspec `Meta`) and `optional`. An optional field the
+Each field has a `type` (`str`, `int`, `float`, `bool`, `list`) or an `enum` (a list of allowed values), and optionally
+`pattern` (a regular expression), `min_length`, `ge`, `le` (msgspec `Meta`) and `optional`. A `list` names its items'
+spec in `items`, any field spec but an optional one: `{"type": "list", "items": {"type": "int", "ge": 0}}`. On the list
+itself `min_length` bounds its length; a bad item fails the line at its index (`depot_ids[0]`). An optional field the
 process leaves out is null on the record, as a Struct field with a `None` default is. Each Struct is frozen and
 forbids unknown fields. `schema_version` is the Producer kind's schema version.
 

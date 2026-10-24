@@ -529,6 +529,10 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### Sprint K271 (2026-10-24, closed) — a list field in a process Producer's schema file
+- `schemas_from_file` now takes `{"type": "list", "items": {spec}}`, each item checked by its own spec and refused at its index (`depot_ids[0]`). Asked by w2m, whose vocabulary has eleven harness-plane list fields. Reference: `docs/process-producer.md`.
+- The local gate fails under py3.12 and py3.13 on the same two tests K270 named, which fail on the clean HEAD too.
+
 ### Sprint K270 (2026-10-23, closed) — a process as a Producer, a topology from a file
 - A program in any language can now put events on a record: `substrate.app.process_producer` runs it and checks each line it writes (`{"kind", "payload"}`) against Structs built from a JSON schema file; `substrate run --file` takes a topology in TOML. Built on the public surface; the kernel is unchanged. Asked by w2m, rewritten in Rust with substrate as its harness. Reference: `docs/process-producer.md`.
 - The local gate fails under py3.12 and py3.13 on two tests that fail on the clean HEAD too (the api page under 3.12; a real-model test 2 of 3 runs): named in the card, not this card's.
