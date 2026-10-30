@@ -130,9 +130,9 @@ timeout = 30
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-# docs/specs/kernel_spec/ and docs/proof/ hold scratch / spec-history Python (audit-trail, hard
+# docs/specs/kernel_spec/, docs/proof/ and process/archive/ hold scratch / spec-history / archived Python (audit-trail, hard
 # rule 12); they are not part of the package and are excluded from both lint and format gates.
-extend-exclude = ["docs/specs/kernel_spec", "docs/proof"]
+extend-exclude = ["docs/specs/kernel_spec", "docs/proof", "process/archive"]
 
 [tool.ruff.lint]
 # ruff's defaults plus BLE (blind except) and S (bandit). Until 2026-10-08 neither ran, so the

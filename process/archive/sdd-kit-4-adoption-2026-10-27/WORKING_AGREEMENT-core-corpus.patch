@@ -1,0 +1,52 @@
+diff --git a/process/WORKING_AGREEMENT.md b/process/WORKING_AGREEMENT.md
+index 203a33ec..c3769b39 100644
+--- a/process/WORKING_AGREEMENT.md
++++ b/process/WORKING_AGREEMENT.md
+@@ -2,7 +2,7 @@
+ 
+ *Current as of 2026-10-11; the version it replaces is kept at `process/archive/WORKING_AGREEMENT-to-2026-10-11.md`.*
+ 
+-*Project-specific overrides and additions on top of `sdd-kit-2/AGENTS.md`. The Agent reads AGENTS.md first (the methodology) then this file (the project specifics). This file augments; it never overrides AGENTS.md hard rules. When the two conflict, AGENTS.md wins.*
++*Project-specific overrides and additions on top of `sdd-kit-4/AGENTS.md` (imported by `CLAUDE.md` at the project root). The Agent reads AGENTS.md first (the methodology) then this file (the project specifics). This file augments; it never overrides AGENTS.md hard rules. When the two conflict, AGENTS.md wins.*
+ 
+ ---
+ 
+@@ -12,7 +12,7 @@
+ - **Project type:** Python library + CLI (concurrent streaming dataflow runtime)
+ - **Primary language(s):** Python 3.12+ (CI matrix 3.12, 3.13, 3.14); asyncio
+ - **Primary build commands:** `uv run pytest` (suite) · `uv run substrate conformance` (release gate) · `uv run mypy --strict` (public-API type gate) · `uv run ruff check`
+-- **Adopted SDD kit version:** `sdd-kit-2` (read-only canon at `../sdd-kit-2/`)
++- **Adopted SDD kit version:** `sdd-kit-4` (read-only canon at `../sdd-kit-4/`, adopted 2026-10-27; earlier work ran under `sdd-kit-2` and `sdd-kit-3`)
+ - **License:** Apache-2.0 (product D-1)
+ 
+ ---
+@@ -46,6 +46,29 @@ Superseded drafts under `docs/specs/product_spec/`, `docs/specs/technical_spec/`
+ 
+ ---
+ 
++## Core corpus
++
++*Every document this project is built on. `every session` files are read at session start. `before design` files are read in full before writing a sprint card, research document or design document that names a part they define.*
++
++| File | Lines | What it defines | Read |
++|---|---|---|---|
++| `process/WORKING_AGREEMENT.md` | 318 | this file: scope, specs, homes, commands | every session |
++| `process/BLACKBOARD.md` | 1267 | decisions, built, open items (read `## Decisions` first) | every session |
++| `process/signals/current.json` | 937 | the locked vocabulary, v0.3 | every session |
++| `docs/specs/kernel_spec/v15.md` + `v16_reconciliation_note.md` | 1067 + 40 | the eight primitives, the append cycle, lifecycle kinds, replay levels | before design |
++| `docs/specs/technical_spec/draft5.md` + `draft5_amendment_A1.md` | 1122 + 30 | byte layout, writer cycle, public API, constants | before design |
++| `docs/specs/product_spec/draft7.md` + amendments A1–A3 | 854 + 156 | requirements, conformance checks, reference topologies | before design |
++| `docs/specs/design_spec/draft1.md` | 1587 | API ergonomics, CLI and error UX | before design |
++| `src/substrate/kernel/` (topology, runtime, sequencer, triggers, policies, views, runstate, composition) | 2766 | the builder, the writer, the append cycle, firing policies, views, composition | before design |
++| `src/substrate/api.py` | 258 | the public surface | before design |
++| `src/substrate/topologies/session/__init__.py` + `vocabulary.py` | 1771 + 664 | the session topology: its producers, triggers, views, termination, kinds | before design |
++| `src/substrate/topologies/session/transcript.py` + `session_prompt_producer.py` | 535 + 400 | the session's prompt build and compaction; its session-open sources | before design |
++| `src/substrate/topologies/session_registry.py` | 1730 | how a session is built, run, interrupted, parked and ended | before design |
++| `src/substrate/topologies/runs/` (run, build, review, hold) | 924 | run sessions and the caller's hold on its runs | before design |
++| `../substrate-ui/server.py` | 4732 | the host: how Substrate UI builds sessions and runs topologies | before design |
++
++---
++
+ ## Canonical home registry
+ 
+ *Per AGENTS.md hard rule 7. Seeded from technical spec §16 (public API) + §3 (record format). Firms up as architecture sprints land; add rows as types stabilize. Import root is the package name (B-Q-1, unresolved — placeholder `substrate`).*

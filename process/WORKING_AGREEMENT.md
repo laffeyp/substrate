@@ -2,7 +2,7 @@
 
 *Current as of 2026-10-11; the version it replaces is kept at `process/archive/WORKING_AGREEMENT-to-2026-10-11.md`.*
 
-*Project-specific overrides and additions on top of `sdd-kit-2/AGENTS.md`. The Agent reads AGENTS.md first (the methodology) then this file (the project specifics). This file augments; it never overrides AGENTS.md hard rules. When the two conflict, AGENTS.md wins.*
+*Project-specific overrides and additions on top of `sdd-kit-3/AGENTS.md` (imported by `CLAUDE.md` at the project root). The Agent reads AGENTS.md first (the methodology) then this file (the project specifics). This file augments; it never overrides AGENTS.md hard rules. When the two conflict, AGENTS.md wins.*
 
 ---
 
@@ -12,7 +12,7 @@
 - **Project type:** Python library + CLI (concurrent streaming dataflow runtime)
 - **Primary language(s):** Python 3.12+ (CI matrix 3.12, 3.13, 3.14); asyncio
 - **Primary build commands:** `uv run pytest` (suite) · `uv run substrate conformance` (release gate) · `uv run mypy --strict` (public-API type gate) · `uv run ruff check`
-- **Adopted SDD kit version:** `sdd-kit-2` (read-only canon at `../sdd-kit-2/`)
+- **Adopted SDD kit version:** `sdd-kit-3` (read-only canon at `../sdd-kit-3/`; earlier work ran under `sdd-kit-2`; `../sdd-kit-4/` is kept for analysis, not in use)
 - **License:** Apache-2.0 (product D-1)
 
 ---
