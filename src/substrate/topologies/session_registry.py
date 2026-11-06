@@ -1149,6 +1149,75 @@ class SessionRegistry:
         except concurrent.futures.TimeoutError:
             return None
 
+    def append_event(
+        self, session_id: str, event: Any, *, timeout_seconds: float = 30.0
+    ) -> dict[str, Any]:
+        """Write an application event to the session's record, during a turn or between turns
+        (editor shared item 0(d)). A view's edit is the use: the person saved a file, and the
+        record says so beside the session's own edits.
+
+        Between turns the per-session lock is free: the event goes through `api.append_at_rest`,
+        which appends it without starting a turn. During a turn the lock is held: the event goes
+        through the running turn's `Runtime.inject_event`, on the turn's own loop, and only while
+        the run there is still running, so an event queued as the turn pauses is not left on an
+        inbox nobody drains. In the moments a turn is starting or ending (lock held, no running
+        run), it waits for either path, up to `timeout_seconds`.
+
+        Returns `{"written": "at_rest", "seq": <int>}` or `{"written": "live", "seq": None}` (an
+        injected event's seq is assigned by the run's writer, after this returns). Raises
+        `KeyError` for an unknown session, `api.RecordNotAtRestError` for a session with no
+        record yet, a record left mid-turn, or an ended session (its `RunFinalised` is terminal), `TimeoutError` when neither path opened in time.
+        """
+        import concurrent.futures
+
+        from substrate.kernel.runstate import RunPhase
+
+        manifest = self._manifests.get(session_id)
+        if manifest is None:
+            raise KeyError(f"unknown session_id {session_id!r}")
+        record_root = Path(manifest.record_root)
+        threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            if threading_lock.acquire(blocking=False):
+                try:
+                    return {"written": "at_rest", "seq": api.append_at_rest(record_root, event)}
+                finally:
+                    threading_lock.release()
+            handle = self._running_handles.get(session_id)
+            runtime = handle.runtime if handle is not None else None
+            loop = handle.loop if handle is not None else None
+            if runtime is not None and loop is not None:
+                fut: concurrent.futures.Future[bool] = concurrent.futures.Future()
+                live_runtime = runtime
+
+                def _inject() -> None:
+                    try:
+                        st = getattr(live_runtime, "_st", None)
+                        if st is None or st.phase is not RunPhase.RUNNING:
+                            fut.set_result(False)
+                            return
+                        live_runtime.inject_event(event)
+                        fut.set_result(True)
+                    except Exception as exc:  # noqa: BLE001 — carry to the caller thread
+                        fut.set_exception(exc)
+
+                try:
+                    loop.call_soon_threadsafe(_inject)
+                    if fut.result(timeout=1.0):
+                        return {"written": "live", "seq": None}
+                except (RuntimeError, concurrent.futures.TimeoutError):
+                    pass  # the turn's loop closed or is ending: wait for the lock below
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"append_event({session_id!r}): no running turn and the per-session lock "
+                    f"not acquired within {timeout_seconds}s"
+                )
+            # Wait on the lock itself, briefly, then look for a running turn again.
+            if threading_lock.acquire(timeout=min(0.05, remaining)):
+                threading_lock.release()
+
     def has_session_dir(self, session_id: str) -> bool:
         """True iff `<base>/<sid>/` exists on disk. Used to tell a
         deleted-but-once-alive session (session dir present, manifest

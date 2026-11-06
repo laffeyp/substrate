@@ -537,6 +537,8 @@
 
 - **SWE-Q-2 (2026-06-27, solver) — `exclude` uses test_patch FILE PATHS (grade metadata); keep-with-disclosure or drop?** The proximity picker drops the held-out test_patch file paths from the regression set — path-only metadata, never reaching the solver, disclosed per-instance via `exclude_delta` (how often it bites beyond proximity). It modestly spares a correct patch from an issue-related test that proximity MISSES (non-co-located). Reviewer #69 leaned keep-and-measure; SWE-Q is whether a clean SELF-CONTAINED number should drop it (proximity-alone) for the eventual reported rate. Not blocking the exploratory work.
 
+- **K340-Q-1 (2026-11-05) — `test_inspect_record_summary_read_back_by_model` fails with `qwen2.5:7b-instruct`.** The model called `inspect_record` on the test's temp folder without its `/seeded` part, got "no record at …", and asked for a valid path instead of retrying; the test needs one call that returns ok. It fails the same way at `b547dd01`, before K340. Not changed in K340.
+
 ---
 
 ## Drift watchlist
@@ -580,6 +582,12 @@
 ## Sprint tail
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
+
+### K340: an event appended to a session's record during or between turns (2026-11-05)
+- **Why.** substrate-ui's editor shared item 0(d): an edit made in a view goes on the session's record, and between turns the run is paused on disk, where `inject_event` cannot reach it and `resume` starts a turn.
+- **Built.** `api.append_at_rest` (`kernel/runtime.py`): under the record's lock, the event (`producer` null) and the pause again, payload unchanged, so the status scan, the graph projection and `resume` read the record as before; refuses no record, a record not paused (`RecordNotAtRestError`, finalised records included) and reserved kinds; a live run raises `BusLockedError`. `SessionRegistry.append_event`: `append_at_rest` between turns, the turn's `inject_event` during one. `FileWritten` (session vocabulary v0.17, § AB).
+- **Vocabulary.** Kernel v0.4, one rule, AT-REST APPEND (`process/signals/0.4.json`, `0.4-rationale.md`, `P-AT-REST-APPEND` ratified); `VOCAB_VERSION` `0.4`; the 18 bundled CI records' `RunStarted` frames rewritten with it and nothing else. Decisions on `../substrate-ui/BLACKBOARD.md`.
+- **Checks.** `tests/test_append_at_rest_k340.py` 7; two planted faults caught. Full suite 1,689 passed, 14 skipped, 2 failed: `docs/api.md` not regenerated (fixed, `scripts/gen_api_docs.py` groups the two names) and K340-Q-1, which fails before K340 too. ruff, format and mypy clean.
 
 ### Core topologies research rounds 11–15; sdd-kit-4 built and adopted (2026-10-27)
 - **No code in `src/`.** Research rounds 11–15 in `process/planning/`; round 15 is the one to build from. Its order: the v0.17 vocabulary proposals, then the run-table and manifest work in Substrate UI, then best-of-N, the document reviewer, the autonomous build, pair coding, swarm, the review panel, the research sweep and debate.

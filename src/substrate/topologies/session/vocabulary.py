@@ -94,6 +94,9 @@ SESSION_CHANGED = "SessionChanged"
 # step while the driver's own loop runs. Neither starts a producer (§ Q.3).
 HARNESS_TOOL_CALL = "HarnessToolCall"
 HARNESS_TOOL_RESULT = "HarnessToolResult"
+# v0.17 (session-vocabulary.md § AB, editor shared item 0(d)): a file a view wrote, appended by
+# SessionRegistry.append_event during a turn or between turns. No trigger subscribes to it.
+FILE_WRITTEN = "FileWritten"
 
 # v0.2 additions (session-vocabulary.md § I, sprint 058, 2026-09-01).
 PROMPT_FRAGMENT = "PromptFragment"
@@ -231,6 +234,7 @@ SESSION_KINDS: frozenset[str] = frozenset(
         SESSION_CHANGED,
         HARNESS_TOOL_CALL,
         HARNESS_TOOL_RESULT,
+        FILE_WRITTEN,
         LANGUAGE_PROFILE,
         LANGUAGE_DRIFT,
         TOPOLOGY_RUN_STARTED,
@@ -607,6 +611,7 @@ __all__ = [
     "LEGACY_PARK_REASONS",
     "LEGACY_SESSION_END_REASONS",
     "INTERRUPT_REQUESTED",
+    "FILE_WRITTEN",
     "LEGACY_SESSION_KINDS",
     "ParkReason",
     "PromptSource",

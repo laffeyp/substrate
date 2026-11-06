@@ -30,12 +30,12 @@ WRITER_STATS_INTERVAL_MS = 1000  # writer-observability cadence (§6.4)
 JSON_SAFE_INT_MAX = 2**53 - 1
 JSON_SAFE_INT_MIN = -(2**53 - 1)
 
-# ── the active locked vocabulary version (process/signals/0.3.json) ───────────────────
+# ── the active locked vocabulary version (process/signals/0.4.json) ───────────────────
 # Distinct from a per-kind wire schema `<kind>@N`: this is the SIGNAL VOCABULARY version.
-# Each version is a new file beside the last (0.1, 0.2, 0.3; process/signals/*-rationale.md
+# Each version is a new file beside the last (0.1 to 0.4; process/signals/*-rationale.md
 # says what each added). Recorded in RunStarted.config.vocab_version so a record
 # self-describes the vocabulary it was written against, for replay/inspection.
-VOCAB_VERSION = "0.3"
+VOCAB_VERSION = "0.4"
 
 
 # The synthetic trigger_id (and firing_key) a topology-declared initial Producer fires under.

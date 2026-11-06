@@ -277,6 +277,16 @@
       "source": "docs/specs/technical_spec/draft5.md \u00a720 (lines 957-961); product F-COMP; locked ProducerRef (process/signals/0.2.json)",
       "disposition": "RESOLVED-AS-SUFFICIENT-FOR-v1.0 (Agent judgment 2026-06-13, recorded for Architect handshake): run-granularity inner provenance is SUFFICIENT for v1.0. With inner_root now REQUIRED on the embedded input, every embedded run is fully citable from the outer record \u2014 the inner root is unconditionally in the outer TriggerFired.resolved_input, leading to the complete inner record (its own RunStarted.run_id + all frames), and an inner-run failure carries inner_run_id on the outer ProducerFailed. Provenance CLOSURE holds at run granularity. The \u00a720 per-frame {inner_run_id, inner_seq} stamp would only add mapping a specific OUTER translated frame to the specific INNER seq it came from \u2014 a finer-grained nicety, not a closure requirement \u2014 and it cannot ride the locked wire ProducerRef {kind,instance,parent} without a vocab change. DEFERRED to post-1.0 as an enhancement (NOT a v1.0 blocker, NOT a unilateral vocab bump). If the Architect wants the per-frame stamp in 1.0, this becomes a v0.3 ProducerRef.metadata field proposal.",
       "ratified": false
+    },
+    {
+      "id": "P-AT-REST-APPEND",
+      "kind": "SEQUENCE_RULE_PROPOSED",
+      "element": "AT-REST APPEND: an application event appended to a paused run's record without resuming it, followed by the pause restated with the same payload; never after RunFinalised.",
+      "rationale": "A session between turns is paused on disk; an edit made in a view then must reach the record without starting a turn, and every reader of the record's last frame must still read the session as paused.",
+      "source": "substrate-ui RESEARCH-2026-11-04-editor-level-and-modes-r8.md; RESEARCH-2026-11-05-editor-view-r11.md shared item 0(d)",
+      "layer": "4 (temporal / sequence)",
+      "disposition": "RATIFIED v0.4, agent-resolved 2026-11-05, sprint K340. Grounds: project (RUN-BOUNDARY and PAUSE/RESUME RE-ENTRY in 0.3.json; the tail readers in session_registry.py and projections/graph.py); SDD (grammar/PRINCIPLES.md taxonomy, hard rule 2); practice (append-only log, the state is the fold of the log: the restated pause keeps the fold's last state unchanged). See 0.4-rationale.md.",
+      "ratified": true
     }
   ]
 }

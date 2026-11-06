@@ -68,7 +68,14 @@ from .kernel.policies import (
     quiescence,
     threshold_count,
 )
-from .kernel.runtime import RunResult, Runtime, current_record_root, find_active_runtime
+from .kernel.runtime import (
+    RecordNotAtRestError,
+    RunResult,
+    Runtime,
+    append_at_rest,
+    current_record_root,
+    find_active_runtime,
+)
 from .kernel.topology import (
     Budget,
     Cap,
@@ -187,6 +194,8 @@ __all__ = [
     "load_bundle",
     "current_record_root",
     "find_active_runtime",
+    "append_at_rest",
+    "RecordNotAtRestError",
     "recover_open_segment",
     "Interval",
     "Always",

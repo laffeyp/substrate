@@ -10,7 +10,7 @@ on the log; the persisted run record is the canonical account of what happened.
 
 Working name "substrate" (B-Q-1 deferred). Public API is re-exported from
 `substrate.api`; see the kernel spec (v15), product spec (DRAFT 7), technical
-spec (DRAFT 5), and the locked vocabulary at process/signals/0.3.json.
+spec (DRAFT 5), and the locked vocabulary at process/signals/0.4.json.
 """
 
 # Derived from the installed distribution's metadata (the dist is `substrate-kernel`; the import name

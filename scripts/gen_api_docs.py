@@ -62,6 +62,7 @@ GROUPS: dict[str, list[str]] = {
         "Cap",
         "current_record_root",
         "find_active_runtime",
+        "append_at_rest",
     ],
     "Records & encoding": [
         "read_record",
@@ -143,6 +144,7 @@ GROUPS: dict[str, list[str]] = {
         "InputTypeError",
         "ReplayError",
         "RecordIncompleteError",
+        "RecordNotAtRestError",
         "RecordGapError",
         "describe_error",
     ],

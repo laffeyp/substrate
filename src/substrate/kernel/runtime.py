@@ -27,6 +27,7 @@ from msgspec import Struct
 from ulid import ULID
 
 from ..constants import (
+    BLOB_THRESHOLD_BYTES,
     BUDGET_US,
     HYSTERESIS_K,
     INITIAL_TRIGGER_ID,
@@ -1053,3 +1054,96 @@ class Runtime:
         if st is None:
             raise RuntimeError("inject_event called before Runtime.run/.resume; no live state")
         st.inbox.put_nowait(_Lifecycle(kind, payload))
+
+
+class RecordNotAtRestError(RuntimeError):
+    """`append_at_rest` found no record, or a record whose last frame is not a pause
+    (`substrate.TerminationMatched`, decision `pause-await-input`). A run is live there, its writer
+    died mid-run, or it finalised; `substrate.RunFinalised` is terminal and no event follows it
+    (vocabulary RUN-BOUNDARY), so none of them takes an at-rest append."""
+
+
+def append_at_rest(record_root: str | Path, event: Any) -> int:
+    """Append an APPLICATION event to a record whose run is paused, without resuming it. Returns
+    the event's seq. Vocabulary v0.4, AT-REST APPEND.
+
+    Peer to `Runtime.inject_event`, which appends to a LIVE run's record; a session between turns
+    has no live run, and `Runtime.resume` would start one, since the event it appends is the one the
+    resume Trigger subscribes to. This call starts nothing: no topology is built, no Trigger is
+    evaluated, no Producer runs.
+
+    Under the record's exclusive lock (so it cannot interleave with a run, and a live run makes it
+    raise `BusLockedError`), it recovers a torn tail, reads the record, and appends two frames: the
+    event, with `producer` null like every external event, and then a copy of the record's last
+    frame, the pause, with the same payload, so the record still ends paused. Every reader that takes
+    the last frame as the run's state (the registry's status scan, the graph projection's pause)
+    reads the same state after the append as before it. A finalised record is refused: its
+    `substrate.RunFinalised` is terminal. Seq continues the record's sequence; a
+    payload over the blob threshold goes to the blob store, as an injected event's does.
+
+    Same refusals as `inject_event`: a reserved `substrate.*` kind or a non-canonical payload
+    raises `RegistrationError`, before the lock is taken. A record with no frames, or one not at
+    rest, raises `RecordNotAtRestError` and is left unchanged.
+    """
+    kind = type(event).__name__
+    if is_reserved(kind):
+        raise RegistrationError(
+            f"append_at_rest kind {kind!r} uses the reserved 'substrate.' namespace; "
+            f"external appends must be APPLICATION events, never lifecycle frames."
+        )
+    sc = try_canonical(event)
+    if not sc.ok:
+        raise RegistrationError(
+            f"append_at_rest event is not canonical: {sc.reason} at {sc.at_path}"
+        )
+    root = Path(record_root)
+    if not root.exists() or hot_segment(root) is None:
+        raise RecordNotAtRestError(f"no record at {root}")
+    lock_fd = locking.acquire_lock(root, start_time=time.time())
+    try:
+        envelopes = recover_and_read(root, resolve_blobs=False)
+        if not envelopes:
+            raise RecordNotAtRestError(f"the record at {root} has no frames")
+        last = envelopes[-1]
+        last_kind = str(last.get("kind", ""))
+        last_payload = last.get("payload")
+        at_rest = (
+            last_kind == TERMINATION_MATCHED
+            and isinstance(last_payload, dict)
+            and last_payload.get("decision") == Decision.PAUSE_AWAIT_INPUT.value
+        )
+        if not at_rest:
+            raise RecordNotAtRestError(f"the record at {root} ends with {last_kind!r}, not a pause")
+        seq = int(last["seq"]) + 1
+        record = RecordWriter(root, resume=True)
+        try:
+            if sc.nbytes <= BLOB_THRESHOLD_BYTES:
+                disk_payload: Any = sc.builtins
+            else:
+                ref = record.put_blob(sc.raw_bytes)
+                disk_payload = {"$blob": ref.sha256, "bytes": ref.bytes}
+            record.append(
+                {
+                    "seq": seq,
+                    "kind": kind,
+                    "schema": f"{kind}@1",
+                    "producer": None,
+                    "t": time.time(),
+                    "payload": disk_payload,
+                }
+            )
+            record.append(
+                {
+                    "seq": seq + 1,
+                    "kind": last_kind,
+                    "schema": last.get("schema", f"{last_kind}@1"),
+                    "producer": None,
+                    "t": time.time(),
+                    "payload": last_payload,
+                }
+            )
+        finally:
+            record.close()
+    finally:
+        locking.release_lock(lock_fd)
+    return seq

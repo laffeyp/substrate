@@ -232,6 +232,16 @@ class InterruptRequested(Struct, frozen=True):
     source: str  # "daemon:interrupt-soft" or a delegate's caller
 
 
+# Session vocabulary § AB (v0.17, editor shared item 0(d)): a file a view wrote. The daemon writes it
+# through SessionRegistry.append_event, during a turn (Runtime.inject_event) or between turns
+# (api.append_at_rest). Recorded only: no trigger subscribes, so the model's turn does not change.
+class FileWritten(Struct, frozen=True):
+    path: str  # workspace-relative, as the workspace file API names it
+    old_text: str | None  # the file before the write; None when the write created it
+    new_text: str  # the file after the write
+    view: str  # the view that wrote it, e.g. "editor"
+
+
 # Session vocabulary § P.4 (K274). The model step writes one on the first step of a turn for each
 # of the session's driver, bundle, per_turn and date that differs from the last recorded value; the
 # daemon rebuilds the topology from the manifest every turn, so a PATCH or `/model` shows here.
@@ -1754,6 +1764,7 @@ __all__ = [
     "SessionEnded",
     "SessionEndRequested",
     "InterruptRequested",
+    "FileWritten",
     "SessionChanged",
     "HarnessToolCall",
     "HarnessToolResult",

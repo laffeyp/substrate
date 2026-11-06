@@ -372,6 +372,29 @@ covers the dict access); callers cross-thread should NOT cache the
 reference — a run that has just finalised will be unregistered from
 the map even if the caller still holds the object.
 
+### `append_at_rest(record_root: 'str | Path', event: 'Any') -> 'int'`
+
+Append an APPLICATION event to a record whose run is paused, without resuming it. Returns
+the event's seq. Vocabulary v0.4, AT-REST APPEND.
+
+Peer to `Runtime.inject_event`, which appends to a LIVE run's record; a session between turns
+has no live run, and `Runtime.resume` would start one, since the event it appends is the one the
+resume Trigger subscribes to. This call starts nothing: no topology is built, no Trigger is
+evaluated, no Producer runs.
+
+Under the record's exclusive lock (so it cannot interleave with a run, and a live run makes it
+raise `BusLockedError`), it recovers a torn tail, reads the record, and appends two frames: the
+event, with `producer` null like every external event, and then a copy of the record's last
+frame, the pause, with the same payload, so the record still ends paused. Every reader that takes
+the last frame as the run's state (the registry's status scan, the graph projection's pause)
+reads the same state after the append as before it. A finalised record is refused: its
+`substrate.RunFinalised` is terminal. Seq continues the record's sequence; a
+payload over the blob threshold goes to the blob store, as an injected event's does.
+
+Same refusals as `inject_event`: a reserved `substrate.*` kind or a non-canonical payload
+raises `RegistrationError`, before the lock is taken. A record with no frames, or one not at
+rest, raises `RecordNotAtRestError` and is left unchanged.
+
 ## Records & encoding
 
 ### `read_record(root: 'Path | str', *, resolve_blobs: 'bool' = False) -> 'Iterator[dict[str, Any]]'`
@@ -1034,6 +1057,13 @@ record (technical §12). Carries a typed reason; the run record path is the evid
 ### `RecordIncompleteError`
 
 A record has no terminal substrate.RunFinalised (e.g. torn at seq N, §5.2).
+
+### `RecordNotAtRestError`
+
+`append_at_rest` found no record, or a record whose last frame is not a pause
+(`substrate.TerminationMatched`, decision `pause-await-input`). A run is live there, its writer
+died mid-run, or it finalised; `substrate.RunFinalised` is terminal and no event follows it
+(vocabulary RUN-BOUNDARY), so none of them takes an at-rest append.
 
 ### `RecordGapError`
 

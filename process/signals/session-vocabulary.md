@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.17 (2026-11-05).** Sprint K340 adds § AB: `FileWritten`, a file a view wrote, appended to a session's record during a turn or between turns (substrate-ui editor shared item 0(d)). Recorded only; no trigger subscribes. v0.16 to v0.16.3 stay withdrawn; v0.17 is additive to v0.15. Agent-resolved.
+
 **Status: v0.15 IN FORCE — v0.16 to v0.16.3 WITHDRAWN (2026-10-14).** The create-topology tool of kernel sprints K335–K338 and app sprints U187–U189 is removed (`POSTMORTEM-2026-10-14-create-topology-without-substrate.md`): it gave a model a plan language of the agent's own in place of Substrate's primitives. § AA and the v0.16.1–v0.16.3 additions to § Z.1 stay below as history; no code writes or reads them. `TopologyRunStarted` has no `record_root`, `TopologyRunEnded` no `result`, and a run's start is written only inside its caller's tool call, as v0.14 says.
 
 **Status: RATIFIED — v0.16.3 (2026-10-14).** UI sprint U189's live run, as built: an `if` test may leave out its field, and then reads its kind's main field; a test the plan tool cannot read stops the plan instead of being dropped. Agent-resolved.
@@ -1179,3 +1181,34 @@ As built (v0.16.1): the three tools are in every app session's tools, and `run_t
 - **v0.16.2** — UI sprint U187, 2026-10-14, recorded by the Agent. §§ A–Z byte-preserved but for § Z.1's added paragraph.
 - **v0.16.1** — Sprint K338, 2026-10-14, as built, recorded by the Agent. §§ A–Z byte-preserved.
 - **v0.16** — Sprint K335, 2026-10-14, decided by the Architect ("lets go Recenter on the create topology tool… We'll work based on this going forward"), recorded by the Agent. §§ A–Z byte-preserved.
+
+## AB. v0.17 — edits made in a view (2026-11-05, sprint K340)
+
+Research: substrate-ui `process/planning/2026-11-04-editor-level/RESEARCH-2026-11-04-editor-level-and-modes-r8.md` ("Every edit made in a view goes on the record") and `RESEARCH-2026-11-05-editor-view-r11.md` (the inspector's HISTORY, "edits made in the view"; shared item 0(d)).
+
+### AB.1 The event
+
+`FileWritten` — a file the person wrote through a view (`FILE_WRITTEN`):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `path` | str | the file, relative to the session's workspace, as the workspace file API names it |
+| `old_text` | str or null | the file before the write; null when the write created it |
+| `new_text` | str | the file after the write |
+| `view` | str | the view that wrote it, `editor` for the editor view's code mode |
+
+A payload over the kernel's blob threshold (16 KiB) is stored in the record's blob store, like any event's.
+
+### AB.2 Who writes it
+
+The daemon, through `SessionRegistry.append_event`. During a turn the event goes on the running run's inbox (`Runtime.inject_event`) and takes its place among the turn's events. Between turns it is appended with `api.append_at_rest` (kernel vocabulary v0.4, AT-REST APPEND), which writes the event and then the turn's pause again, so the session stays parked. `producer` is null on both paths.
+
+An ended session refuses it: its `substrate.RunFinalised` is terminal. So does a session with no record yet, before its first turn.
+
+### AB.3 Triggers
+
+None. The event is recorded; no producer starts and the model's prompt does not change.
+
+### Ratification signature
+
+- **v0.17** — Sprint K340, 2026-11-05, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AA byte-preserved.

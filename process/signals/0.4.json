@@ -1,0 +1,943 @@
+{
+  "_note": "Substrate locked vocabulary v0.4. ADDITIVE successor to v0.3 (process/signals/0.3.json retained as the locked-v0.3 audit trail; no deletions). v0.4 ratifies one SEQUENCE_RULE_PROPOSED, AT-REST APPEND: at a pause (substrate.TerminationMatched, decision pause-await-input) an application event may be appended without resuming the run (api.append_at_rest), producer null, followed at once by the pause restated with the same payload, so the record still ends paused. No new tag, no payload change, no change to any run's frames. Validator-extras: STRICT. See process/signals/0.4-rationale.md. Changes go through the eight-proposal taxonomy and bump the version.",
+  "version": "0.4",
+  "project": "Substrate",
+  "locked": true,
+  "locked_at": "2026-11-05",
+  "locked_by": "agent-resolved 2026-11-05 (sprint K340, editor shared item 0(d): an application event appended to a paused session record between turns)",
+  "prior_version": "0.3",
+  "validator_extras": "strict",
+  "ontology": {
+    "entities": [
+      {
+        "name": "Producer",
+        "definition": "The one execution primitive: a unit implementing start(input) -> AsyncIterable[Event]; the runtime consumes its typed event stream until it completes, fails, or is cancelled. Anti-anthropomorphic name for an emitter (never agent/actor/speaker/voice). Input is sealed at instantiation and immutable for its life.",
+        "also_operator": true
+      },
+      {
+        "name": "ProducerId",
+        "definition": "A Producer's typed in-memory identity: {kind, instance_id, parent_id, metadata}. instance_id is unique only within a run; a persistent bus requires a run-id prefix for cross-run uniqueness. Typed, never a free string.",
+        "also_operator": false
+      },
+      {
+        "name": "ProducerRef",
+        "definition": "The on-disk/on-bus serialized projection of a Producer's identity carried in the envelope's 'producer' field: {kind, instance, parent}; parent is the spawning Producer's instance or null for topology-declared initial Producers; the whole field is null for runtime-emitted (substrate.*) events. Same entity as ProducerId at the wire altitude (see ENTITY_MERGE proposal).",
+        "also_operator": false
+      },
+      {
+        "name": "Event",
+        "definition": "An append-only typed record persisted as an envelope {seq, kind, schema, producer (ProducerRef|null), t, payload, crc}. seq is its identity and total-order position; t is supplementary (excluded from D-8 equivalence, never used for ordering).",
+        "also_operator": false
+      },
+      {
+        "name": "Bus",
+        "definition": "The runtime's single coordination point: one totally-ordered append-only event log plus the admission queue, the control queue, and the RAM-resident Views maintained against it. One bus, one total order, no per-edge channels. 'The act of being on the log after validation is what post-validation means.'",
+        "also_operator": false
+      },
+      {
+        "name": "View",
+        "definition": "A deterministic RAM-resident projection over the bus (accumulated buffer, count of kind K, events since seq N), materialised incrementally inside append-cycle step 3 synchronously with seq assignment, before any Route or Predicate evaluates. As-of-N: a View seen at seq N reflects all events with seq <= N.",
+        "also_operator": true
+      },
+      {
+        "name": "Predicate",
+        "definition": "A cheap deterministic boolean gate over Views and events, a host-language callable run on every relevant append under a per-call budget; when it overruns budget K times (hysteresis) or raises, the runtime stops consulting it (quarantine). Taxonomy: event-local | buffer-local | bus-view | composite | externalised.",
+        "also_operator": true
+      },
+      {
+        "name": "Trigger",
+        "definition": "The mechanism for creating Producers: the tuple (predicate, producer_factory, firing_policy, input_builder). When its predicate holds against the as-of-N snapshot, input_builder runs and a Producer is scheduled, recorded via substrate.TriggerFired (or substrate.InputBuildFailed if input_builder raises).",
+        "also_operator": true
+      },
+      {
+        "name": "FiringPolicy",
+        "definition": "The rule governing how often a Trigger fires relative to predicate satisfaction. Exactly four: Once (first satisfaction only), PerEvent (each newly-satisfying event), PerKey (once per distinct canonical key), WhileTrue (continuous while true, throttled by a cooldown).",
+        "also_operator": false
+      },
+      {
+        "name": "Cooldown",
+        "definition": "A throttle on a Trigger (notably under WhileTrue). Logical by default \u2014 counted in append cycles matching the predicate's subscription, fully replayable. Wall-clock is opt-in, flagged at registration, and demotes the run's replay ceiling to 3(b).",
+        "also_operator": false
+      },
+      {
+        "name": "Route",
+        "definition": "A rule for incorporating typed events into FUTURE Producer instantiations: the tuple (source_predicate, target_input_slot, transform). Push-staged in append-cycle step 4; pull-queryable from an input_builder. Never mutates a running Producer's input.",
+        "also_operator": false
+      },
+      {
+        "name": "Injection",
+        "definition": "The act of a Route contributing staged typed messages to a Producer's resolved input at instantiation, recorded as substrate.InjectionApplied. The parenthetical 'Route (Injection)' marks Injection as the staging act of the Route primitive, not a ninth primitive.",
+        "also_operator": false
+      },
+      {
+        "name": "Slot",
+        "definition": "The named target_input_slot a Route stages messages into; a firing Trigger's input_builder reads the staged messages from the Slot when assembling input. The addressable join point between Routes and input assembly.",
+        "also_operator": false
+      },
+      {
+        "name": "TerminationPolicy",
+        "definition": "A host-language callback interpreting termination signals, completions, failures, cancellations, predicate quarantines, and quiescence into one of: cancel-others, let-finish, finalise-run, pause-await-input, continue. Per-run and per-Producer policies compose. Its firing is recorded as substrate.TerminationMatched.",
+        "also_operator": true
+      },
+      {
+        "name": "ResumeCondition",
+        "definition": "A typed description carried in substrate.TerminationMatched when decision == pause-await-input, naming exactly the external event that would unstick a paused Run; a Trigger on that event fires the continuation Producer.",
+        "also_operator": false
+      },
+      {
+        "name": "Quiescence",
+        "definition": "The Run-level resting condition: no running Producers; admission queue empty; control queue empty; no Trigger true-now-and-unfired under its firing policy; no pending wall-clock cooldown firing. A derived predicate the TerminationPolicy receives, NOT an emitted event.",
+        "also_operator": false
+      },
+      {
+        "name": "Topology",
+        "definition": "The frozen registered set for a run \u2014 Producer kinds with schema descriptors, Triggers, Routes, Views, and policies \u2014 captured as the manifest embedded in substrate.RunStarted. One of the eight named primitives.",
+        "also_operator": false
+      },
+      {
+        "name": "Runtime",
+        "definition": "The single-use executor that runs a Topology: drives the single-writer append cycle, opens the Run with substrate.RunStarted, closes it with substrate.RunFinalised, returns a RunResult. Dual-classified: a Layer-0 entity that is also the Layer-6 operator owning run lifecycle.",
+        "also_operator": true
+      },
+      {
+        "name": "Writer",
+        "definition": "The single asyncio task that drains the admission queue and runs one append cycle per admitted event (validate, seq+append, update Views, stage Routes, evaluate Predicates/fire Triggers, drain control queue), then maybe-fsyncs, maybe-rolls the segment, starts scheduled Producers between cycles. The sole thread touching Views; the synchronisation point for total order.",
+        "also_operator": true
+      },
+      {
+        "name": "Run",
+        "definition": "A single bounded execution of a Topology by the Runtime, opened by substrate.RunStarted at seq 0 and closed by substrate.RunFinalised; its event log IS the run record. The Layer-3 session of the substrate.",
+        "also_operator": false
+      },
+      {
+        "name": "RunResult",
+        "definition": "The typed outcome of one Runtime.run call: {run_id, record_root, status (finalised|paused|failed), final_event, elapsed_seconds, finalisation_payload}. The in-memory convenience face over the durable record (record_root is the load-bearing field).",
+        "also_operator": false
+      },
+      {
+        "name": "RunRecord",
+        "definition": "The persisted bus plus its metadata at a run root: the framed/CRC JSONL segments, manifest, blob store, and sidecar; loaded via load_record(root) -> RunRecord. The authoritative durable artifact and the dual contract's view-side surface.",
+        "also_operator": false
+      },
+      {
+        "name": "Segment",
+        "definition": "A UTF-8 text file of newline-terminated frames. Exactly one hot segment carries the '.open.' infix (append-only); sealed segments (events-N.jsonl) are immutable forever. Sealed by the \u00a73.2 protocol when SEGMENT_MAX_BYTES is exceeded.",
+        "also_operator": false
+      },
+      {
+        "name": "Frame",
+        "definition": "One event = one frame = one line: the canonical serialization of the envelope WITH crc (B_disk) followed by 0x0A. The atomic unit of the record; each line independently proves itself via CRC. A frame exceeding FRAME_MAX_BYTES is rejected at validation.",
+        "also_operator": false
+      },
+      {
+        "name": "Envelope",
+        "definition": "The persisted form of every bus event (seq, kind, schema, producer, t, payload, crc) serialized in JCS order. Two canonical forms: B_hash (without crc, what every sha256 hashes over) and B_disk (with crc, what is on disk).",
+        "also_operator": false
+      },
+      {
+        "name": "Manifest",
+        "definition": "manifest.json \u2014 a small advisory JSON index updated by write-to-temp -> rename -> dir fsync, never edited in place. Segments are authoritative; the manifest is rebuildable. Records the segment list with first_seq/last_seq, runstarted_sha256, and replay_ceiling.",
+        "also_operator": false
+      },
+      {
+        "name": "BlobStore",
+        "definition": "Content-addressed store at blobs/sha256/<first-2-hex>/<full-hex> for payloads whose canonical encoding exceeds BLOB_THRESHOLD_BYTES. Write-ahead (blob written+fsynced before the referencing frame), immutable, size-verified dedup, paths derived from the hash never from payload content.",
+        "also_operator": false
+      },
+      {
+        "name": "BlobRef",
+        "definition": "The in-envelope reference standing in for an oversized payload: {\"$blob\": \"sha256:<hex>\", \"bytes\": n}. A whitelist payload type (a frozen Struct: sha256:str; bytes:int). The hash, not the inline-or-blob choice, is the citable identity.",
+        "also_operator": false
+      },
+      {
+        "name": "Sidecar",
+        "definition": "Off-bus, never-sequence-numbered files under sidecar/: diagnostics.jsonl (non-firing predicate evals + budget-violation observations, keyed by observed seq) and writer_stats.jsonl (operator metrics). Enabling it MUST leave the bus log bit-identical (conformance check 14).",
+        "also_operator": false
+      },
+      {
+        "name": "Schema",
+        "definition": "An event schema a Producer kind declares it can emit, registered as a msgspec Struct, validated at the bus boundary on every emission. Recorded in substrate.RunStarted as a full JSON Schema (draft 2020-12) descriptor sufficient for decoding and validation, making the run record self-describing for replay.",
+        "also_operator": false
+      },
+      {
+        "name": "SchemaVersion",
+        "definition": "An integer version a Producer kind declares (the '@<version>' in the envelope's schema field '<kind>@<version>'). Fixed for the duration of a run; a persistent bus may hold runs at different versions, each interpreted through its own run's manifest. Readers must support every version present or fail with a typed (kind, version) error.",
+        "also_operator": false
+      },
+      {
+        "name": "EmbeddedSubstrate",
+        "definition": "A substrate instance wrapped as a Producer: it takes typed input, runs an inner Runtime with its own internal bus/topology/writer/log at its own record root, and emits the inner run's events back onto the outer bus \u2014 but only the kinds its ExportMap declares. A black box presenting start(input) -> AsyncIterable[Event].",
+        "also_operator": true
+      },
+      {
+        "name": "ExportMap",
+        "definition": "Part of an EmbeddedSubstrate Producer kind's declaration: a typed mapping {inner event kind -> outer event schema}. Only mapped kinds cross the composition boundary, translated and validated by the outer append cycle. Default export is the inner substrate.RunFinalised payload only; inner substrate.* kinds never cross unless explicitly mapped.",
+        "also_operator": false
+      },
+      {
+        "name": "ReplayLevel",
+        "definition": "The honest tier of reconstruction a record admits: Level 1 (Views/derivations), Level 2 (all runtime decisions incl. resolved inputs), Level 3(a) (native re-execution; preconditioned on determinism + ceiling 3a), Level 3(b) (substitution re-execution against recorded admission order; byte-identical). An enum, not an event.",
+        "also_operator": false
+      },
+      {
+        "name": "ReplayCeiling",
+        "definition": "The record's max honestly-supported Level-3 tier, recorded in the manifest: starts '3a', drops to '3b' the moment any wall-clock cooldown is registered (at RunStarted time). The demotion is the honesty mechanism for wall-clock state.",
+        "also_operator": false
+      },
+      {
+        "name": "Divergence",
+        "definition": "The typed result of first_divergence(r1, r2): the first index where the two records' D-8 comparison sequences (kind, decision_identity, payload_sha256) differ; supplementary metadata (t, host, config) never enters comparison. Returns Divergence | None.",
+        "also_operator": false
+      },
+      {
+        "name": "AdmissionQueue",
+        "definition": "The bounded submission queue ahead of the single writer; the substrate's only backpressure mechanism. Producers await submit() onto it; submit blocks when full (the credit pool, sized at implementation time). A single writer drains it.",
+        "also_operator": false
+      },
+      {
+        "name": "ControlQueue",
+        "definition": "The writer-internal FIFO queue holding control-plane events the cycle generates (TriggerFired, ProducerStarted, InjectionApplied, ...); it bypasses admission and is drained in step 6, each queued event running its own full append cycle in FIFO generation order before any further admitted payload event.",
+        "also_operator": false
+      }
+    ]
+  },
+  "categories": [
+    {
+      "name": "event",
+      "description": "Base stratum: discrete on-bus, sequence-numbered state transitions."
+    },
+    {
+      "name": "ambient",
+      "description": "Base stratum: continuous samples with payload, throttled. In Substrate this is OFF-bus only (writer_stats.jsonl, diagnostics.jsonl); NO kernel kind is ambient (tech \u00a73.8, \u00a76.4; F-OBS-6)."
+    },
+    {
+      "name": "summary",
+      "description": "Base stratum: typed roll-ups at a boundary (run open/close, run-level decision)."
+    },
+    {
+      "name": "incident",
+      "description": "Base stratum: anomalies / halt-worthy events; carry diagnostic-required Evidence (Layer 7)."
+    },
+    {
+      "name": "lifecycle",
+      "description": "Architectural boundary: the runtime's control-plane run-lifecycle + termination decisions (substrate/runtime.py, policies.py). The substrate.* control-plane kinds attributing to the run boundary: RunStarted, TerminationMatched, RunFinalised. Kernel-vs-application bounded context, not a file label."
+    },
+    {
+      "name": "bus",
+      "description": "Architectural boundary: the single totally-ordered append-only log + admission/control queues + RAM-resident Views and the as-of-N snapshot (substrate/runtime.py). Home of the append cycle and the bus-observable control-plane surface."
+    },
+    {
+      "name": "producer",
+      "description": "Architectural boundary: the one execution primitive's lifecycle (substrate/protocols.py Producer; runtime scheduling). substrate.ProducerStarted/Completed/Failed/Cancelled/EmittedInvalidEvent."
+    },
+    {
+      "name": "predicate-trigger",
+      "description": "Architectural boundary: the match-and-spawn machinery \u2014 Predicate evaluation + budget/quarantine, Trigger firing-policy bookkeeping, input_builder (substrate/triggers.py; append-cycle step 5). substrate.TriggerFired, InputBuildFailed, PredicateQuarantined."
+    },
+    {
+      "name": "route",
+      "description": "Architectural boundary: the input-staging subsystem \u2014 source-predicate match, transform, staging into a Slot for future instantiations (append-cycle step 4). substrate.InjectionApplied."
+    },
+    {
+      "name": "composition",
+      "description": "Architectural boundary: the embedded-substrate boundary translator (tech \u00a720) \u2014 inner events translated through the ExportMap onto the outer bus; outer-bus backpressure throttles the embedded Producer at its export point. Mints no new on-bus kinds (re-uses substrate.RunFinalised / substrate.ProducerFailed)."
+    },
+    {
+      "name": "record",
+      "description": "Architectural boundary: the run record on disk \u2014 segments, sealing, frame/CRC, manifest, blob store, recovery, durability/fsync (substrate/record.py; tech \u00a73, \u00a75). Off-bus persistence acts; surfaced as evidence/state-transition constraints, not bus tags."
+    },
+    {
+      "name": "encoding",
+      "description": "Architectural boundary: canonical RFC 8785/JCS pipeline + the type whitelist, B_hash vs B_disk, CRC32 vs sha256 roles (substrate/encoding.py; tech \u00a74). The Layer-7 evidence backbone; its only bus-observable failure mode is substrate.ProducerEmittedInvalidEvent."
+    },
+    {
+      "name": "replay-inspection",
+      "description": "Architectural boundary: read-side reconstruction from the record \u2014 replay Levels 1/2/3a/3b, replay ceiling, inspection/provenance/divergence queries (substrate/replay.py, attach.py, inspect.py; tech \u00a712-14). Read-only by construction; emits nothing to the bus (F-OBS-6)."
+    },
+    {
+      "name": "cli",
+      "description": "Architectural boundary: the command surface reading the record (run/replay/inspect/validate/tail/conformance/resume/stats; substrate/cli.py). Exit codes are a contract; user-facing strings are Layer-7 tone-constrained. Emits nothing to the bus."
+    }
+  ],
+  "tags": [
+    {
+      "name": "substrate.RunStarted",
+      "namespace": "substrate",
+      "category": "lifecycle",
+      "stratum": "summary",
+      "payload": [
+        {
+          "field": "run_id",
+          "type": "str",
+          "required": true,
+          "note": "ULID (python-ulid). Session persistent attribute carried once at open, not repeated per frame. Identity of the Run entity."
+        },
+        {
+          "field": "topology",
+          "type": "dict",
+          "required": true,
+          "note": "The manifest: producer_kinds[] (each {kind, schema_version, schemas[] = full JSON Schema draft-2020-12 docs, fingerprint{qualname, source_sha256, author_version}}), triggers[] (id, subscription, firing_policy, cooldown flags), routes[], views[], policies[]. Self-describing so replay decodes with the schemas the run was written with. F-OBS-1, F-SCHEMA-1, tech \u00a77."
+        },
+        {
+          "field": "baseline",
+          "type": "dict",
+          "required": true,
+          "note": "Topology-supplied baseline metadata: {fixtures, seed, env}. F-OBS-1; load-bearing for Level 3(a) precondition checks."
+        },
+        {
+          "field": "config",
+          "type": "dict",
+          "required": true,
+          "note": "Run config snapshot: {fsync policy, admission bound, budget_us, hysteresis_k}. The wall-clock-cooldown flags here set the replay_ceiling. tech \u00a77."
+        }
+      ],
+      "note": "Frame 0 (seq 0) of every record; opens the Run session; the causal root every initial Producer attributes to. producer is null (runtime-emitted). SUMMARY stratum: a run-boundary manifest roll-up, not a per-step event. Transcribed verbatim PascalCase under the reserved namespace; never paraphrased."
+    },
+    {
+      "name": "substrate.TriggerFired",
+      "namespace": "substrate",
+      "category": "predicate-trigger",
+      "stratum": "event",
+      "payload": [
+        {
+          "field": "trigger_id",
+          "type": "str",
+          "required": true,
+          "note": "FK -> Trigger (a triggers[].id in the RunStarted manifest). The Trigger whose predicate was satisfied. tech \u00a76.2 step 5."
+        },
+        {
+          "field": "firing_key",
+          "type": "str",
+          "required": true,
+          "note": "The canonical-encoded firing key recorded under D-5/\u00a710. For PerKey it is the canonical JCS bytes of the key fn output (dedup key); Once/PerEvent/WhileTrue still record a key so the prior-firing set reconstructs. tech \u00a76.2 step 5, \u00a710."
+        },
+        {
+          "field": "resolved_input",
+          "type": "dict",
+          "required": false,
+          "note": "The sealed resolved input INLINE when its canonical encoding <= BLOB_THRESHOLD_BYTES (D-5). Exactly one of resolved_input | $blob present."
+        },
+        {
+          "field": "input_blob",
+          "type": "BlobRef",
+          "required": false,
+          "note": "BlobRef form of resolved_input when oversized: a BlobRef object {\"$blob\":\"sha256:<hex>\",\"bytes\":n}. Renamed from $blob in v0.2 (P-TRIGGERFIRED-INPUT-BLOB) to de-overload the bare-BlobRef sentinel: as a field literally named $blob it serialized to {\"$blob\":{\"$blob\":..}}, a reader footgun. D-5, tech \u00a73.7. Exactly one of resolved_input | input_blob present."
+        },
+        {
+          "field": "input_sha256",
+          "type": "str",
+          "required": true,
+          "note": "sha256:<64 lowercase hex> over the resolved input's canonical bytes (B_hash). ALWAYS present even when inline, because citations and D-8 cross-run comparison key on the hash (D-5). tech \u00a76.2 step 5."
+        },
+        {
+          "field": "factory",
+          "type": "str",
+          "required": true,
+          "note": "The Producer KIND the firing schedules (the trigger's `starts`). Ratified in v0.2 from P-TRIGGERFIRED-FACTORY: kernel v15's lifecycle table names `factory` among TriggerFired's identified elements; tech \u00a76.2 step 5 omitted it (recoverable via the manifest's triggers[].starts), but carrying it on the frame is the cheapest read of the spawned kind and reconciles the kernel-vs-tech drift. For an initial Producer this is the initial kind, with trigger_id=\"__initial__\".",
+          "ratified_into": "0.2"
+        },
+        {
+          "field": "instance",
+          "type": "str",
+          "required": true,
+          "note": "The ULID instance_id of the Producer this firing schedules. Ratified in v0.2 from P-TRIGGERFIRED-INSTANCE: closes provenance closure (F-OBS-2 / conformance check 11) \u2014 explain_producer/trace_ancestry link a ProducerStarted back to its exact firing via this field; without it the link must be re-derived from the resolved-input hash. Symmetric with P-SUBJECT-ID (ratified into v0.1 on the Producer* tags). Unique within a run.",
+          "ratified_into": "0.2"
+        }
+      ],
+      "note": "A Trigger's predicate was satisfied; input_builder ran; the Producer task is scheduled. Enqueued on the control queue at end of step 5; appended in step 6 with its own full cycle. EVENT stratum (per-firing decision frame). Resolved inputs carried here are what make Level-2 replay reconstruct exact inputs. Payload shape verbatim from tech \u00a76.2 step 5.  [v0.2: factory + instance ratified (P-TRIGGERFIRED-FACTORY / -INSTANCE); $blob renamed input_blob (P-TRIGGERFIRED-INPUT-BLOB). See process/signals/0.2-rationale.md.]"
+    },
+    {
+      "name": "substrate.InputBuildFailed",
+      "namespace": "substrate",
+      "category": "predicate-trigger",
+      "stratum": "incident",
+      "payload": [
+        {
+          "field": "trigger_id",
+          "type": "str",
+          "required": false,
+          "note": "FK -> Trigger. Present when a Trigger's input_builder raised. Mutually exclusive with route_id (tech \u00a76.3)."
+        },
+        {
+          "field": "route_id",
+          "type": "str",
+          "required": false,
+          "note": "FK -> Route. Present INSTEAD of trigger_id when a Route's transform raised; staging abandoned, recorded via the same event shape scoped to the route (tech \u00a76.3). Exactly one of trigger_id | route_id present (see INVARIANT_PROPOSED scope-exclusivity)."
+        },
+        {
+          "field": "firing_key",
+          "type": "str",
+          "required": false,
+          "note": "The firing key the input_builder was building under; present for the Trigger-scoped case. tech \u00a76.2 step 5."
+        },
+        {
+          "field": "error",
+          "type": "str",
+          "required": true,
+          "note": "Typed error/diagnostic from the raising input_builder or transform. Incident-stratum diagnostic-required Evidence (Layer 7)."
+        }
+      ],
+      "note": "A Trigger's input_builder (or a Route's transform) raised; the firing produces NO Producer; the failure is on the log instead of silent. INCIDENT stratum on the structured error cascade; downstream Triggers/TerminationPolicy match on it. Verbatim shape from tech \u00a76.2 step 5 / \u00a76.3; conformance check 17. trigger_id XOR route_id is the discriminator."
+    },
+    {
+      "name": "substrate.ProducerStarted",
+      "namespace": "substrate",
+      "category": "producer",
+      "stratum": "event",
+      "payload": [
+        {
+          "field": "producer",
+          "type": "ProducerRef {kind,instance,parent}",
+          "required": true,
+          "note": "SUBJECT Producer identity. NOT spec-named (envelope producer is null for runtime events; F-PROD-4 types ProducerId but never says it rides the lifecycle payload). Load-bearing for conformance checks 1, 11 and R-1. See proposals.json P-SUBJECT-ID.",
+          "ratified_into": "0.1"
+        }
+      ],
+      "note": "Producer task began running. producer:null (runtime-emitted); the SUBJECT Producer's identity is not carried by the envelope's null producer field and is not enumerated in the spec \u2014 see PAYLOAD_FIELD_PROPOSED (the frontier predicate count(ProducerStarted for K)==count(ProducerCompleted for K) needs the kind/instance matchable). EVENT stratum. Verbatim PascalCase.  [v0.1: subject/injection identity ratified from P-SUBJECT-ID; kernel v16 reconciliation flagged \u2014 see docs/specs/kernel_spec/v16_reconciliation_note.md]"
+    },
+    {
+      "name": "substrate.ProducerEmittedInvalidEvent",
+      "namespace": "substrate",
+      "category": "producer",
+      "stratum": "incident",
+      "payload": [
+        {
+          "field": "reason",
+          "type": "str",
+          "required": true,
+          "note": "Enum: 'unknown_kind' | 'schema_violation' | 'non_canonical_value'. The typed validation failure class. tech \u00a74.3, \u00a78.1."
+        },
+        {
+          "field": "raw_payload",
+          "type": "dict",
+          "required": true,
+          "note": "The offending emission preserved verbatim ('raw payload preserved inside'). Field NAME not literally specced -> see PAYLOAD_FIELD_PROPOSED. Diagnostic-required Evidence."
+        },
+        {
+          "field": "at_path",
+          "type": "str",
+          "required": false,
+          "note": "The offending field path for schema_violation/non_canonical_value (registration names 'the offending path'). Field NAME not literally enumerated for the emission event -> PAYLOAD_FIELD_PROPOSED. tech \u00a74.3."
+        },
+        {
+          "field": "producer",
+          "type": "ProducerRef {kind,instance,parent}",
+          "required": true,
+          "note": "SUBJECT Producer identity. NOT spec-named (envelope producer is null for runtime events; F-PROD-4 types ProducerId but never says it rides the lifecycle payload). Load-bearing for conformance checks 1, 11 and R-1. See proposals.json P-SUBJECT-ID.",
+          "ratified_into": "0.1"
+        }
+      ],
+      "note": "Schema validation failed at the bus boundary (tech \u00a78.1): reason in {unknown_kind, schema_violation, non_canonical_value}, raw payload preserved, at_path for non_canonical_value. Whether the wrapper retains the emitting Producer's identity is SPEC-CONTESTED (envelope producer is null for runtime events per \u00a73.4, but the retry pattern keys on the failed Producer's kind per kernel line 508) \u2014 see proposals.json P-INVALID-PRODUCER-FIELD; not asserted here.  [v0.1: subject/injection identity ratified from P-SUBJECT-ID; kernel v16 reconciliation flagged \u2014 see docs/specs/kernel_spec/v16_reconciliation_note.md]"
+    },
+    {
+      "name": "substrate.ProducerCompleted",
+      "namespace": "substrate",
+      "category": "producer",
+      "stratum": "event",
+      "payload": [
+        {
+          "field": "producer",
+          "type": "ProducerRef {kind,instance,parent}",
+          "required": true,
+          "note": "SUBJECT Producer identity. NOT spec-named (envelope producer is null for runtime events; F-PROD-4 types ProducerId but never says it rides the lifecycle payload). Load-bearing for conformance checks 1, 11 and R-1. See proposals.json P-SUBJECT-ID.",
+          "ratified_into": "0.1"
+        }
+      ],
+      "note": "Producer's stream exhausted normally (a normal terminal). producer:null. No explicit payload specced beyond the envelope -> subject-Producer identity is PAYLOAD_FIELD_PROPOSED. EVENT stratum. Half of the frontier predicate with ProducerStarted. Verbatim PascalCase.  [v0.1: subject/injection identity ratified from P-SUBJECT-ID; kernel v16 reconciliation flagged \u2014 see docs/specs/kernel_spec/v16_reconciliation_note.md]"
+    },
+    {
+      "name": "substrate.ProducerFailed",
+      "namespace": "substrate",
+      "category": "producer",
+      "stratum": "incident",
+      "payload": [
+        {
+          "field": "error",
+          "type": "str",
+          "required": true,
+          "note": "'payload includes error' \u2014 the Producer's terminal error. Incident diagnostic-required Evidence. The Retry pattern's Trigger predicate matches this kind. Subject-Producer identity is PAYLOAD_FIELD_PROPOSED."
+        },
+        {
+          "field": "inner_run_id",
+          "type": "str",
+          "required": false,
+          "note": "COMPOSITION USE: an EmbeddedSubstrate's inner-run failure surfaces as ONE substrate.ProducerFailed on the OUTER bus with the inner run_id in the payload (tech \u00a720). Present only when the failed Producer is an EmbeddedSubstrate. Field NAME not in the named ProducerFailed schema -> PAYLOAD_FIELD_PROPOSED."
+        },
+        {
+          "field": "producer",
+          "type": "ProducerRef {kind,instance,parent}",
+          "required": true,
+          "note": "SUBJECT Producer identity. NOT spec-named (envelope producer is null for runtime events; F-PROD-4 types ProducerId but never says it rides the lifecycle payload). Load-bearing for conformance checks 1, 11 and R-1. See proposals.json P-SUBJECT-ID.",
+          "ratified_into": "0.1"
+        }
+      ],
+      "note": "Producer errored (an abnormal terminal). INCIDENT stratum on the structured error cascade. producer:null on the kernel kind (the failed Producer's id is needed in payload -> PAYLOAD_FIELD_PROPOSED). Distinct from the APPLICATION terminal RetryExhausted (a Producer-emitted kind, NOT substrate.*; see NEW_TAG_PROPOSED). Verbatim PascalCase.  [v0.1: subject/injection identity ratified from P-SUBJECT-ID; kernel v16 reconciliation flagged \u2014 see docs/specs/kernel_spec/v16_reconciliation_note.md]"
+    },
+    {
+      "name": "substrate.ProducerCancelled",
+      "namespace": "substrate",
+      "category": "producer",
+      "stratum": "event",
+      "payload": [
+        {
+          "field": "producer",
+          "type": "ProducerRef {kind,instance,parent}",
+          "required": true,
+          "note": "SUBJECT Producer identity. NOT spec-named (envelope producer is null for runtime events; F-PROD-4 types ProducerId but never says it rides the lifecycle payload). Load-bearing for conformance checks 1, 11 and R-1. See proposals.json P-SUBJECT-ID.",
+          "ratified_into": "0.1"
+        },
+        {
+          "field": "cause",
+          "type": "str (enum-like: 'external' | 'policy')",
+          "required": false,
+          "note": "Names WHY the producer was cancelled. 'external' when Runtime.cancel_producer(instance, cause=...) fired the cancel from outside the run's own policy machinery (e.g. a daemon interrupt endpoint). 'policy' when a TerminationPolicy path (_cancel_others) decided the cancel. Absent on cascade cancels during run teardown (task cleanup with no policy adjudication). Consumers that don't read this field are unaffected. See P-CANCELLED-CAUSE.",
+          "ratified_into": "0.3"
+        },
+        {
+          "field": "caller",
+          "type": "str | null",
+          "required": false,
+          "note": "Optional free-form identifier of the caller that dispatched the cancel. Populated with policy names for cause='policy' (e.g. 'cancel_all_others'). Populated with a caller-supplied string for cause='external' (e.g. 'daemon:interrupt', 'cli:ctrl-c'). Absent when the caller did not name itself. See P-CANCELLED-CALLER.",
+          "ratified_into": "0.3"
+        }
+      ],
+      "note": "Runtime cancelled Producer per policy (e.g. a cancel-others / subtree-cancellation TerminationPolicy decision) OR per an external Runtime.cancel_producer(instance) dispatch (v0.3). EVENT stratum: an ordinary terminal, NOT a failure (not on the error cascade \u2014 kernel \u00a7Structured error cascade enumerates Failed/EmittedInvalidEvent/Quarantined as the failure trio, not Cancelled). producer:null on the envelope. Optional cause + caller (v0.3) give the record self-describing provenance for who cancelled and why, closing the piece-B red-team gap where an external cancel wrote a naked ProducerCancelled with no reason envelope. Verbatim PascalCase.  [v0.1: subject/injection identity ratified from P-SUBJECT-ID; v0.3: cause/caller ratified from P-CANCELLED-CAUSE + P-CANCELLED-CALLER]"
+    },
+    {
+      "name": "substrate.InjectionApplied",
+      "namespace": "substrate",
+      "category": "route",
+      "stratum": "event",
+      "payload": [
+        {
+          "field": "route_id",
+          "type": "str",
+          "required": false,
+          "note": "FK -> Route (a routes[] entry in the RunStarted manifest). Field names not literally enumerated in the spec table -> PAYLOAD_FIELD_PROPOSED; route identity is required to attribute the injection. kernel \u00a77, tech \u00a710.",
+          "ratified_into": "0.1"
+        },
+        {
+          "field": "target_input_slot",
+          "type": "str",
+          "required": false,
+          "note": "FK -> Slot. The Slot of the Producer input the staged message was contributed to (kernel \u00a77 Route tuple). PAYLOAD_FIELD_PROPOSED (spec asserts the event records 'each Route contribution' but does not pin fields).",
+          "ratified_into": "0.1"
+        },
+        {
+          "field": "message_sha256",
+          "type": "str",
+          "required": false,
+          "note": "sha256:<64 hex> over the canonical bytes of the staged (transform-output) message, so injection provenance is hash-stable like resolved_input. PAYLOAD_FIELD_PROPOSED \u2014 symmetry with TriggerFired.input_sha256; spec does not pin it.",
+          "ratified_into": "0.1"
+        }
+      ],
+      "note": "A Route contributed typed messages to a Producer's input; records each Route contribution at the instantiation boundary. EVENT stratum. The faithful name for staging-for-future-instantiation; NEVER paraphrase to Temporal's 'SignalDelivered' (input is immutable; no mid-life push). kernel \u00a77 line 486; tech \u00a710. Payload fields underspecified -> proposed, not fabricated.  [v0.1: subject/injection identity ratified from P-INJECTION-FIELDS; kernel v16 reconciliation flagged \u2014 see docs/specs/kernel_spec/v16_reconciliation_note.md]"
+    },
+    {
+      "name": "substrate.PredicateQuarantined",
+      "namespace": "substrate",
+      "category": "predicate-trigger",
+      "stratum": "incident",
+      "payload": [
+        {
+          "field": "predicate_id",
+          "type": "str",
+          "required": true,
+          "note": "FK -> Predicate. The predicate the runtime stopped consulting. tech \u00a79, \u00a76.3."
+        },
+        {
+          "field": "trigger_id",
+          "type": "str",
+          "required": false,
+          "note": "FK -> Trigger. The predicate's Trigger. Kernel \u00a75 says the event identifies 'its Trigger', but a Predicate may instead be a Route source_predicate or a standalone gate -> OPTIONAL, see INVARIANT_PROPOSED on predicate-ownership cardinality."
+        },
+        {
+          "field": "reason",
+          "type": "str",
+          "required": true,
+          "note": "Enum: 'budget' (K consecutive over-budget evals, default k=3 per D-9, hysteresis) | 'exception' (predicate raised; immediate, no hysteresis). The two paths carry different companion fields (tech \u00a79 vs \u00a76.3) -> see PAYLOAD_FIELD_PROPOSED discriminated schema."
+        },
+        {
+          "field": "measured_us",
+          "type": "int",
+          "required": false,
+          "note": "Measured over-budget microseconds (budget reason only). tech \u00a79."
+        },
+        {
+          "field": "k",
+          "type": "int",
+          "required": false,
+          "note": "The hysteresis threshold K reached (budget reason only). tech \u00a79."
+        },
+        {
+          "field": "error",
+          "type": "str",
+          "required": false,
+          "note": "The exception text (exception reason only). tech \u00a76.3."
+        }
+      ],
+      "note": "The runtime stopped consulting a predicate \u2014 the explicit alternative to SEDA's silent adaptive controller ('silent enforcement is not an option'). INCIDENT stratum, diagnostic-required; sequence-numbered, matchable by other Predicates and TerminationPolicy. Two firing paths (budget hysteresis vs immediate exception) carry different companion fields; tech \u00a79 and \u00a76.3 payloads are not unified -> PAYLOAD_FIELD_PROPOSED. Conformance check 8."
+    },
+    {
+      "name": "substrate.TerminationMatched",
+      "namespace": "substrate",
+      "category": "lifecycle",
+      "stratum": "summary",
+      "payload": [
+        {
+          "field": "policy",
+          "type": "str",
+          "required": true,
+          "note": "FK -> policies[] (manifest). Identifier of the TerminationPolicy that fired (e.g. 'all-completed', 'quiescence-with-watchdog')."
+        },
+        {
+          "field": "decision",
+          "type": "str",
+          "required": true,
+          "note": "Enum, the five v15 \u00a78 values verbatim (hyphenated form): 'cancel-others' | 'let-finish' | 'finalise-run' | 'pause-await-input' | 'continue'. F-TERM-1."
+        },
+        {
+          "field": "resume_condition",
+          "type": "dict",
+          "required": false,
+          "note": "A typed ResumeCondition. REQUIRED-WHEN decision == 'pause-await-input' (F-TERM-3, kernel lines 532-535); MUST be absent otherwise. Encoded flat-optional here; conditional-requiredness is INVARIANT_PROPOSED. design \u00a74.7 shows a prose string -> PAYLOAD_FIELD_PROPOSED for a structured shape."
+        }
+      ],
+      "note": "TerminationPolicy fired; identifies the policy decision. SUMMARY stratum: a run-level decision roll-up (the 'why did the run end / pause' record). pause-await-input is a NON-terminal boundary (pauses without RunFinalised); the resume event re-enters the run. Distinct from RunFinalised (the run actually producing final output). Verbatim PascalCase. The five decision values live in ONE enum field, NOT five tags."
+    },
+    {
+      "name": "substrate.RunFinalised",
+      "namespace": "substrate",
+      "category": "lifecycle",
+      "stratum": "summary",
+      "payload": [
+        {
+          "field": "reason",
+          "type": "str",
+          "required": false,
+          "note": "Specced failure value: 'view_failure' (a View raised in update(), tech \u00a76.3, fatal). Normal-finalisation reasons (finalise-run / quiescence) are NOT enumerated; design \u00a73 normal example shows an empty payload -> the full reason enum is OPEN, see INVARIANT_PROPOSED. A RunFinalised{reason:'view_failure'} is the incident-stratum instance of this summary tag."
+        },
+        {
+          "field": "view",
+          "type": "str",
+          "required": false,
+          "note": "FK -> View. Present for reason 'view_failure': the failing View. tech \u00a76.3."
+        },
+        {
+          "field": "seq",
+          "type": "int",
+          "required": false,
+          "note": "Present for reason 'view_failure': the seq at which the View raised. tech \u00a76.3."
+        },
+        {
+          "field": "error",
+          "type": "str",
+          "required": false,
+          "note": "Present for reason 'view_failure': the View's error. tech \u00a76.3."
+        },
+        {
+          "field": "finalisation_payload",
+          "type": "dict",
+          "required": false,
+          "note": "The run's final output on normal finalisation; surfaced to RunResult.finalisation_payload. For an EmbeddedSubstrate the boundary translator carries the inner root path here (tech \u00a720). Field name not literally specced in the \u00a76.3 table -> PAYLOAD_FIELD_PROPOSED."
+        }
+      ],
+      "note": "Run produced its final output (the terminal frame; default composition export is the inner RunFinalised payload only). producer:null. SUMMARY stratum (run-boundary close, the Layer-3 session-close). CRITICAL carve-out (\u00a75.2): on a failed-fsync medium the writer MUST NOT append RunFinalised \u2014 absence after a torn tail is the correct encoding of medium failure, NOT a vocabulary gap. British spelling preserved (RunFinalised, never RunFinalized/RunCompleted). Verbatim PascalCase."
+    }
+  ],
+  "sessions": {
+    "strata": [
+      {
+        "name": "Run",
+        "open_tag": "substrate.RunStarted",
+        "close_tag": "substrate.RunFinalised",
+        "persistent_attributes": [
+          "run_id",
+          "topology (manifest: producer_kinds + schema descriptors + fingerprints, triggers, routes, views, policies)",
+          "baseline (fixtures, seed, env)",
+          "config (fsync policy, admission bound, budget_us, hysteresis_k)",
+          "replay_ceiling (3a|3b, in the manifest; demoted by any wall-clock cooldown)"
+        ],
+        "note": "The session = a Run. Boundary-open is substrate.RunStarted at seq 0 (exactly once, frame 0). Boundary-close is substrate.RunFinalised (at-most-once, terminal; legitimately ABSENT after a torn tail per \u00a75.2). Persistent attributes are carried once in RunStarted, not repeated per tag (mirrors the worked 0.1.json SESSION_INIT pattern). Re-entry edge: a substrate.TerminationMatched{decision:'pause-await-input'} pauses the Run without RunFinalised; the Run re-enters when a Trigger fires on the event named by resume_condition (paused persistent-bus runs MUST resume across process restarts, F-TERM-3). Run vs RunRecord vs RunResult are three altitudes of the same surface concept (see ENTITY_MERGE proposal): the execution/session vs the durable byte artifact vs the in-memory return Struct. Persistent-bus framing: per-run by default (in-memory bus, persisted to the record); persistent mode (F-PERS-2) survives across runs at a named root under an exclusive flock, where ProducerId.instance_id needs a run-id prefix for cross-run uniqueness and each event interprets via its OWN run's RunStarted manifest (F-SCHEMA-2). framing_inferred: 'session' is not a spec word; constructed from RunStarted/RunFinalised boundaries \u2014 recorded per BOOTSTRAP Step 4."
+      }
+    ]
+  },
+  "temporal_invariants": {
+    "invariants": [
+      {
+        "kind": "pairing",
+        "statement": "APPEND-CYCLE ORDERING (the canonical six-step total order inside the single writer, per spec): for each admitted/control event e \u2014 (1) Validate; (2) Sequence+append (assign seq N, frame, append); (3) Update Views synchronously (state is now as-of-N); (4) Stage Routes (matching Routes compute transform(e) and stage to their Slot) \u2014 BEFORE Predicates; (5) Evaluate Predicates in registration order against the as-of-N snapshot and fire Triggers (input_builder runs; substrate.TriggerFired or substrate.InputBuildFailed enqueued on the control queue; Producer scheduled post-cycle); (6) Drain the control queue FIFO, each queued event running its own full append cycle (seq N+1, N+2, ...) before any further admitted payload event. NOTE: the spec order is Views(3) THEN Routes(4) THEN Predicates(5); a Trigger fired by event N CAN read messages a Route staged from event N (no one-event delay \u2014 the Retry pattern relies on it). Reentrant appends from inside steps 3-5 raise ReentrantAppendError.",
+        "source": "docs/specs/kernel_spec/v15.md \u00a7The append cycle (lines 119-166); docs/specs/technical_spec/draft5.md \u00a76.2 (lines 481-512)"
+      },
+      {
+        "kind": "window",
+        "statement": "AS-OF-N SNAPSHOT: a Predicate or input_builder evaluated at seq N sees Views reflecting exactly all events with seq <= N and Route messages staged as of step 4; every Predicate in step 5 of one cycle sees the SAME snapshot. Views are the single writer's exclusive state (no concurrent update).",
+        "source": "docs/specs/kernel_spec/v15.md \u00a74 View (lines 334-337), \u00a7The append cycle (lines 139-157, 170-176)"
+      },
+      {
+        "kind": "cooldown",
+        "statement": "COOLDOWN logical-by-default: a Trigger cooldown is counted in append cycles matching the predicate's subscription (logical, replayable at every level the run otherwise supports). Wall-clock cooldown is opt-in and DEMOTING: registering ANY wall-clock cooldown on ANY Trigger flips the run's replay_ceiling from 3a to 3b at RunStarted time and records the cooldown flag in the manifest; logical cooldowns leave the ceiling at 3a.",
+        "source": "docs/specs/kernel_spec/v15.md \u00a76 (lines 395-404); docs/specs/product_spec/draft7.md F-TRIG-3 (lines 378-380); docs/specs/technical_spec/draft5.md \u00a73.5, \u00a710"
+      },
+      {
+        "kind": "eventually_must",
+        "statement": "COHORT FRONTIER (Naiad frontier re-derived as a counting predicate, NOT an emitted event): for any Producer kind K and triggering cohort, count(substrate.ProducerCompleted)+count(substrate.ProducerFailed)+count(substrate.ProducerCancelled) for K eventually equals count(substrate.ProducerStarted) for K \u2014 the 'all running Producers of kind K done' condition. Do NOT mint a 'FrontierReached' kind: progress is a derived predicate, not an event.",
+        "source": "docs/specs/kernel_spec/v15.md \u00a7Topology patterns Progress gating (lines 541-547), \u00a7lifecycle table (481-485)"
+      },
+      {
+        "kind": "cadence",
+        "statement": "AMBIENT CADENCE (the only ambient surfaces; both OFF-bus): writer_stats.jsonl is sampled at WRITER_STATS_INTERVAL_MS (default 1000ms; EWMA over a 1s window for cycles_per_sec); the diagnostic sidecar diagnostics.jsonl is flushed at SIDECAR_FLUSH_MS (default 500ms) or at fsync boundaries. Satisfies the BOOTSTRAP Step-5 halt (every ambient stratum entry needs a cadence invariant). NO on-bus kernel kind is ambient.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a73.8, \u00a76.4, \u00a719 constants; docs/specs/product_spec/draft7.md F-OBS-6"
+      },
+      {
+        "kind": "forbidden_after",
+        "statement": "DIAGNOSTIC INVARIANCE (the boundary rule separating event from ambient/incident): enabling the diagnostic sidecar OR writer_stats MUST leave the bus log bit-identical; sidecar records are keyed by observed seq but NEVER sequence-numbered; the writer's append cycle does NO sidecar/filesystem I/O on the hot path. Therefore no event-stratum bus tag may be minted for seal/blob/replay/inspect/diagnostic acts.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a73.8, \u00a76.4; docs/specs/product_spec/draft7.md F-OBS-6, conformance check 14"
+      }
+    ]
+  },
+  "state_transitions": {
+    "rules": [
+      {
+        "kind": "pairing_ordering",
+        "statement": "RUN-BOUNDARY: substrate.RunStarted is seq 0 (frame 0, exactly once, run-open); no substrate.* or application event may precede it. substrate.RunFinalised is terminal (at most once, run-close, last-if-present); no event follows it. CARVE-OUT: on the \u00a75.2 fsync-failure path RunFinalised is legitimately ABSENT (torn tail) \u2014 recovery reports 'incomplete run \u2014 no RunFinalised \u2014 torn at seq N'; absence-after-torn-tail is valid, not a missing-terminal defect.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a77 (RunStarted frame 0), \u00a75.2 (lines 436-448); docs/specs/kernel_spec/v15.md \u00a7The append cycle"
+      },
+      {
+        "kind": "pairing_ordering",
+        "statement": "PRODUCER LIFECYCLE: for a given Producer instance, substrate.ProducerStarted precedes exactly one terminal in {substrate.ProducerCompleted, substrate.ProducerFailed, substrate.ProducerCancelled}; substrate.ProducerEmittedInvalidEvent for that instance may occur zero-or-more times strictly between Started and its terminal. The re-arm/AfterMatchSkip question for the firing Triggers is left open (SEQUENCE_RULE_PROPOSED).",
+        "source": "docs/specs/kernel_spec/v15.md \u00a7lifecycle table (481-485), \u00a7Structured error cascade (559-571); docs/specs/technical_spec/draft5.md \u00a76.2"
+      },
+      {
+        "kind": "forbidden_after",
+        "statement": "PAUSE/RESUME RE-ENTRY: a substrate.TerminationMatched{decision:'pause-await-input'} is a NON-terminal boundary \u2014 it pauses the Run WITHOUT a RunFinalised and MUST carry a resume_condition; the Run is re-entered when a Trigger fires on the event named by resume_condition. Distinguished from finalise-run (which leads to RunFinalised). CLI exit codes distinguish paused from finalised.",
+        "source": "docs/specs/kernel_spec/v15.md \u00a7Topology patterns Halt-with-resume (529-539); docs/specs/product_spec/draft7.md F-TERM-3"
+      },
+      {
+        "kind": "pairing_ordering",
+        "statement": "AT-REST APPEND: while a Run is paused (its last frame is substrate.TerminationMatched{decision:'pause-await-input'}), an application event may be appended without resuming it, under the record's exclusive lock, with producer null; it is followed at once by the pause restated (substrate.TerminationMatched, the same payload, producer null). No Trigger is evaluated and no Producer runs, so the record ends paused, and the Run is re-entered only as PAUSE/RESUME RE-ENTRY says. Never after substrate.RunFinalised (RUN-BOUNDARY). A reserved substrate.* kind is refused.",
+        "source": "substrate-ui process/planning/2026-11-04-editor-level/RESEARCH-2026-11-04-editor-level-and-modes-r8.md (an edit made between turns needs a kernel call that appends without resuming); src/substrate/kernel/runtime.py append_at_rest (K340)"
+      },
+      {
+        "kind": "forbidden_after",
+        "statement": "SEALING PAIRING (off-bus writer FSM, Layer-5): for any segment the hot ('.open.' infix, append-only) state precedes the sealed (events-N.jsonl, immutable) state; seal order is fsync(hot) -> rename -> fsync(dir) -> create next .open -> fsync(dir) -> manifest update; a sealed segment MUST NEVER be reopened for writing, including by recovery; recovery operates ONLY on the single .open segment (first unterminated/unparseable/crc-mismatched line is the cut point: ftruncate + fsync). Write-ahead-blob: a blob is written and fsynced BEFORE the referencing frame is appended.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a73.2 sealing protocol, \u00a73.3 recovery, \u00a73.7 write-ahead-blob, \u00a75.2; conformance check 16"
+      },
+      {
+        "kind": "terminal",
+        "statement": "VIEW-FAILURE TERMINAL: a View raising in update() is fatal for the run; the writer appends substrate.RunFinalised{reason:'view_failure', view, seq, error} and terminates. This is the incident-stratum instance of the RunFinalised summary tag.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a76.3 (lines 515-517)"
+      }
+    ]
+  },
+  "operators": {
+    "operators": [
+      {
+        "name": "Writer / append-cycle (the central operator)",
+        "responsibilities": "The single asyncio task that drains the admission queue and runs one append cycle per admitted event (validate -> seq+append -> update Views -> stage Routes -> evaluate Predicates/fire Triggers -> drain control queue FIFO), then maybe-fsyncs, maybe-rolls the segment, and starts scheduled Producers between cycles. The sole thread touching Views and the synchronisation point for total order. Reentrancy guard raises ReentrantAppendError on any submit() reached synchronously from View/Predicate/input_builder/transform code. Home: substrate/runtime.py.",
+        "emits": [
+          "substrate.RunStarted",
+          "substrate.TriggerFired",
+          "substrate.InputBuildFailed",
+          "substrate.ProducerStarted",
+          "substrate.ProducerEmittedInvalidEvent",
+          "substrate.ProducerCompleted",
+          "substrate.ProducerFailed",
+          "substrate.ProducerCancelled",
+          "substrate.InjectionApplied",
+          "substrate.PredicateQuarantined",
+          "substrate.TerminationMatched",
+          "substrate.RunFinalised"
+        ],
+        "consumes": [
+          "all application payload kinds (via the admission queue)"
+        ]
+      },
+      {
+        "name": "Predicate-budget enforcer / quarantine controller",
+        "responsibilities": "Evaluates each subscribed non-quarantined Predicate in registration order under the per-call budget protocol (\u00a79). On K consecutive over-budget evals (hysteresis, default k=3 per D-9) or an immediate raise, stops consulting the predicate and emits the quarantine event \u2014 the explicit (non-silent) alternative to SEDA's adaptive controller. Home: substrate/triggers.py + the writer.",
+        "emits": [
+          "substrate.PredicateQuarantined"
+        ],
+        "consumes": [
+          "application payload kinds",
+          "substrate.* control-plane kinds (predicates may match them)"
+        ]
+      },
+      {
+        "name": "Trigger firing-policy evaluator",
+        "responsibilities": "Bookkeeps firing policy (Once/PerEvent/PerKey/WhileTrue + cooldown), runs input_builder against the as-of-N snapshot + staged Route messages, seals the input, schedules the Producer. PerKey extraction is canonical (JCS-encode the key before dedup). Home: substrate/triggers.py.",
+        "emits": [
+          "substrate.TriggerFired",
+          "substrate.InputBuildFailed"
+        ],
+        "consumes": [
+          "application payload kinds",
+          "substrate.* kinds"
+        ]
+      },
+      {
+        "name": "Route staging operator",
+        "responsibilities": "Matches source_predicate against event N (step 4), applies transform, stages the typed message into the target Slot for FUTURE Producer instantiations; a transform raise abandons staging and records an InputBuildFailed-shaped event scoped to the route. Home: substrate/runtime.py / triggers.py.",
+        "emits": [
+          "substrate.InjectionApplied",
+          "substrate.InputBuildFailed (route_id form)"
+        ],
+        "consumes": [
+          "application payload kinds"
+        ]
+      },
+      {
+        "name": "TerminationPolicy evaluator",
+        "responsibilities": "Interprets termination signals, completions, failures, cancellations, quarantines, and quiescence into cancel-others/let-finish/finalise-run/pause-await-input/continue; per-Producer policies evaluated first then the per-run policy (finalise-run overrides). Standard recipes (cancel-all-others, let-finish, quiescence-with-watchdog, threshold-count, all-completed, subtree-cancellation, any_of, all_of, pause_await_input) ship as named functions (these are operator NAMES surfacing as TerminationMatched.policy, NOT tags). Home: substrate/policies.py.",
+        "emits": [
+          "substrate.TerminationMatched",
+          "substrate.RunFinalised (on finalise-run / quiescence)"
+        ],
+        "consumes": [
+          "substrate.ProducerCompleted",
+          "substrate.ProducerFailed",
+          "substrate.ProducerCancelled",
+          "substrate.PredicateQuarantined",
+          "application termination-signal kinds"
+        ]
+      },
+      {
+        "name": "Composition boundary translator",
+        "responsibilities": "For an EmbeddedSubstrate Producer, runs the inner Runtime and translates inner events through the ExportMap onto the outer bus (only mapped kinds cross, validated by the outer append cycle); default export is the inner RunFinalised payload only; inner substrate.* kinds never cross unless mapped; an inner-run failure surfaces as ONE substrate.ProducerFailed on the outer bus with the inner run_id. Outer-bus congestion throttles the embedded Producer at its export point only (inner run never throttled internally). Home: tech \u00a720 (composition internals).",
+        "emits": [
+          "substrate.RunFinalised (outer, via export map)",
+          "substrate.ProducerFailed (outer, inner-run failure)",
+          "mapped application kinds"
+        ],
+        "consumes": [
+          "inner-run events"
+        ]
+      },
+      {
+        "name": "Canonical encoder",
+        "responsibilities": "The RFC 8785/JCS pipeline: event Struct -> msgspec.to_builtins() -> rfc8785 encoder -> bytes. Produces B_hash (without crc, what every sha256 hashes over) and B_disk (with crc, on disk). Enforces the type whitelist; CI runs RFC 8785 conformance vectors every commit. Dual-classified (Layer-0 entity CanonicalEncoder + Layer-6 operator). Home: substrate/encoding.py.",
+        "emits": [],
+        "consumes": [
+          "validated events (internal step of frame construction)"
+        ]
+      },
+      {
+        "name": "Record / segment writer",
+        "responsibilities": "Frames events, manages the hot segment, seals at SEGMENT_MAX_BYTES (fsync -> rename -> dir fsync), maintains the advisory manifest (write-temp -> rename -> dir fsync), the write-ahead blob store, and torn-tail recovery (CRC scan to last complete frame). fsync policy governs the hot segment only; sealing/manifest/blob fsync unconditionally. Home: substrate/record.py.",
+        "emits": [],
+        "consumes": [
+          "framed events from the writer"
+        ]
+      },
+      {
+        "name": "Replay engine / inspection / attach (read-side)",
+        "responsibilities": "Reconstructs from the record: Level 1 (Views/derivations), Level 2 (all runtime decisions incl. resolved inputs), Level 3(a) native re-execution (preconditioned on determinism + ceiling 3a; REFUSES rather than diverges), Level 3(b) substitution re-execution (byte-identical against recorded admission order). Inspection queries cite sequence numbers, never prose: explain_producer, trace_ancestry, view_at, decisions_between, first_divergence. Live attach tails the hot segment read-only (CRC-verify, ignore partial line, poll st_size; never writes/locks/signals). Homes: substrate/replay.py, inspect.py, attach.py.",
+        "emits": [],
+        "consumes": [
+          "the run record (read-only)"
+        ]
+      }
+    ]
+  },
+  "evidence_constraints": {
+    "constraints": [
+      {
+        "target": "all payload fields (encoding boundary)",
+        "constraint": "CANONICAL ENCODING / RFC 8785 (JCS): every logical event serializes to identical bytes on every OS/Python 3.12+ via the pinned rfc8785 encoder; CI runs the RFC 8785 conformance vectors every commit.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a74.1; F-PERS-3 / D-7",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "every sha256 field (input_sha256, blob ids, manifest segment hashes, D-8 comparison) + envelope crc",
+        "constraint": "TWO CANONICAL FORMS: hashes are sha256 over B_hash (envelope WITHOUT crc); the on-disk frame is B_disk (WITH crc). A verifier re-hashing on read MUST strip crc before re-encoding. CRC32 is torn-write detection only, NEVER identity; sha256 does all identity work. No envelope-level payload field may be named 'crc'.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a73.3, \u00a74.2",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "any int payload field",
+        "constraint": "INT_RANGE: -(2^53-1) <= n <= 2^53-1; integers that can exceed this MUST be schema-typed as strings (JCS numbers are IEEE-754 doubles; precision loss is silent). Any PAYLOAD_FIELD_PROPOSED introducing a numeric field MUST declare whether it can exceed 2^53-1. measured_us/k/seq/bytes are well within range.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a74.2 int row; RFC 8785",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "any float payload field",
+        "constraint": "FLOAT_FINITE: finite only; -0.0 canonicalizes to 0; NaN/Inf rejected at validation (no JCS form) -> substrate.ProducerEmittedInvalidEvent reason non_canonical_value.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a74.2 float row, \u00a74.3",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "all payload / View-state / resolved-input values",
+        "constraint": "TYPE_WHITELIST: exactly {str, bool, None, int, float, dict(str keys only, JCS-ordered), list/tuple, BlobRef, bytes16/bytes20/bytes32 (lowercase hex strings of length 32/40/64)}. Variable-length inline bytes are PROHIBITED (blob or explicit base64 string field). No open 'any'. Object keys are str-only sorted by UTF-16 code unit; discourage astral/emoji chars in KEYS (values fine). Out-of-whitelist field type fails at registration with the offending path named.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a74.2, \u00a74.3; RFC 8785 UTF-16 key sort",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "seq field on every envelope; t field",
+        "constraint": "SEQ_DENSE: seq is dense (no gaps in a healthy record), writer-assigned at append, the event's identity and the record's total order; a gap PROVES data loss (recovery reports it). NO vocabulary element (kernel kind or application tag) may key its semantics on t (wall-clock); t is supplementary, excluded from D-8 equivalence, never used for ordering.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a73.4 (seq/t rows), \u00a73.6; D-8; kernel \u00a72",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "the 'substrate.' kind prefix",
+        "constraint": "RESERVED_NAMESPACE (F-OBS-5): kinds beginning 'substrate.' are reserved for the twelve enumerated kernel kinds; Producer-declared kinds MUST NOT use the prefix and registration rejects collisions. Runtime vs application events are distinguishable by inspecting the kind alone. Kernel kinds keep exact spec PascalCase (never paraphrased, e.g. never 'InvalidEmission'); application tags are UPPER_SNAKE past-participle.",
+        "source": "docs/specs/product_spec/draft7.md F-OBS-5; docs/specs/technical_spec/draft5.md \u00a73.4 kind row",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "every Producer's resolved input",
+        "constraint": "INPUT_IMMUTABLE: input is sealed at instantiation (when input_builder returns / start() is called) and structurally immutable for the Producer's life \u2014 enforced BY CONSTRUCTION via the recursive sealing walk (frozen msgspec.Struct, tuple, frozenset, \u00a74.2 scalars, fixed-size bytes, BlobRef; anything else raises InputTypeError naming the path). No Route, Producer, or runtime call may mutate it; Routes stage only for FUTURE instantiations.",
+        "source": "docs/specs/kernel_spec/v15.md \u00a71 (lines 300-304); docs/specs/product_spec/draft7.md F-PROD-3; docs/specs/technical_spec/draft5.md \u00a78.3",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "manifest.replay_ceiling + Level 3(a) replay",
+        "constraint": "REPLAY_CEILING_HONESTY: replay_ceiling starts '3a' and drops to '3b' the moment ANY wall-clock cooldown is registered (at RunStarted time). Level 3(a) MUST verify preconditions (all Producers author-flagged deterministic AND ceiling=='3a') from RunStarted and REFUSE rather than produce a divergence. Level 1/2/3(b) work for EVERY recorded run.",
+        "source": "docs/specs/technical_spec/draft5.md \u00a73.5, \u00a710, \u00a712; docs/specs/product_spec/draft7.md F-RPLY-1; conformance checks 5, 6, 9",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "first_divergence / trace_ancestry (D-8)",
+        "constraint": "DIVERGENCE_COMPARISON + PROVENANCE_CLOSURE: first_divergence builds the comparison sequence (kind, decision_identity, payload_sha256) in seq order per D-8; supplementary metadata (t, host, config) NEVER enters comparison. Every Producer traces to exactly one of substrate.TriggerFired / a resume event / substrate.RunStarted (trace_ancestry acyclic by construction; no dangling ProducerIds).",
+        "source": "docs/specs/technical_spec/draft5.md \u00a714; docs/specs/product_spec/draft7.md F-OBS-2, F-OBS-3; D-8; conformance checks 11, 13",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "every incident-stratum tag (InputBuildFailed, ProducerEmittedInvalidEvent, ProducerFailed, PredicateQuarantined, RunFinalised{reason:view_failure})",
+        "constraint": "DIAGNOSTIC-REQUIRED EVIDENCE: each incident-stratum kind MUST carry typed diagnostic fields (reason/error + at_path/seq where applicable) sufficient to localize the failure from the record alone. BOOTSTRAP Step-8 halt: an incident tag with no diagnostic constraint halts the session.",
+        "source": "BOOTSTRAP.md Step 8; docs/specs/technical_spec/draft5.md \u00a74.3, \u00a76.3, \u00a78.1",
+        "enforceability": "mechanical"
+      },
+      {
+        "target": "all user-facing string fields (CLI run/replay/inspect/validate/tail/conformance/stats output; registration/error strings)",
+        "constraint": "TONE CANON + CLI EXIT CODES: structured output only, never natural language from the runtime; typed fields (error_kind, at_path, sequence); cite sequence numbers ('at seq 1247', never 'around the third trigger'); the eight-word vocabulary only (Producer/Bus/View/Predicate/Trigger/Route/TerminationPolicy/Topology), no anthropomorphic synonyms (agent/actor/speaker), no marketing reframes (workflow/step/task), no emoji; registration errors follow design \u00a76.1 shape (where -> summary -> what's wrong -> upstream constraint -> inline fix). Exit codes are a stable contract; the record root path is printed on every exit.",
+        "source": "process/WORKING_AGREEMENT.md Tone canon; docs/specs/design_spec/draft1.md \u00a75.1, \u00a76.1",
+        "enforceability": "llm_check"
+      }
+    ]
+  },
+  "report_binding": {
+    "_note": "Layer 8 \u2014 the run record IS the report surface (no UI). Inspection queries (explain_producer, trace_ancestry, view_at, decisions_between, first_divergence) bind the tag set into the read-side per tech \u00a714.",
+    "observed_categories": [
+      "lifecycle",
+      "producer",
+      "predicate-trigger",
+      "route",
+      "termination"
+    ],
+    "rendered_categories": [
+      "record",
+      "replay-inspection"
+    ],
+    "notes_categories": [
+      "incident"
+    ]
+  },
+  "grammar_growth": {
+    "taxonomy_version": "0.1",
+    "project_overrides": [
+      "strict validator-extras",
+      "record-as-view-side (no UI): dual-contract counterpart = reconstructable-from-record / replay Level 1-2"
+    ]
+  }
+}
