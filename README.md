@@ -15,7 +15,7 @@ substrate demo replay code_review
 
 ## The nine pieces
 
-A topology in Substrate is a function that declares which computations run and what connects them. They are built of nine fundamtal ideas.
+A topology in Substrate is a function that declares which computations run and what connects them. They are built of nine fundamental ideas.
 
 A **Producer** takes typed input and yields typed output. The runtime treats it as opaque — it sees the input, the output,and nothing between.
 
