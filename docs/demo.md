@@ -247,7 +247,7 @@ uv run python -m pytest            # the full suite (about 1,700 tests; realmode
 uv run substrate conformance       # the release gate (includes the perf floor)
 ```
 
-With a pip install (`pip3 install substrate-kernel`, then `python3 -m substrate install`), the
+With a pip install (`pip3 install --upgrade substrate-kernel`, then `python3 -m substrate install`), the
 bundled records replay without a checkout: `substrate demo replay code_review`.
 
 The committed records are deterministic CI-mode artifacts. For the same topologies

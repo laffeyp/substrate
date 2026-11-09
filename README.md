@@ -9,7 +9,7 @@
 A Python runtime that coordinates concurrent computations through a single append-only log. A topology declares the computations and the conditions that connect them. The log records all output, every lifecycle transition, each decision the runtime made. 
 
 ```
-pip3 install substrate-kernel
+pip3 install --upgrade substrate-kernel
 python3 -m substrate install
 substrate demo replay code_review
 ```
@@ -86,7 +86,7 @@ Most of these ship in various states of completion as demo topologies, some with
 ## Install
 
 ```
-pip3 install substrate-kernel
+pip3 install --upgrade substrate-kernel
 python3 -m substrate install
 substrate demo replay code_review
 ```

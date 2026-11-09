@@ -7,7 +7,7 @@ Everything uses `substrate.api` only. Shape from design-spec §3.
 ## 0. Install
 
 ```
-pip3 install substrate-kernel
+pip3 install --upgrade substrate-kernel
 python3 -m substrate install
 ```
 
