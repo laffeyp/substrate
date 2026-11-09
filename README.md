@@ -38,7 +38,7 @@ The **run record** is the Bus written to disk, checksummed and replayable.
 
 ### A toy topology
 
-Generator yields items. After three, a Trigger starts Processor with the latest item as input. When no Producers are running and no Triggers can fire, the TerminationPolicy ends the run. The run record captures every Event.
+A generator of some kind yields items. After three items, a Trigger starts a Processor with the latest item as input. When finally no Producers can run and no Triggers can fire, the TerminationPolicy ends the run. 
 
 ```mermaid
 flowchart TD
@@ -67,10 +67,10 @@ flowchart TD
     Bus -. "serialized to disk" .-> RR["<b>run record</b><br/>checksummed JSONL"]
 ```
 
-The cycle is the point: Producer → Event → Bus → View → Predicate → Trigger → new Producer. Everything passes through the Bus. Producers share nothing else.
+As you can see here, its possible to get a precise yet legible implementation of whatever you want to happen. Then once you set a topology up, you can run multiple at the same, compare then, make a different one and then chain them together, or whatever you want. Then observe the bus at all times and replay the entire topology at any time. It gets more interesting when you consider that with capable LLM, a topology can be made to modify itself by giving the LLM the proper interface to the topology. 
 
 
-## What you can build with this
+## What else you can build with this
 
 - An group of models on the same task, with a another model
   adjudicating and the losing runs cancelled when appropriate.
