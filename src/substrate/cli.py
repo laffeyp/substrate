@@ -1793,6 +1793,92 @@ def bundle_edit(name: str) -> None:
 # ── builder verb: open the studio in a browser ──────────────────────────
 
 
+# `substrate install` (K343): puts the `substrate` command on PATH. `pip3 install substrate-kernel`
+# writes the command into its Python's scripts folder, which a new terminal's PATH often lacks
+# (2026-11-08: `zsh: command not found: substrate`). Run as `python3 -m substrate install`, this links
+# that script into ~/.local/bin and, when ~/.local/bin is not on PATH, adds it to the shell profile.
+_INSTALL_MARK = "# added by `substrate install`"
+
+
+def _installed_script() -> Path | None:
+    """The `substrate` script pip wrote for this interpreter: its scripts folder, the user scheme's
+    (pip3 install --user), or beside the interpreter."""
+    import sysconfig
+
+    folders = [sysconfig.get_path("scripts")]
+    try:
+        folders.append(sysconfig.get_path("scripts", sysconfig.get_preferred_scheme("user")))
+    except (KeyError, AttributeError):
+        pass
+    folders.append(str(Path(sys.executable).parent))
+    for folder in folders:
+        script = Path(folder) / "substrate"
+        if script.is_file():
+            return script
+    return None
+
+
+def _profiles(home: Path) -> list[Path]:
+    """The startup files a new terminal reads for the user's shell."""
+    shell = Path(os.environ.get("SHELL", "")).name
+    if shell == "zsh":
+        return [home / ".zshrc", home / ".zprofile"]
+    if shell == "bash":
+        return [home / ".bashrc", home / ".bash_profile"]
+    if shell == "fish":
+        return [home / ".config" / "fish" / "conf.d" / "substrate.fish"]
+    return [home / ".profile"]
+
+
+@main.command("install")
+def install_command() -> None:
+    """Put the `substrate` command on PATH. Run once after `pip3 install substrate-kernel`, as
+    `python3 -m substrate install`."""
+    if os.name == "nt":
+        raise click.ClickException("substrate install supports macOS and Linux")
+    script = _installed_script()
+    if script is None:
+        raise click.ClickException(
+            f"no substrate script found for {sys.executable}; install with pip3 install substrate-kernel"
+        )
+    home = Path.home()
+    bin_dir = home / ".local" / "bin"
+    link = bin_dir / "substrate"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or not link.exists():
+        if link.is_symlink() and link.resolve() != script.resolve():
+            link.unlink()
+        if not link.is_symlink():
+            link.symlink_to(script)
+    elif link.resolve() != script.resolve():
+        raise click.ClickException(
+            f"{link} exists and is not a link to {script}; remove it and rerun"
+        )
+    click.echo(f"linked {link} -> {script}")
+    on_path = any(
+        Path(p).expanduser().resolve() == bin_dir.resolve()
+        for p in os.environ.get("PATH", "").split(os.pathsep)
+        if p
+    )
+    if on_path:
+        click.echo("substrate is ready: substrate demo replay code_review")
+        return
+    for profile in _profiles(home):
+        line = (
+            f"fish_add_path $HOME/.local/bin  {_INSTALL_MARK}\n"
+            if profile.suffix == ".fish"
+            else f'export PATH="$HOME/.local/bin:$PATH"  {_INSTALL_MARK}\n'
+        )
+        text = profile.read_text(encoding="utf-8") if profile.exists() else ""
+        if _INSTALL_MARK in text:
+            continue
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        with profile.open("a", encoding="utf-8") as fh:
+            fh.write(("\n" if text and not text.endswith("\n") else "") + line)
+        click.echo(f"added {bin_dir} to PATH in {profile}")
+    click.echo("open a new terminal, then: substrate demo replay code_review")
+
+
 @main.command("builder")
 def builder() -> None:
     """Open the substrate studio in the default browser.
