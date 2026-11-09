@@ -539,6 +539,11 @@
 
 - **K340-Q-1 (2026-11-05) — `test_inspect_record_summary_read_back_by_model` fails with `qwen2.5:7b-instruct`.** The model called `inspect_record` on the test's temp folder without its `/seeded` part, got "no record at …", and asked for a valid path instead of retrying; the test needs one call that returns ok. It fails the same way at `b547dd01`, before K340. Not changed in K340.
 
+- **2026-11-08 surfaced** — README diagram failure (Opus 4.6 session, ~20 attempts). Task: produce a Mermaid or SVG diagram of the nine kernel pieces using a toy "count to three" topology. The first Mermaid attempt (flowchart TD, Bus as central node) was close to correct — the only structural error was the Route reading from a View instead of subscribing to the Bus. Every subsequent attempt made it worse: session topology diagrams that drew direct arrows between Producers (bypassing the Bus), diagrams with orphaned Views, diagrams where the TerminationPolicy read Views instead of run state, abstract class diagrams of the API with no concrete program, graphviz renders with illegible layout and curving arrows.
+  - The first Mermaid diagram needed one fix: change the Route's source from the LatestItem View to the Bus (matching `RouteReg.subscription` in `topology.py:100`). That fix was identified on the second attempt but every subsequent diagram introduced new errors instead of applying it to the working version.
+  - Root cause: the agent kept rewriting the entire diagram from scratch instead of making the one identified correction to the version that was close. Each rewrite reintroduced errors the prior version did not have. The agent also switched tools (Mermaid → hand-coded SVG → graphviz dot) and abstraction levels (concrete program → API class diagram → concrete program again) without settling on one.
+  - Open question: whether an LLM agent can produce a legible, correct system diagram at all, or whether diagram generation requires a different method (human-drawn, or code that introspects a live Registration and emits the graph mechanically). Twenty attempts across one session produced zero correct diagrams. The README currently has no diagram.
+
 ---
 
 ## Drift watchlist
