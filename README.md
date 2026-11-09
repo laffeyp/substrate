@@ -67,7 +67,7 @@ flowchart TD
     Bus -. "serialized to disk" .-> RR["<b>run record</b><br/>checksummed JSONL"]
 ```
 
-As you can see here, it's possible to get a precise yet legible implementation of whatever you want to happen. Then once you set a topology up, you can run multiple at the same time, compare them, make a different one and then chain them together, or whatever you want. Then observe the bus at all times and replay the entire topology at any time. It gets more interesting when you consider that with a capable LLM, a topology can be made to modify itself by giving the LLM the proper interface to the topology. 
+As you can see here, it's possible to get a precise yet legible implementation of whatever you want to happen. Then once you set a topology up, you can run multiple at the same time, compare them, make a different one and then chain them together, or whatever you want. Then observe the bus at all times and replay the entire topology at any time. It gets more interesting when you consider that with a capable LLM, a topology can be made to modify itself by giving the LLM the proper interface to the topology, in essence a self modifying harness.  
 
 
 ## What else you can build with this
