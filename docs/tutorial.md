@@ -1,19 +1,20 @@
 # First topology: zero to a working two-Producer run
 
-A counter Producer emits three numbers. A Trigger fires a doubler Producer for each. That is the whole tutorial. New to the eight words? The [README glossary](../README.md#the-pieces) names them.
+A counter Producer emits three numbers. A Trigger fires a doubler Producer for each. That is the whole tutorial. New to the nine pieces? [The README](../README.md#the-nine-pieces) names them.
 
 Everything uses `substrate.api` only. Shape from design-spec §3.
 
 ## 0. Install
 
-From the `substrate/` directory:
-
 ```
-uv venv --python 3.12
-uv pip install -e ".[dev]"
+pip3 install substrate-kernel
+python3 -m substrate install
 ```
 
-Save each snippet below to `first.py` and run `python first.py`.
+From a source checkout instead, in the `substrate/` directory: `uv venv --python 3.12`, then
+`uv pip install -e ".[dev]"`, and prefix each command below with `uv run`.
+
+Save each snippet below to `first.py` and run `python3 first.py`.
 
 ## 1. A single Producer
 
@@ -48,7 +49,7 @@ async def main():
 asyncio.run(main())
 ```
 
-It prints `finalised ./runs/first`. That directory is a **run record** — the log on disk.
+It prints `finalised runs/first`. That directory is a **run record** — the log on disk.
 
 What you declared:
 
@@ -146,7 +147,7 @@ The staging lands as `substrate.InjectionApplied` on the record. Context that re
 The record is the product. Read it with the CLI or the API.
 
 ```
-$ uv run substrate tail ./runs/first
+$ substrate tail ./runs/first
 seq=0   substrate.RunStarted        (topology=..., baseline=...)
 seq=1   substrate.TriggerFired      trigger=__initial__  factory=counter
 seq=2   substrate.ProducerStarted   producer=counter[01J...]
@@ -160,7 +161,7 @@ seq=N   substrate.RunFinalised
 `tail` is every frame. `narrate` is the plot:
 
 ```
-$ uv run substrate narrate ./runs/first
+$ substrate narrate ./runs/first
 seq     0  Run started (run_id=01J...).
 seq     1  Initial trigger starts counter.
 seq     3  counter -> CountReached (n=1)
@@ -172,7 +173,7 @@ seq    20  Run finalised.
 Application events show as work; substrate lifecycle events (`ProducerStarted`, `ProducerCompleted`) hide by default. `--lifecycle` restores them. `--summary` answers *did it work?*:
 
 ```
-$ uv run substrate narrate ./runs/first --summary
+$ substrate narrate ./runs/first --summary
 Run finalised: 21 events.
   producers: 4 started, 4 completed, 0 cancelled, 0 failed
   work: CountReached=3, Doubled=3
@@ -183,11 +184,13 @@ Every authoring failure surfaces. A run that finalises with failures gets a `Run
 Ask *why* a Producer existed:
 
 ```
-$ uv run substrate inspect ./runs/first --producer "doubler[01J...]" --why
+$ substrate inspect ./runs/first --producer "doubler[01J...]" --why
 producer=doubler[01J...]
-parent=counter[01J...]
+parent=01J...
 caused_by:
-  seq=12  TriggerFired   trigger=double-each   resolved_input={"n": 2}   input_sha256=sha256:...
+  seq=4  TriggerFired
+    trigger=double-each
+    firing_key=None
 ```
 
 From code:
@@ -204,7 +207,7 @@ count_at = view_at("./runs/first", 5, KindCount("CountReached"))  # a View's sta
 ## 4. Replay and diff
 
 ```
-$ uv run substrate replay ./runs/first --level 2
+$ substrate replay ./runs/first --level 2
 [OK] Level 2 replay successful.
 Frames replayed: 21
 Decisions verified: 4 (all inputs verified by hash)

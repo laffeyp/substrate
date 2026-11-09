@@ -154,8 +154,10 @@ _METHODS_FOR = {"Runtime", "TopologyBuilder", "LiveRecord"}  # classes whose met
 
 
 def _signature(obj: object) -> str:
+    """The signature as written, without the `typing.` prefix Python 3.12 and 3.13 print and 3.14
+    does not, so the page is the same on every supported Python."""
     try:
-        return str(inspect.signature(obj)) if callable(obj) else ""
+        return re.sub(r"\btyping\.", "", str(inspect.signature(obj))) if callable(obj) else ""
     except (ValueError, TypeError):
         return ""
 
@@ -166,7 +168,10 @@ def _own_doc(obj: object) -> str:
     subclass) would otherwise pick up the base class's example docstring as slop. We read
     `__doc__` directly (which is per-class / per-object, not inherited for classes) and clean its
     indentation. A symbol with no own docstring renders as "_(no docstring)_"."""
-    doc = getattr(obj, "__doc__", None)
+    # A plain value (a kind-name string such as RUN_STARTED) has no docstring of its own: its
+    # `__doc__` is its type's (str's, whose wording differs between Python versions).
+    own = isinstance(obj, type) or inspect.isroutine(obj) or inspect.ismodule(obj)
+    doc = getattr(obj, "__doc__", None) if own else None
     return inspect.cleandoc(doc).strip() if doc else "_(no docstring)_"
 
 

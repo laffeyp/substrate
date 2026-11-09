@@ -238,12 +238,17 @@ public-API import boundary is enforced by `import-linter` in CI on every push.
 
 ## Run it yourself
 
+The records above are in a source checkout of the repository. From its root:
+
 ```
 uv venv --python 3.12 && uv pip install -e ".[dev]"
 bash demo.sh                       # the whole walk, against committed records
-uv run python -m pytest            # the full suite (575+ tests; realmodel tests run live when Ollama is present)
+uv run python -m pytest            # the full suite (about 1,700 tests; realmodel tests run live when Ollama is present)
 uv run substrate conformance       # the release gate (includes the perf floor)
 ```
+
+With a pip install (`pip3 install substrate-kernel`, then `python3 -m substrate install`), the
+bundled records replay without a checkout: `substrate demo replay code_review`.
 
 The committed records are deterministic CI-mode artifacts. For the same topologies
 driven by a real local LLM, see `docs/walkthroughs/README.md`.

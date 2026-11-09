@@ -27,4 +27,4 @@ A reading order, not an alphabetical pile. If you're new, follow the **Learn** p
 
 ## Background (the *why*, skip to *use*)
 
-`application-catalogue.md`, `precursor-application-ideas.md`, `walkthroughs/`, and `ui-design-handoff.md` are development-record / planning material — read them for the reasoning, not to learn the system.
+`application-catalogue.md` and `walkthroughs/` are development-record / planning material — read them for the reasoning, not to learn the system.

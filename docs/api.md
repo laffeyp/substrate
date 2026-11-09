@@ -555,185 +555,63 @@ run_id (technical §20). The inner record stays complete at its own root.
 
 ### `RUN_STARTED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `RUN_FINALISED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `TRIGGER_FIRED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `PRODUCER_STARTED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `PRODUCER_COMPLETED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `PRODUCER_FAILED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `PRODUCER_CANCELLED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `PRODUCER_EMITTED_INVALID`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `TERMINATION_MATCHED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `INPUT_BUILD_FAILED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `INJECTION_APPLIED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `PREDICATE_QUARANTINED`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ### `LIFECYCLE_KINDS`
 
-Built-in immutable sequence.
-
-If no argument is given, the constructor returns an empty tuple.
-If iterable is specified the tuple is initialized from iterable's items.
-
-If the argument is a tuple, the return value is the same object.
+_(no docstring)_
 
 ### `FAILURE_KINDS`
 
-Build an immutable unordered collection of unique elements.
+_(no docstring)_
 
 ### `INITIAL_TRIGGER_ID`
 
-str(object='') -> str
-str(bytes_or_buffer[, encoding[, errors]]) -> str
-
-Create a new string object from the given object. If encoding or
-errors is specified, then the object must expose a data buffer
-that will be decoded using the given encoding and error handler.
-Otherwise, returns the result of object.__str__() (if defined)
-or repr(object).
-encoding defaults to 'utf-8'.
-errors defaults to 'strict'.
+_(no docstring)_
 
 ## Bundles and the state root
 
