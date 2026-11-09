@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-PolyForm--NC--1.0.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 
-A Python runtime that coordinates concurrent computations through a single append-only log. A topology declares the computations and the conditions that connect them. The log records every output, every lifecycle transition, every decision the runtime made. 
+A Python runtime that coordinates concurrent computations through a single append-only log. A topology declares the computations and the conditions that connect them. The log records all output, every lifecycle transition, each decision the runtime made. 
 
 ```
 pip3 install substrate-kernel
