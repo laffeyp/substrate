@@ -9,7 +9,7 @@
 A Python runtime that coordinates concurrent computations through a single append-only log. A topology declares the computations and the conditions that connect them. The log records every output, every lifecycle transition, every decision the runtime made. 
 
 ```
-pip install substrate-kernel
+pipx install substrate-kernel
 substrate demo replay code_review
 ```
 
@@ -96,8 +96,19 @@ Most of these ship as bundled topologies with committed run records — `substra
 ## Install
 
 ```
-pip install substrate-kernel          # import name is `substrate`
+pipx install substrate-kernel         # or: uv tool install substrate-kernel
 ```
+
+pipx and uv install the `substrate` command into its own environment and put it on PATH; run
+`pipx ensurepath` (or `uv tool update-shell`) once and open a new terminal. With pip, run the
+command through the Python that installed it, which works whatever PATH holds:
+
+```
+python3 -m pip install substrate-kernel
+python3 -m substrate demo replay code_review
+```
+
+The import name is `substrate`.
 
 From source:
 
