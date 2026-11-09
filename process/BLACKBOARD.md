@@ -1333,3 +1333,12 @@
   - **Checked:**
     - from PyPI on a stand-in python.org Python 3.13, fresh and with 1.1.1 installed, the three commands end with the demo replaying to `RunFinalised` in a new login shell;
     - the full suite on 3.12, 3.13 and 3.14 passed apart from the API page test, which now passes on all three.
+
+- **2026-11-08 built** — K344: attachments on a message (substrate-ui editor item 0(e), first half; design D94).
+  - **The change:** `UserMessage.attachments` is a tuple of `Attachment(kind, label, ref, span, text)`, defined in `session/vocabulary.py` beside the other payload parts. The prompt composer writes each attachment's text after the message's `USER:` line, as `[attached <kind> <label>]`, the text, then `[end attached]`. The text is resolved when the message is built, so the record holds what the model read.
+  - **Old records:** `UserMessage` encodes with `omit_defaults`, so a message with no attachments is byte for byte as before.
+  - **Session vocabulary v0.18, § AC.**
+  - **Bundled records:** `daily` and `session` were regenerated. Their RunStarted frame hashes the event schemas, and `UserMessage`'s changed. The other 16 are unchanged.
+  - **Tests:** `tests/test_attachments_k344.py`, 3: the encoding unchanged with no attachments; the prompt lines; a deterministic session whose record holds the attachment and whose PromptComposed holds its text. With the renderer's call removed, the end-to-end test fails.
+  - **Second half, 0(e).2:** images reaching the models whose APIs take them. `Responder.respond(prompt: str)` carries text only, so it waits for that seam to widen.
+- **2026-11-08 agent-resolved** — The shape of an attachment. Decision: one shape for every view's chip, `kind`, `label`, `ref`, `span`, `text`; the content resolved into `text` when the message is built and recorded with it; the model reads it after the message in a delimited block. Grounds: project — design D94 (a chip names the thing, travels with the next message, "appears in the record with the message"); the record holds what the model saw (§ AB, replay); SDD — additive vocabulary, § AC; practice — Claude Code's and Cursor's @-mentions put the referenced file's text into the prompt. Revisit if: a view's thing has no text a model can read and no image form.

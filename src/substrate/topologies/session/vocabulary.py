@@ -178,6 +178,22 @@ class RunRole(StrEnum):
     REVIEWER = "reviewer"  # a review's session
 
 
+class Attachment(Struct, frozen=True, omit_defaults=True):
+    """A thing a view added to the message (session vocabulary § AC, K344; substrate-ui design D94):
+    `kind` is file | folder | lines | image | time_range | element | plan_item | event; `label` is
+    the chip's text ("cart.ts 85–89"); `ref` names it (a workspace-relative path, or "seq:240" for
+    a record event); `span` is its range when it has one (first and last line, start and end
+    seconds, or x, y, width, height); `text` is the content the model reads, resolved when the
+    message is built, so the record holds what the model saw. An image's bytes are not text; its
+    `text` is empty until a responder takes images."""
+
+    kind: str
+    label: str
+    ref: str
+    span: tuple[float, ...] = ()
+    text: str = ""
+
+
 class RunSession(Struct, frozen=True):
     """One session of a run, as its caller's record names it (§ Z.1)."""
 

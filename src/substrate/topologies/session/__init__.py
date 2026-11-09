@@ -34,6 +34,7 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
+    Attachment,
     REPORT_WRITTEN,
     RunOutcome,
     RunSession,
@@ -143,11 +144,13 @@ class SessionStarted(Struct, frozen=True):
     handoff: str = ""  # v0.15 (§ Y, K334): the Handoff position; empty before it
 
 
-class UserMessage(Struct, frozen=True):
+class UserMessage(Struct, frozen=True, omit_defaults=True):
     text: str
     turn_index: int
     assembled_prompt: str
     slash_source: str | None
+    # § AC (K344): left out of the record when empty, so a message with none encodes as before.
+    attachments: tuple[Attachment, ...] = ()
 
 
 class ModelReply(Struct, frozen=True):

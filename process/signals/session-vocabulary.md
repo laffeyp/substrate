@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.18 (2026-11-08).** Sprint K344 adds § AC: `UserMessage.attachments`, the things a view added to the message (substrate-ui design D94, editor item 0(e)), recorded with the message and read by the model under it. Additive: a message with none encodes as before. Agent-resolved.
+
 **Status: RATIFIED — v0.17 (2026-11-05).** Sprint K340 adds § AB: `FileWritten`, a file a view wrote, appended to a session's record during a turn or between turns (substrate-ui editor shared item 0(d)). Recorded only; no trigger subscribes. v0.16 to v0.16.3 stay withdrawn; v0.17 is additive to v0.15. Agent-resolved.
 
 **Status: v0.15 IN FORCE — v0.16 to v0.16.3 WITHDRAWN (2026-10-14).** The create-topology tool of kernel sprints K335–K338 and app sprints U187–U189 is removed (`POSTMORTEM-2026-10-14-create-topology-without-substrate.md`): it gave a model a plan language of the agent's own in place of Substrate's primitives. § AA and the v0.16.1–v0.16.3 additions to § Z.1 stay below as history; no code writes or reads them. `TopologyRunStarted` has no `record_root`, `TopologyRunEnded` no `result`, and a run's start is written only inside its caller's tool call, as v0.14 says.
@@ -1212,3 +1214,31 @@ None. The event is recorded; no producer starts and the model's prompt does not 
 ### Ratification signature
 
 - **v0.17** — Sprint K340, 2026-11-05, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AA byte-preserved.
+
+## AC. v0.18 — attachments on a message (2026-11-08, sprint K344)
+
+Design: substrate-ui `design/received/handoff 5/docs/DESIGN-DECISIONS -through 2026-11-04-.md` D94 ("Add to the message"): in any view a thing becomes a chip in the input bar, "travels with the next message as context, and appears in the record with the message". Research: `process/planning/2026-11-04-editor-level/RESEARCH-2026-11-05-editor-view-r11.md`, shared item 0(e).
+
+### AC.1 The field
+
+`UserMessage.attachments` — a list of `Attachment`, empty by default and then left out of the record:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `kind` | str | file, folder, lines, image, time_range, element, plan_item or event |
+| `label` | str | the chip's text, e.g. "cart.ts 85–89" |
+| `ref` | str | a workspace-relative path, or `seq:<n>` for a record event |
+| `span` | list of numbers | the range, when it has one: first and last line; start and end seconds; x, y, width, height |
+| `text` | str | the content the model reads, resolved when the message is built; empty for an image until a responder takes images, and for a folder |
+
+### AC.2 Who writes it
+
+Whoever builds the turn's `UserMessage`: the daemon, from the attachments its turn route receives, resolving each `text` from the workspace or the record at that moment. The record holds what the model saw.
+
+### AC.3 What the model reads
+
+The prompt composer writes, after the message's `USER:` line, one block per attachment: `[attached <kind> <label>]`, its text, `[end attached]`; an attachment with no text is its header line alone.
+
+### Ratification signature
+
+- **v0.18** — Sprint K344, 2026-11-08, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AB byte-preserved.

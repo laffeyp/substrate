@@ -269,6 +269,21 @@ def output_savings(turn: list[dict[str, Any]]) -> list[tuple[int, int]]:
     return out
 
 
+def attachment_lines(attachments: Any) -> list[str]:
+    """The prompt lines for a message's attachments (§ AC, K344): each as `[attached <kind>
+    <label>]`, its text, then `[end attached]`. One with no text (an image before a responder takes
+    images, a folder) is its header line alone."""
+    out: list[str] = []
+    for a in attachments or ():
+        if not isinstance(a, Mapping):
+            continue
+        out.append(f"[attached {a.get('kind', '?')} {a.get('label', '')}]")
+        text = str(a.get("text") or "")
+        if text:
+            out += [text, "[end attached]"]
+    return out
+
+
 def _render_turns(
     kept_turns: list[list[dict[str, Any]]],
     after_current_user: list[str] | None = None,
@@ -296,6 +311,7 @@ def _render_turns(
             if kind == _KIND_USER_MESSAGE:
                 text = str(payload.get("assembled_prompt") or payload.get("text", ""))
                 lines.append(f"USER: {text}")
+                lines.extend(attachment_lines(payload.get("attachments")))
                 if turn_idx == len(kept_turns) - 1 and after_current_user:
                     lines.extend(after_current_user)
             elif kind == SESSION_CHANGED:
