@@ -1323,3 +1323,13 @@
 ---
 
 *process/BLACKBOARD.md for Substrate. First session 2026-06-12. One COMPREHENSION_AFFIRMATION on file. One proposed scope Decision awaiting Architect ratification. Sprint 0 (Vocabulary Session) is the founding act per hard rule 12; no implementation sprint dispatches until `process/signals/0.1.json` + `process/signals/0.1-rationale.md` are locked and signed.*
+
+- **2026-11-08 built** — K342, K343 and the 1.1.2 release.
+  - **The fault:** `pip3 install substrate-kernel` put the `substrate` command in a script folder a new terminal's PATH lacked (`zsh: command not found: substrate`).
+  - **K342:** `python -m substrate` runs the CLI.
+  - **K343:** `substrate install` links the command into `~/.local/bin` and adds that folder to the shell's startup files when PATH lacks it. The README, `docs/tutorial.md` and `docs/demo.md` give the three commands: `pip3 install --upgrade substrate-kernel`, `python3 -m substrate install`, `substrate demo replay code_review`. `--upgrade` is needed because a machine with 1.1.1 kept it on a plain install.
+  - **The API page:** `scripts/gen_api_docs.py` writes the same `docs/api.md` on Python 3.12, 3.13 and 3.14. Python 3.12 and 3.13 printed `typing.Any` where 3.14 prints `Any`, and plain string constants took `str`'s docstring.
+  - **Release:** 1.1.2 uploaded to PyPI from `44283542`, which is tagged `v1.1.2` and pushed. The sdist is 1.5 MB, 537 files, so the 95 MB `process/runs` finding of sprint 249 no longer applies.
+  - **Checked:**
+    - from PyPI on a stand-in python.org Python 3.13, fresh and with 1.1.1 installed, the three commands end with the demo replaying to `RunFinalised` in a new login shell;
+    - the full suite on 3.12, 3.13 and 3.14 passed apart from the API page test, which now passes on all three.
