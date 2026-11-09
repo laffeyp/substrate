@@ -197,3 +197,37 @@ def test_missing_record_is_an_error_not_an_empty_record(tmp_path: Path, fmt: str
     for path in (tmp_path / "nope", tmp_path):
         with pytest.raises(ValueError, match="no record at"):
             tool.run([{"record": str(path), "format": fmt}])
+
+
+def test_a_missing_record_names_the_records_near_it(tmp_path: Path, record: Path) -> None:
+    """K341: the error for a path with no record names the records under it, or under the nearest
+    folder that exists, and the call that reads one, so a model that dropped part of a long path has
+    its next move (K340-Q-1)."""
+    import shutil
+
+    shutil.copytree(record, tmp_path / "seeded")
+    (tmp_path / "workspace").mkdir()
+    tool = make_inspect_record()
+    with pytest.raises(ValueError) as under:
+        tool.run([{"record": str(tmp_path)}])
+    seeded = str(tmp_path / "seeded")
+    assert str(under.value) == (
+        f"inspect_record: no record at {tmp_path}; it holds one record. To read it, call"
+        f" inspect_record again with record={seeded!r}"
+    )
+    with pytest.raises(ValueError) as above:
+        tool.run([{"record": str(tmp_path / "seede" / "x")}])
+    assert str(above.value).endswith(
+        f"the nearest folder that exists, {tmp_path}, holds one record. To read it, call"
+        f" inspect_record again with record={seeded!r}"
+    )
+    shutil.copytree(record, tmp_path / "second")
+    with pytest.raises(ValueError) as two:
+        tool.run([{"record": str(tmp_path)}])
+    assert str(two.value).endswith(
+        f"; it holds 2 records: {tmp_path / 'second'}, {seeded}. Call inspect_record again"
+        " with record set to the one you meant"
+    )
+    with pytest.raises(ValueError) as none:
+        tool.run([{"record": str(tmp_path / "workspace")}])
+    assert str(none.value) == f"inspect_record: no record at {tmp_path / 'workspace'}"

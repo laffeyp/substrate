@@ -583,6 +583,12 @@
 
 *Agent maintains. Last 10 sprint summaries; older entries roll into `## Built` as compressed paragraphs.*
 
+### K341: inspect_record names the record near a path that has none (2026-11-08)
+- **Why.** K340-Q-1: `test_inspect_record_summary_read_back_by_model` failed 6 of 6 runs on 2026-11-08. `qwen2.5:7b-instruct` at temperature 0 dropped `/seeded` from pytest's long temp path, the tool answered "no record at <folder>", and the model asked for a valid path.
+- **Built.** `_records_near` (`topologies/tool_loop/substrate_tools.py`): for a path with no record, the error names the records directly under it, or, when the path does not exist, under the nearest folder above it that does (at most 5 named, 50 entries read), and the call that reads one: `; it holds one record. To read it, call inspect_record again with record='<path>'`, or for several, the list and "call inspect_record again with record set to the one you meant". A path near no record keeps the old error.
+- **Test fixture.** The test's own session record moved from beside the seeded record to `tmp_path/session/`: beside it, the error named both, and the model read the session's own live record and reported it unfinalised. With only the seeded record named and no call named, the model still asked for a path; with the call named, it retried.
+- **Checks.** `tests/test_substrate_tools_inspect_record_227.py` 19 (one new: one record under the path, one under the nearest folder, two records, none); the real-model test 6 of 6 under six different pytest temp paths. ruff, format and mypy clean.
+
 ### K340: an event appended to a session's record during or between turns (2026-11-05)
 - **Why.** substrate-ui's editor shared item 0(d): an edit made in a view goes on the session's record, and between turns the run is paused on disk, where `inject_event` cannot reach it and `resume` starts a turn.
 - **Built.** `api.append_at_rest` (`kernel/runtime.py`): under the record's lock, the event (`producer` null) and the pause again, payload unchanged, so the status scan, the graph projection and `resume` read the record as before; refuses no record, a record not paused (`RecordNotAtRestError`, finalised records included) and reserved kinds; a live run raises `BusLockedError`. `SessionRegistry.append_event`: `append_at_rest` between turns, the turn's `inject_event` during one. `FileWritten` (session vocabulary v0.17, § AB).

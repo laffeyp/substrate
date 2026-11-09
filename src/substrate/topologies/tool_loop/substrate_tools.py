@@ -442,7 +442,10 @@ def _inspect_record_impl(
     # mistyped the path got ok=True, total_events=0, finalised=False and reported
     # a real, finished record as unfinished. An absent record is an error.
     if not record_root.is_dir() or api.read_first_envelope(record_root) is None:
-        raise ValueError(f"{TOOL_NAME_INSPECT_RECORD}: no record at {record_root_str}")
+        raise ValueError(
+            f"{TOOL_NAME_INSPECT_RECORD}: no record at {record_root_str}"
+            + _records_near(record_root)
+        )
 
     if format_name == "summary":
         summary = api.narration_summary(record_root)
@@ -552,6 +555,47 @@ def _inspect_record_impl(
         return {"format": "events", "events": collected, "has_more": False}
 
     raise ValueError(f"{TOOL_NAME_INSPECT_RECORD}: unknown format {format_name!r}")
+
+
+_NEAR_RECORDS_SHOWN = 5
+_NEAR_ENTRIES_READ = 50
+
+
+def _records_near(path: Any) -> str:
+    """The next move for a path with no record (K341): the records directly under it, or, when it
+    does not exist, under the nearest folder above it that does. A model that dropped part of a long
+    path (K340-Q-1: `.../seeded` called as `...`) gets the path it meant. At most
+    `_NEAR_ENTRIES_READ` entries are read and `_NEAR_RECORDS_SHOWN` named; "" when none is found."""
+    from ... import api
+
+    folder = path
+    while not folder.is_dir():
+        if folder.parent == folder:
+            return ""
+        folder = folder.parent
+    found: list[str] = []
+    try:
+        entries = sorted(p for p in folder.iterdir() if p.is_dir())[:_NEAR_ENTRIES_READ]
+    except OSError:
+        return ""
+    for child in entries:
+        try:
+            if api.read_first_envelope(child) is not None:
+                found.append(str(child))
+        except (OSError, ValueError):
+            continue
+        if len(found) == _NEAR_RECORDS_SHOWN:
+            break
+    if not found:
+        return ""
+    where = "it holds" if folder == path else f"the nearest folder that exists, {folder}, holds"
+    if len(found) == 1:
+        return f"; {where} one record. To read it, call {TOOL_NAME_INSPECT_RECORD} again with record={found[0]!r}"
+    return (
+        f"; {where} {len(found)} records: "
+        + ", ".join(found)
+        + f". Call {TOOL_NAME_INSPECT_RECORD} again with record set to the one you meant"
+    )
 
 
 def make_inspect_record(

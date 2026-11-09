@@ -359,8 +359,12 @@ async def test_inspect_record_summary_read_back_by_model(tmp_path: Path) -> None
     )
 
     tools = {"inspect_record": make_inspect_record(driver_context_tokens=8192)}
+    # The session's own record goes in its own folder, not beside the seeded one: a mistyped path
+    # (the model drops `/seeded` from pytest's long tmp path, K340-Q-1) then gets an error naming one
+    # record, the seeded one (K341), where beside it the error named the session's own live record too
+    # and the model read that one.
     record_root, _ws, factory = _open_session(
-        tmp_path=tmp_path,
+        tmp_path=tmp_path / "session",
         tools=tools,
         first_text=(
             f'Call inspect_record on the record at {seeded_root} with format="summary". '
