@@ -208,12 +208,12 @@ async def test_r3_composed_exports_only_artifact_ready(tmp_path):
 
 def test_cli_responder_shells_any_command_line_model_and_fails_loud() -> None:
     # CliResponder turns ANY command-line model into a Responder: it runs the command with the prompt
-    # as the final argument and returns stdout. A stub command (no real CLI needed) proves the
+    # on its standard input (K348; before, the final argument) and returns stdout. A stub command (no real CLI needed) proves the
     # mechanism; `claude -p` / `gemini -p` are the SAME shape, exercised live. Substrate's tool loop
     # provides the tools, so even a plain prompt->text CLI drives FULL_SUITE.
     from substrate.adapters import CliResponder
 
-    echo = CliResponder(["python3", "-c", "import sys; print('cli:' + sys.argv[-1])"])
+    echo = CliResponder(["python3", "-c", "import sys; print('cli:' + sys.stdin.read())"])
     assert echo.respond("hello") == "cli:hello"
 
     # a non-zero exit is a LOUD failure, never a silent stub (the loop turns it into a typed

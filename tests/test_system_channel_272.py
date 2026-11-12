@@ -120,15 +120,16 @@ def test_no_system_text_leaves_the_prompt_alone() -> None:
     assert driver.calls == ["P"]
 
 
-def test_cli_argv_with_and_without_a_flag() -> None:
+def test_cli_call_with_and_without_a_flag() -> None:
+    # K348: the prompt goes on standard input; the command line holds the system text's flag.
     flagged = CliResponder(["claude", "-p"], system_flag=["--system-prompt"])
     assert flagged.system_channel
-    assert flagged._argv("P", "S") == ["claude", "-p", "--system-prompt", "S", "P"]
-    assert flagged._argv("P", "") == ["claude", "-p", "--system-prompt", "", "P"]
-    assert flagged.at("/tmp")._argv("P", "S") == ["claude", "-p", "--system-prompt", "S", "P"]
+    assert flagged._call("P", "S") == (["claude", "-p", "--system-prompt", "S"], "P")
+    assert flagged._call("P", "") == (["claude", "-p", "--system-prompt", ""], "P")
+    assert flagged.at("/tmp")._call("P", "S") == (["claude", "-p", "--system-prompt", "S"], "P")
     bare = CliResponder(["codex", "exec"])
     assert not bare.system_channel
-    assert bare._argv("P", "S") == ["codex", "exec", "S\n\nP"]
+    assert bare._call("P", "S") == (["codex", "exec"], "S\n\nP")
 
 
 def test_ollama_sends_the_call_system_as_a_system_message() -> None:

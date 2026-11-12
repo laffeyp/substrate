@@ -556,17 +556,18 @@ class CliResponder:
             )
         return argv
 
-    def _argv(self, prompt: str, system: str) -> list[str]:
-        """The command line for one call: with a flag, the system text through it, empty or not,
-        so the CLI never falls back to a system prompt of its own (`claude --system-prompt ""`
-        leaves Claude with none, measured 2026-10-10); then the prompt last. A streaming CLI's
-        flags follow its command."""
+    def _call(self, prompt: str, system: str) -> tuple[list[str], str]:
+        """One call's command line and the text for its standard input. The prompt goes on
+        standard input, which `claude -p`, `codex exec` and `cursor-agent -p` all read when no
+        prompt is on the command line (K348; before, it was the last argument, and macOS refuses an
+        argument list past ARG_MAX, 1,048,576 bytes shared with the environment). With a flag, the
+        system text goes through it, empty or not, so the CLI never falls back to a system prompt
+        of its own (`claude --system-prompt ""` leaves Claude with none, measured 2026-10-10);
+        without one, it heads the prompt. A streaming CLI's flags follow its command."""
         base = [*self._command, *self._stream_flags]
         if self._system_flag is not None:
-            return [*base, *self._system_flag, system, prompt]
-        if system:
-            return [*base, f"{system}\n\n{prompt}"]
-        return [*base, prompt]
+            return [*base, *self._system_flag, system], prompt
+        return base, (f"{system}\n\n{prompt}" if system else prompt)
 
     def _reply_from_stream(self, stdout: str) -> str:
         """A streaming CLI's reply, read from its whole stdout at once (the sync path)."""
@@ -584,9 +585,10 @@ class CliResponder:
     def respond(self, prompt: str, *, system: str = "") -> str:
         import subprocess
 
+        argv, stdin_text = self._call(prompt, system)
         proc = subprocess.run(  # noqa: S603 — an explicit, operator-chosen agent CLI driver
-            self._spawnable(self._argv(prompt, system)),
-            stdin=subprocess.DEVNULL,  # the prompt is an argument; `claude` waits 3 s on an open stdin, then fails
+            self._spawnable(argv),
+            input=stdin_text,  # the prompt, then end of input (K348)
             capture_output=True,
             text=True,
             timeout=self._timeout,
@@ -620,9 +622,10 @@ class CliResponder:
         if self._stream_format is None:
             raise RuntimeError(f"CliResponder({self.name}) has no stream format")
         parser = parser_for(self._stream_format)
+        argv, stdin_text = self._call(prompt, system)
         proc = await _asyncio.create_subprocess_exec(
-            *self._spawnable(self._argv(prompt, system)),
-            stdin=_asyncio.subprocess.DEVNULL,  # see `respond`
+            *self._spawnable(argv),
+            stdin=_asyncio.subprocess.PIPE,  # the prompt, written below (K348)
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
             cwd=self._cwd,
@@ -633,6 +636,20 @@ class CliResponder:
         if proc.stdout is None or proc.stderr is None:  # both are PIPE above
             raise RuntimeError(f"CliResponder({self.name}) has no output pipes")
         stderr_task = _asyncio.ensure_future(proc.stderr.read())  # a full stderr pipe would block
+        if proc.stdin is not None:
+            pipe = proc.stdin
+
+            async def _feed() -> None:
+                # Written beside the stdout read, so neither pipe waits on the other.
+                try:
+                    pipe.write(stdin_text.encode("utf-8"))
+                    await pipe.drain()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                finally:
+                    pipe.close()
+
+            _asyncio.ensure_future(_feed())
         tail: list[str] = []
         finished = False
         try:
@@ -682,15 +699,17 @@ class CliResponder:
         import os as _os
         import signal as _signal
 
+        argv, stdin_text = self._call(prompt, system)
         proc = await _asyncio.create_subprocess_exec(
-            *self._spawnable(self._argv(prompt, system)),
-            stdin=_asyncio.subprocess.DEVNULL,  # see `respond`
+            *self._spawnable(argv),
+            stdin=_asyncio.subprocess.PIPE,  # the prompt, through `communicate` (K348)
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
             cwd=self._cwd,
             env=self._subprocess_env(),
             start_new_session=True,  # own process group: a kill reaches the agent's children
         )
+        stdin_bytes = stdin_text.encode("utf-8")
 
         async def _kill_group() -> None:
             try:
@@ -705,7 +724,9 @@ class CliResponder:
                 pass
 
         try:
-            stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=self._timeout)
+            stdout, stderr = await _asyncio.wait_for(
+                proc.communicate(stdin_bytes), timeout=self._timeout
+            )
         except (TimeoutError, _asyncio.TimeoutError):
             await _kill_group()
             raise RuntimeError(
