@@ -3,7 +3,8 @@
 ```yaml
 ---
 id: 345
-status: pending
+status: closed
+closed_at: 2026-11-12
 phase: continuing a session (substrate-ui roadmap 2026-11-12-continue-a-session r1, E1)
 pass_kind: functional
 depends_on: []
