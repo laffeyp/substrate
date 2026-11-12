@@ -478,6 +478,7 @@ class SessionRegistry:
         branch: str | None = None,
         handoff: str | None = None,
         continued_session: str | None = None,
+        make_repository: bool = True,
     ) -> SessionManifest:
         """Register a new session. Atomic against by-name.json under `fcntl.flock`.
 
@@ -488,11 +489,18 @@ class SessionRegistry:
         (`workspace.ensure_repository`). With `branch`, the session works in its own
         worktree of that repository, on that branch, under `<base>/wt/<session_id>`, and its
         manifest names the worktree with shape `worktree`.
+
+        K349: `make_repository=False` leaves a workspace that is not inside a repository as a
+        plain folder (a folder holding repositories, which is not one itself). A branch needs a
+        repository, so the two together raise ValueError.
         """
         _check_controls(length, tone, handoff)
         from .workspace import ensure_repository, make_worktree
 
-        ensure_repository(Path(workspace))
+        if make_repository:
+            ensure_repository(Path(workspace))
+        elif branch is not None:
+            raise ValueError("a branch needs a repository; make_repository=False names none")
         if branch is not None:
             workspace = str(make_worktree(Path(workspace), branch, self._base / "wt" / session_id))
             workspace_shape = WorkspaceShape.WORKTREE
