@@ -295,10 +295,11 @@ class SessionRegistry:
         earlier `_locks: dict[str, asyncio.Lock]` map is gone (piece-C
         review finding 3).
 
-    Not thread-safe in the general sense; the daemon runs one event loop, and
-    the process-level lock lives at `~/.substrate/daemon.pid`. `fcntl.flock`
-    on `by-name.json` protects against corruption from ANY writer, including a
-    stray script or a second daemon that snuck past the pidfile guard.
+    Not thread-safe in the general sense; the daemon runs one event loop. No
+    process-level lock refuses a second daemon on the same store: one store
+    per daemon is the caller's job (each install names its own
+    `SUBSTRATE_HOME`). `fcntl.flock` on `by-name.json` protects that file
+    against corruption from ANY writer.
     """
 
     def __init__(
