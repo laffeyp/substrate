@@ -140,6 +140,7 @@ def test_prompt_source_enum_has_all_v02_plus_interrupt_values() -> None:
         PromptSource.MEMORY,
         PromptSource.SKILL,
         PromptSource.PARENT_CONTEXT,
+        PromptSource.CONTINUED_SESSION,  # v0.19 § AD (K346): a conversation held elsewhere
         PromptSource.TOOLS_SUITE,
         PromptSource.CONTROL,  # v0.8 § T (K296): the Length and Tone texts
         PromptSource.USER_MESSAGE,
@@ -186,6 +187,7 @@ def test_session_open_and_turn_scoped_partition_prompt_sources() -> None:
         PromptSource.SKILL,
         PromptSource.TOOLS_SUITE,
         PromptSource.PARENT_CONTEXT,
+        PromptSource.CONTINUED_SESSION,  # v0.19 § AD (K346): written once at session open
         PromptSource.CONTROL,  # v0.8 § T (K296): written at session open, like the style
     }
     assert TURN_SCOPED_SOURCES == {

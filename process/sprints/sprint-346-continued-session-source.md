@@ -3,7 +3,8 @@
 ```yaml
 ---
 id: 346
-status: pending
+status: closed
+closed_at: 2026-11-12
 phase: continuing a session (substrate-ui roadmap 2026-11-12-continue-a-session r1, E2)
 pass_kind: functional
 depends_on: [345]
@@ -70,3 +71,15 @@ Primitive-plus-consumer: the consumer is sprint 347 (`sprint-347-session-names-c
 - [x] Consumer named, its card on disk.
 - [x] Artifact contract is gradable.
 - [x] Observation contract present.
+
+## close
+
+`PromptSource.CONTINUED_SESSION` is a session-open source (`vocabulary.py`); `continued_session_fragments` renders the given turns with `_group_by_turn` and `_render_turns` after one line naming the tool, and `session_prompt_sources` takes `continued_session` (`session_prompt_producer.py`). Session vocabulary v0.19, § AD. `tests/test_session_prompt_vocabulary_v02.py` lists the new source in its two pinned sets, as a vocabulary change requires.
+
+- `tests/test_continued_session_source.py`: 5 passed. The fragment's text is the renderer's own; precedence 30, provenance with the counts; no turns, no fragment; a source only when named; the producer body yields it and `compose_model_prompt` places it after the seed.
+- With the memory, parent-context, producer and vocabulary tests: 31 passed. `ruff check`, `ruff format --check` clean; `mypy --strict` on the two source files clean.
+- Mutant (the raw events in place of the rendering): 2 of 5 fail.
+
+The observation contract's full session run moves to sprint 347, which wires the source into the session topology; here the producer body and the composer are run directly.
+
+Rubber Duck Pass: one new fragment kind on the record, `PromptFragment(source=continued_session)`, written once at session open with its provenance; no other event changes. No observations.

@@ -58,6 +58,7 @@ METHODOLOGY_PRECEDENCE = 5  # every link of the extends chain; seq keeps ancesto
 TOOLS_SUITE_PRECEDENCE = 20
 PARENT_CONTEXT_PRECEDENCE = 30
 PARENT_CONTEXT_CAP_BYTES = 64 * 1024
+CONTINUED_SESSION_PRECEDENCE = 30  # with parent_context: another conversation's text (§ AD)
 
 Source = Callable[[], list[PromptFragment]]
 
@@ -267,6 +268,33 @@ def parent_context_fragments(parent_context: dict[str, Any]) -> list[PromptFragm
     ]
 
 
+def continued_session_fragments(continued: dict[str, Any]) -> list[PromptFragment]:
+    """A conversation held elsewhere, as this session's opening text (§ AD, K346). `continued` is
+    `{"turns": [...], "provenance": {...}}`: the turns are events of the kinds the history renders
+    (`UserMessage`, `ModelReply`, `HarnessToolCall`, `HarnessToolResult`), each `{"kind",
+    "payload"}`, and the text is what the history's renderer writes for them, so it reads as this
+    session's own history does. Reading another tool's file into turns is the caller's."""
+    from .transcript import _group_by_turn, _render_turns
+
+    events = list(continued.get("turns") or [])
+    turns = _group_by_turn(events)
+    if not turns:
+        return []
+    provenance = dict(continued.get("provenance") or {})
+    tool = str(provenance.get("tool", "another tool"))
+    text = f"This session continues a conversation held in {tool}. The conversation so far:\n\n" + (
+        "\n".join(_render_turns(turns))
+    )
+    return [
+        PromptFragment(
+            source=PromptSource.CONTINUED_SESSION,
+            text=text,
+            precedence=CONTINUED_SESSION_PRECEDENCE,
+            provenance={**provenance, "turns": len(turns), "events": len(events)},
+        )
+    ]
+
+
 def tools_suite_fragments(tools: dict[str, Tool]) -> list[PromptFragment]:
     """The raw `suite_describe` text, with the sorted tool names as provenance. The model step
     frames it for a text-only driver; a native driver gets the schemas on the tool channel."""
@@ -295,6 +323,7 @@ def session_prompt_sources(
     length: str | None = None,
     tone: str | None = None,
     handoff: str | None = None,
+    continued_session: dict[str, Any] | None = None,
 ) -> dict[PromptSource, Source]:
     """The sources a session names, in the order the producer runs them."""
     sources: dict[PromptSource, Source] = {}
@@ -315,6 +344,10 @@ def session_prompt_sources(
         sources[PromptSource.MEMORY] = lambda: memory_fragments(role_repo_root)
     if parent_context is not None:
         sources[PromptSource.PARENT_CONTEXT] = lambda: parent_context_fragments(parent_context)
+    if continued_session is not None:
+        sources[PromptSource.CONTINUED_SESSION] = lambda: continued_session_fragments(
+            continued_session
+        )
     if tools:
         sources[PromptSource.TOOLS_SUITE] = lambda: tools_suite_fragments(tools)
     return sources
@@ -385,6 +418,7 @@ def session_prompt_producer_factory(
 __all__ = [
     "Source",
     "bundle_methodology_fragments",
+    "continued_session_fragments",
     "baseline_fragments",
     "memory_dirs",
     "memory_fragments",

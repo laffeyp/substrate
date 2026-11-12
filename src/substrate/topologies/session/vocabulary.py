@@ -282,6 +282,9 @@ class PromptSource(StrEnum):
     MEMORY = "memory"  # a memory index, operator or repo (§ P.2, K276)
     SKILL = "skill"  # a skill's body, loaded on request and kept for the session (§ P.2, K277)
     PARENT_CONTEXT = "parent_context"
+    # v0.19 (§ AD, K346): a conversation held elsewhere, carried into a new session as its opening
+    # text, rendered as this session's own history renders turns.
+    CONTINUED_SESSION = "continued_session"
     TOOLS_SUITE = "tools_suite"
     CONTROL = "control"  # the Length and Tone controls' texts, at session open (§ T, K296)
     USER_MESSAGE = "user_message"
@@ -305,6 +308,7 @@ SESSION_OPEN_SOURCES: Final[frozenset[PromptSource]] = frozenset(
         PromptSource.SKILL,
         PromptSource.TOOLS_SUITE,
         PromptSource.PARENT_CONTEXT,
+        PromptSource.CONTINUED_SESSION,
         PromptSource.CONTROL,
     }
 )

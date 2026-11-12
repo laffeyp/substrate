@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.19 (2026-11-12).** Sprint K346 adds § AD: the `continued_session` prompt source, a conversation held elsewhere carried into a new session as its opening text (substrate-ui roadmap `2026-11-12-continue-a-session` r1). Additive: a session that names none writes the fragments it wrote before. Agent-resolved.
+
 **Status: RATIFIED — v0.18 (2026-11-08).** Sprint K344 adds § AC: `UserMessage.attachments`, the things a view added to the message (substrate-ui design D94, editor item 0(e)), recorded with the message and read by the model under it. Additive: a message with none encodes as before. Agent-resolved.
 
 **Status: RATIFIED — v0.17 (2026-11-05).** Sprint K340 adds § AB: `FileWritten`, a file a view wrote, appended to a session's record during a turn or between turns (substrate-ui editor shared item 0(d)). Recorded only; no trigger subscribes. v0.16 to v0.16.3 stay withdrawn; v0.17 is additive to v0.15. Agent-resolved.
@@ -1242,3 +1244,24 @@ The prompt composer writes, after the message's `USER:` line, one block per atta
 ### Ratification signature
 
 - **v0.18** — Sprint K344, 2026-11-08, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AB byte-preserved.
+
+## AD. v0.19 — a session continues a conversation held elsewhere (2026-11-12, sprint K346)
+
+Research: substrate-ui `process/planning/2026-11-12-continue-a-session/RESEARCH-2026-11-12-continue-a-session-r2.md`; roadmap `ROADMAP-2026-11-12-continue-a-session-r1.md`. The Architect, 2026-11-12: a Claude Code session continues as a Substrate session, through Substrate's existing way of loading context at session open.
+
+### AD.1 The source
+
+`PromptSource.CONTINUED_SESSION`, `"continued_session"`: a session-open source (§ P.2), precedence 30, with `parent_context`. Its input is `{"turns": [...], "provenance": {...}}`. `turns` are events of the kinds the history renders (`UserMessage`, `ModelReply`, `HarnessToolCall`, `HarnessToolResult`), each `{"kind", "payload"}` with the payload fields those kinds carry. The source groups them into turns and renders them with the history's renderer (`_group_by_turn`, `_render_turns`), after one line naming the tool: "This session continues a conversation held in <tool>. The conversation so far:". It writes one `PromptFragment`; none when the turns hold no `UserMessage`.
+
+### AD.2 Provenance
+
+What the caller gives (`tool`, the file's `path`, the line of its last compaction summary as `summary_line`), plus `turns` and `events`, the counts.
+
+### AD.3 Who writes the turns
+
+The caller. The kernel reads no other tool's files: the daemon reads a tool's session file and gives the source its turns (substrate-ui sprint 494, for Claude Code), as it resolves an attachment's text (§ AC.2).
+
+### Ratification signature
+
+- **v0.19** — Sprint K346, 2026-11-12, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AC byte-preserved.
+
