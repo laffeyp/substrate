@@ -3,7 +3,8 @@
 ```yaml
 ---
 id: 347
-status: pending
+status: closed
+closed_at: 2026-11-12
 phase: continuing a session (substrate-ui roadmap 2026-11-12-continue-a-session r1, E3)
 pass_kind: functional
 depends_on: [346]
@@ -64,3 +65,13 @@ Primitive-plus-consumer: the production consumer of this manifest field is subst
 - [x] Consumer named, its card on disk.
 - [x] Artifact contract is gradable.
 - [x] Observation contract present.
+
+## close
+
+`SessionManifest.continued_session` (the turns file's path), `create(continued_session=)`, and the field's round trip through `manifest.json`, written only when set (`session_registry.py`); `session_topology(continued_session=)` hands it to `session_prompt_sources` (`session/__init__.py`). The topology factory reads the file: the daemon's is substrate-ui sprint 494's; the test's is the same shape.
+
+- `tests/test_session_continued_347.py`: 3 passed. Through the registry, created with a turns file and run one deterministic turn: the record holds one `PromptFragment` of source `continued_session` and the first `PromptComposed` holds `USER: Remember the word: heron.` and `MODEL: OK, heron.`; created without one: no such fragment, and `manifest.json` has no `continued_session` key; the field survives a reload.
+- With the source's, K340's and the vocabulary's tests: 57 passed. ruff clean; `mypy --strict` on both files clean.
+- Mutant (the builder not handing the field on): 1 of 3 fails.
+
+Rubber Duck Pass: on a continued session the record opens with the session-open fragments plus one `continued_session` fragment, then the turn as before. No observations.

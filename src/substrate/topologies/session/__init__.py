@@ -1028,6 +1028,7 @@ def session_topology(
     handoff: str | None = None,  # v0.15 (§ Y, K334)
     language: bool = False,
     run: "RunSpec | None" = None,
+    continued_session: dict[str, Any] | None = None,  # v0.19 (§ AD, K347)
 ) -> Callable[[api.TopologyBuilder], None]:
     """Build the session topology.
 
@@ -1323,6 +1324,7 @@ def session_topology(
             length=length,
             tone=tone,
             handoff=handoff,
+            continued_session=continued_session,
         )
         # K299: always present, even with no sources, because it records every mid-session change.
         has_session_prompt = True

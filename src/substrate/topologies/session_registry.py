@@ -157,6 +157,10 @@ class SessionManifest(Struct, frozen=True):
     length: str | None = None
     tone: str | None = None
     handoff: str | None = None  # Kernel K334 (§ Y); None is the default (normal)
+    # Kernel K347 (§ AD): the path of a JSON file `{"turns": [...], "provenance": {...}}`, the
+    # conversation this session continues; the topology's builder gives it to the
+    # `continued_session` source. None for a session that continues nothing.
+    continued_session: str | None = None
 
 
 def _check_controls(length: str | None, tone: str | None, handoff: str | None = None) -> None:
@@ -473,6 +477,7 @@ class SessionRegistry:
         tone: str | None = None,
         branch: str | None = None,
         handoff: str | None = None,
+        continued_session: str | None = None,
     ) -> SessionManifest:
         """Register a new session. Atomic against by-name.json under `fcntl.flock`.
 
@@ -509,6 +514,7 @@ class SessionRegistry:
             length=length,
             tone=tone,
             handoff=handoff,
+            continued_session=continued_session,
         )
         # Sprint 223e race fix: bridge finds a session by_name and dispatches
         # a turn immediately after create. Under flock, the by-name.json write
@@ -1710,6 +1716,9 @@ def _manifest_to_dict(m: SessionManifest) -> dict[str, Any]:
         Control.LENGTH: m.length,
         Control.TONE: m.tone,
         Control.HANDOFF: m.handoff,
+        # Kernel K347 (§ AD): written only when set, so a manifest that continues nothing is
+        # the bytes it was before.
+        **({"continued_session": m.continued_session} if m.continued_session is not None else {}),
     }
 
 
@@ -1754,6 +1763,9 @@ def _manifest_from_dict(d: dict[str, Any]) -> SessionManifest:
         length=str(d[Control.LENGTH]) if d.get(Control.LENGTH) is not None else None,
         tone=str(d[Control.TONE]) if d.get(Control.TONE) is not None else None,
         handoff=str(d[Control.HANDOFF]) if d.get(Control.HANDOFF) is not None else None,
+        continued_session=(
+            str(d["continued_session"]) if d.get("continued_session") is not None else None
+        ),
     )
 
 
