@@ -22,6 +22,8 @@ from substrate.topologies.session.transcript import (
 )
 from substrate.topologies.tool_loop.tools import Tool
 
+from _text import varied_text
+
 # ── the plan ─────────────────────────────────────────────────────────────────
 
 
@@ -92,7 +94,7 @@ def test_the_codex_case_keeps_every_turn() -> None:
 
 # ── a session ────────────────────────────────────────────────────────────────
 
-_BIG = "x" * 3_000
+_BIG = varied_text(3_000)
 
 
 def _read(args: list[object]) -> str:

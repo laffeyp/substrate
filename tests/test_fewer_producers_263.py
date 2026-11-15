@@ -25,6 +25,8 @@ from substrate.topologies.session.vocabulary import (
 )
 from substrate.topologies.tool_loop.tools import CALCULATOR
 
+from _text import varied_text
+
 
 def _um(text: str, turn_index: int = 0) -> UserMessage:
     return UserMessage(text=text, turn_index=turn_index, assembled_prompt="", slash_source="chat")
@@ -114,7 +116,7 @@ def test_a_large_seed_warns_from_the_session_prompt_before_the_first_message(
         driver=DeterministicResponder(seed=0),
         driver_name="deterministic",
         driver_context_tokens=4_096,
-        seed="X" * 20_000,
+        seed=varied_text(20_000),
         tools={},
         session_id="s263w",
         workspace_path=str(tmp_path),

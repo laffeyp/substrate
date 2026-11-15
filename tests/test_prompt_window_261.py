@@ -17,6 +17,7 @@ from typing import Any
 from substrate import api
 from substrate.topologies.session import UserMessage, session_topology
 from substrate.topologies.session import transcript
+from substrate.topologies.session.token_count import count_tokens
 from substrate.topologies.session.transcript import compose_model_prompt
 
 
@@ -55,7 +56,7 @@ def _compose(history: list[dict[str, Any]], ctx: int) -> tuple[str, list[Any]]:
     turns = transcript._group_by_turn(history)
     costs = [transcript.turn_cost(t) for t in turns]
     _system, head, _reminder, _ = transcript.head_block("SEED", [])
-    keep = transcript.plan_window(costs, transcript._est_tokens(head), ctx, 0.6)
+    keep = transcript.plan_window(costs, count_tokens(head), ctx, 0.6)
     kept = [e for t in turns[keep:] for e in t]
     _system, prompt, _seqs = compose_model_prompt(history=kept, seed="SEED", fragments=[])
     compaction: list[Any] = []
@@ -64,8 +65,8 @@ def _compose(history: list[dict[str, Any]], ctx: int) -> tuple[str, list[Any]]:
             _Compaction(
                 (turns[0][0]["seq"], turns[keep][0]["seq"] - 1),
                 turns[keep][0]["seq"],
-                transcript._est_tokens(head) + sum(costs),
-                transcript._est_tokens(prompt),
+                count_tokens(head) + sum(costs),
+                count_tokens(prompt),
             )
         )
     return prompt, compaction

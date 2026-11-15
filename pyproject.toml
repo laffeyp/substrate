@@ -31,10 +31,11 @@ dependencies = [
   "rfc8785",                        # D-7: RFC 8785 canonical JSON (the bytes everything hashes over)
   "python-ulid",                    # run_id generation
   "typing_extensions",              # python-ulid 3.x imports it at runtime but doesn't declare it;
-                                    # without this a base `pip install substrate` fails at import
+  # without this a base `pip install substrate` fails at import
   "click",                          # CLI parsing
   "rich",                           # the CLI's stderr narration channel ([config]/[lock]/[FAIL]
   # status lines); record DATA goes to stdout via plain click.echo
+  "tokenizers>=0.23,<0.24",        # K352: counts a prompt's tokens with the Claude tokenizer it ships
 ]
 
 [project.optional-dependencies]

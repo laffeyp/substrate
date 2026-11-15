@@ -168,4 +168,6 @@ def test_a_harness_session_compacts_when_its_first_call_says_so(tmp_path: Path) 
     assert all(isinstance(u.get("first_call_prompt_tokens"), int) for u in replies)
     compacted = [e["payload"] for e in events if e["kind"] == "TranscriptCompacted"]
     assert compacted, "the second turn did not compact"
-    assert compacted[-1]["token_scale"] >= 1.9
+    # v0.22 (§ AG, K352): a Claude Code session counts with the tokenizer times 1.5; the first
+    # call's figure stays on the reply beside it.
+    assert compacted[-1]["token_scale"] == 1.5

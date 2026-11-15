@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Peter Laffey
 """Live-model compaction: a real local model, a real window, a conversation that outgrows it.
 
-Driver: `llama3.2:1b` on the local Ollama with `num_ctx=2048`, Ollama's own default context
+Driver: `qwen2.5:7b-instruct` on the local Ollama with `num_ctx=2048`, Ollama's own default context
 window, and the session told the same window. The conversation asks for a few sentences on one
 topic after another until the history no longer fits the prompt budget (60% of 2,048 tokens);
 from then on the session drops the oldest turns from the prompt (rolling window) and records a
@@ -16,7 +16,7 @@ Checks, all on the record:
 4. every recorded prompt (`PromptComposed`) fits the 2,048-token window by our estimate, and
 5. by Ollama's own count: every request Ollama received carried `num_ctx=2048`, and Ollama read
    fewer prompt tokens than the window (`prompt_eval_count`), so it never cut a prompt. The
-   first call of the run has no prompt cache, so its count is compared with our chars/4 estimate.
+   first call of the run has no prompt cache, so its count is compared with our count (§ AG).
 
 The reply cap is 800 tokens: the session gives the history 60% of the window and leaves 40% for
 the reply.
@@ -39,7 +39,7 @@ from substrate.topologies.session.transcript import TURN_EVENT_KINDS, compose_mo
 
 pytestmark = pytest.mark.realmodel
 
-_MODEL = "llama3.2:1b"
+_MODEL = "qwen2.5:7b-instruct"  # K352: a model that holds a 2,048-token window coherently
 _WINDOW = 2048  # Ollama's default num_ctx; the session is told the same window
 _MAX_TURNS = 30
 _TOPICS = [

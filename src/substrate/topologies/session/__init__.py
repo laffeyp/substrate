@@ -27,6 +27,7 @@ from msgspec import Struct
 
 from ... import api
 from ...adapters import DeterministicResponder, ModelUsage, Responder, call_responder_metered
+from ...adapters.harness_streams import CLAUDE_STREAM_JSON
 from ...kernel.policies import TerminationPolicy
 from ..tool_loop import _tool_factory as _tool_loop_tool_factory
 from ..tool_loop.background import TaskStatus
@@ -561,7 +562,7 @@ def _model_factory(
             yield PromptComposed(
                 text=str(driver_text),
                 fragment_seqs=(),
-                total_tokens=_est_tokens(str(driver_text)),
+                total_tokens=count_tokens(str(driver_text)),
                 strategy=PROMPT_STRATEGY_MODEL_INPUT,
                 system="",
             )
@@ -650,7 +651,9 @@ def _model_factory(
                 reason=COMPACTION_REASON_WINDOW_EXCEEDED,
                 tokens_before=int(ticket["tokens_before"]),
                 tokens_after=int(
-                    ticket.get("tokens_after", _est_tokens(system_text) + _est_tokens(prompt_text))
+                    ticket.get(
+                        "tokens_after", count_tokens(system_text) + count_tokens(prompt_text)
+                    )
                 ),
                 token_scale=float(ticket.get("scale", 1.0)),
             )
@@ -674,7 +677,7 @@ def _model_factory(
         yield PromptComposed(
             text=prompt,
             fragment_seqs=fragment_seqs,
-            total_tokens=_est_tokens(system_text) + _est_tokens(prompt),
+            total_tokens=count_tokens(system_text) + count_tokens(prompt),
             strategy=PROMPT_STRATEGY_MODEL_INPUT,
             system=system_text,
         )
@@ -1117,6 +1120,8 @@ def session_topology(
         return producer_kind_from_lifecycle_payload(payload)
 
     harness_driver = _streams(driver)
+    # § AG (K352): a driver that speaks Claude Code's stream is a Claude model.
+    claude_driver = getattr(driver, "stream_format", None) == CLAUDE_STREAM_JSON
 
     def _prompt_input(ctx: Any) -> dict[str, Any]:
         """What the model step builds a prompt from (K268): the session's prompt fragments, and a
@@ -1130,10 +1135,19 @@ def session_topology(
         if not turns:
             return {"fragments": fragments, "history_ref": None}
         system_text, head_text, reminder, _seqs = head_block(seed, fragments, system_sources)
-        head_tokens = _est_tokens(system_text) + _est_tokens(head_text) + _est_tokens(reminder)
-        # § S.5: a harness driver's reported totals add every call of its tool loop, so its scale
-        # comes from its first call's whole input when it reports one (K350); else 1.0.
-        scale = (state.first_call_scale or 1.0) if harness_driver else state.scale
+        # § AG (K352): a Claude model's count is the tokenizer's times the measured factor. Another
+        # harness's comes from its first call's whole input when it reports one (K350), else 1.0,
+        # since its reported totals add every call of its tool loop; any other driver's is § S.5's.
+        if claude_driver:
+            scale = CLAUDE_FACTOR
+        elif harness_driver:
+            scale = state.first_call_scale or 1.0
+        else:
+            scale = state.scale
+        # § AG: the head is counted at the same scale as the history.
+        head_tokens = int(
+            (count_tokens(system_text) + count_tokens(head_text) + count_tokens(reminder)) * scale
+        )
         plan = plan_history(
             [(a, cost, savings) for a, _b, cost, savings in turns],
             head_tokens,
@@ -1319,7 +1333,7 @@ def session_topology(
         # K263: one `session_prompt` producer runs every session-open prompt source and the
         # seed-size check. It runs only when the session names a source or the seed alone passes
         # the driver's headroom (the 0.6 the history window also uses).
-        seed_tokens = _est_tokens(seed) + _est_tokens(resolved_per_turn)
+        seed_tokens = count_tokens(seed) + count_tokens(resolved_per_turn)
         seed_warning = (
             SessionWarning(
                 session_id=session_id,
@@ -1772,10 +1786,10 @@ from .session_prompt_producer import (  # noqa: E402
     session_prompt_sources,
 )
 from .skills import skill_fragment_producer_factory  # noqa: E402
+from .token_count import CLAUDE_FACTOR, count_tokens  # noqa: E402
 from .transcript import (  # noqa: E402
     TURN_EVENT_KINDS,
     TranscriptCompacted,
-    _est_tokens,
     compose_model_prompt,
     head_block,
     plan_history,

@@ -291,13 +291,11 @@ def _cap_tokens(driver_context_tokens: int | None) -> int:
 
 
 def _estimate_tokens(text: str) -> int:
-    """Local re-export of `session.transcript._est_tokens` so this module
-    does not reach into that private symbol at import time (the piece-A
-    module is loaded via the same package tree; this indirection also
-    lets tests substitute an alternative estimator)."""
-    from ..session.transcript import _est_tokens
+    """`session.token_count.count_tokens`, imported at call time (§ AG, K352): this module
+    loads before the session package; the indirection also lets tests substitute a count."""
+    from ..session.token_count import count_tokens
 
-    return _est_tokens(text)
+    return count_tokens(text)
 
 
 def _sign_cursor(payload: dict[str, Any], hmac_key: bytes) -> str:

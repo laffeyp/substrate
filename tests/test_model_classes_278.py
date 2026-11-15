@@ -24,7 +24,8 @@ from substrate.topologies.session.model_class import (
 )
 from substrate.topologies.session.session_prompt_producer import session_prompt_sources
 from substrate.topologies.session.skills import list_skills, resolve_skill
-from substrate.topologies.session.transcript import _est_tokens, head_block
+from substrate.topologies.session.token_count import count_tokens
+from substrate.topologies.session.transcript import head_block
 
 
 def test_both_reported_forms_parse() -> None:
@@ -80,7 +81,7 @@ def _head_tokens(bundle: str, role: str = "default") -> int:
                 )
             )
     system, head, reminder, _ = head_block("", fragments)
-    return _est_tokens(system) + _est_tokens(head) + _est_tokens(reminder)
+    return count_tokens(system) + count_tokens(head) + count_tokens(reminder)
 
 
 def test_the_low_head_fits_in_800_tokens() -> None:

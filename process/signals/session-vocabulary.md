@@ -1311,3 +1311,23 @@ The history reads the imported events as turns (`TURN_EVENT_KINDS`). Compaction 
 ### Ratification signature
 
 - **v0.21** — Sprint K351, 2026-11-14, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AE byte-preserved.
+
+## AG. v0.22 — tokens counted (2026-11-14, sprint K352; amends § S.5 and § AE)
+
+Found in use: the history window sized every prompt at four characters a token. The session continued on 2026-11-12 sent a prompt of 2,337,585 characters that this counted as 585,098 tokens; Claude Code counted about 1,028,540 and refused it. § S.5 corrected the count from a reply's reported figure, and § AE from Claude Code's first call; a refused prompt has no reply. The Architect, 2026-11-14: "We're not keeping any sort of guessing … We're counting it."
+
+### AG.1 The count
+
+Every size the window plans with is a tokenizer's count: each turn as it renders, each tool result's saving, the head, `PromptComposed.total_tokens`, `SessionWarning.seed_tokens`. The tokenizer is Anthropic's earlier published Claude tokenizer, `claude-tokenizer` (MIT), a file in the kernel package (`topologies/session/tokenizers/`); counting reads nothing else, so a count is the same live and on replay. Records before v0.22 hold characters over four in these fields, and `token_scale` there multiplied that estimate.
+
+### AG.2 Claude's factor
+
+Claude's current models use a tokenizer Anthropic does not publish. Against Claude Code's exact first-call counts (Claude Opus 5.5, its own overhead taken off), `claude-tokenizer`'s count times 1.43 to 1.50 gave Claude's: 1.497 and 1.461 on Python and TypeScript, 1.434 and 1.425 on English prose (research `RESEARCH-2026-11-14-token-counting.md`). A session whose driver speaks Claude Code's stream (`claude-stream-json`) multiplies every count by 1.50; `TranscriptCompacted.token_scale` reads 1.5. Another harness keeps § AE's first-call correction, and any other driver § S.5's, until its family's own tokenizer is built.
+
+### AG.3 The head
+
+The head is counted at the same scale as the history. Before v0.22 the budget subtracted the head's unscaled count.
+
+### Ratification signature
+
+- **v0.22** — Sprint K352, 2026-11-14, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AF byte-preserved.

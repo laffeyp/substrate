@@ -4,7 +4,7 @@
 
 Since K263 the `session_prompt` producer writes the warning. On a session with no prompt
 source, the producer and its `initial` are registered only when
-`_est_tokens(seed) + _est_tokens(per_turn) > driver_context_tokens * 0.6`. The producer
+`count_tokens(seed) + count_tokens(per_turn) > driver_context_tokens * 0.6`. The producer
 emits one `SessionWarning{kind:"seed_alone_exceeds"}` and completes, so the vocabulary-lock
 §F #6 cadence "at most once per (session_id, condition_kind)" holds by construction — no
 trigger re-fires it.
@@ -21,6 +21,8 @@ from substrate.adapters import DeterministicResponder
 from substrate.testing import assert_event
 from substrate.topologies.session import SessionWarning, session_topology
 from substrate.topologies.session.vocabulary import PRODUCER_KIND_SESSION_PROMPT
+
+from _text import varied_text
 
 # A short scripted run inside one K-window: the documented exception to session_topology's
 # record_root warning (UI sprint 107 states it here instead of letting it print on every run).
@@ -58,16 +60,16 @@ def test_small_seed_still_arms_the_initial() -> None:
 
 
 def test_seed_exceeding_headroom_arms_the_initial() -> None:
-    # driver_context_tokens=4096 → headroom 2457 tokens; seed of 20 000 chars ≈ 5000 tokens.
-    reg = _open(seed="X" * 20000, driver_context_tokens=4096)
+    # driver_context_tokens=4096 → headroom 2457 tokens; a 20,000-character seed counts 5,269 tokens.
+    reg = _open(seed=varied_text(20000), driver_context_tokens=4096)
     kinds = {i.kind for i in reg.initials}
     assert PRODUCER_KIND_SESSION_PROMPT in kinds
 
 
 def test_seed_plus_per_turn_crossing_boundary_arms_the_initial() -> None:
-    # 12 000-char seed alone (~3000 tokens) fits under headroom (12288 * 0.6 = 7372).
-    # Add a 20 000-char per_turn (~5000 tokens) → total 8000 tokens, exceeds headroom.
-    reg = _open(seed="X" * 12000, per_turn="Y" * 20000, driver_context_tokens=12288)
+    # A 12,000-character seed alone (3,163 tokens) fits under headroom (12288 * 0.6 = 7372).
+    # Add a 20,000-character per_turn (5,269 tokens) → 8,432 tokens, past headroom.
+    reg = _open(seed=varied_text(12000), per_turn=varied_text(20000), driver_context_tokens=12288)
     kinds = {i.kind for i in reg.initials}
     assert PRODUCER_KIND_SESSION_PROMPT in kinds
 
@@ -80,7 +82,7 @@ async def test_session_prompt_emits_exactly_one_warning_and_completes(tmp_path: 
     minimal topology built directly from `session_topology`'s registration.
     """
     reg = _open(
-        seed="X" * 20000,
+        seed=varied_text(20000),
         driver_context_tokens=4096,
         session_id="sess-warn",
     )

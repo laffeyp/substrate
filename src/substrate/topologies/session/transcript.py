@@ -9,8 +9,8 @@ background-task notices. The model step appends its pre-K261 endings, records th
 
 The history window keeps the most recent turns whose rendered size fits the budget (driver
 context x headroom, minus the fixed head); the current turn always stays. When turns drop, one
-`TranscriptCompacted` names the dropped range. Token estimates are a chars/4 heuristic; the driver's
-own counts for each call are on `ModelReply.usage` (K262).
+`TranscriptCompacted` names the dropped range. Sizes are token counts (`token_count`, § AG, K352);
+the driver's own counts for each call are on `ModelReply.usage` (K262).
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from ...adapters import (
 from ...bundles import LEGACY_BUNDLE_NAMES
 from ..tool_loop.kinds import FINAL_ANSWER, TOOL_CALL, TOOL_RESULT
 from .model_class import LEVEL_BUNDLES
+from .token_count import count_tokens
 from .vocabulary import (
     BACKGROUND_TASK_ENDED,
     DRIVER_SLASH_SOURCE,
@@ -63,7 +64,6 @@ _DETERMINISTIC_CONTEXT_TOKENS = 4096
 # session opens on the same tag to a single HTTP call.
 _context_cache: dict[tuple[str, str], tuple[float, int]] = {}
 
-_CHARS_PER_TOKEN = 4  # coarse conservative estimator; see module docstring
 # § S.1: the newest tool results always render whole; § S.5: the estimate's scale is clamped.
 KEEP_WHOLE_TOOL_OUTPUTS = 3
 _SCALE_MIN, _SCALE_MAX = 1.0, 4.0
@@ -112,7 +112,7 @@ class TranscriptCompacted(Struct, frozen=True):
     # v0.7: tool-output bodies at or below this seq, outside the newest kept whole, render as
     # placeholders. None: nothing cleared.
     cleared_through_seq: int | None = None
-    # v0.7 (§ S.5): the factor the chars/4 estimate was multiplied by.
+    # v0.7 (§ S.5): the factor the count was multiplied by (§ AG: 1.5 for a Claude Code session).
     token_scale: float = 1.0
 
 
@@ -176,10 +176,6 @@ def resolve_driver_context_tokens(
 ) -> int:
     """`resolve_driver_context`'s window alone."""
     return resolve_driver_context(driver_name, responder, config_path=config_path, now=now)[0]
-
-
-def _est_tokens(text: str) -> int:
-    return max(len(text) // _CHARS_PER_TOKEN, 1) if text else 0
 
 
 def _group_by_turn(events: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -246,7 +242,7 @@ def result_lines(kind: str, payload: Mapping[str, Any], tool: str, seq: int) -> 
 
 
 def output_savings(turn: list[dict[str, Any]]) -> list[tuple[int, int]]:
-    """For each tool result in `turn`, its seq and the estimated tokens clearing it saves."""
+    """For each tool result in `turn`, its seq and the tokens clearing it saves."""
     tools: dict[str, str] = {}
     out: list[tuple[int, int]] = []
     for env in turn:
@@ -264,7 +260,7 @@ def output_savings(turn: list[dict[str, Any]]) -> list[tuple[int, int]]:
             )
             whole, placeholder = result_lines(kind, payload, tool, int(env.get("seq", 0)))
             out.append(
-                (int(env.get("seq", 0)), max(_est_tokens(whole) - _est_tokens(placeholder), 0))
+                (int(env.get("seq", 0)), max(count_tokens(whole) - count_tokens(placeholder), 0))
             )
     return out
 
@@ -374,10 +370,10 @@ def is_driver_turn(turn: list[dict[str, Any]]) -> bool:
 
 
 def turn_cost(turn: list[dict[str, Any]]) -> int:
-    """One turn's estimated rendered size in tokens, as the history window prices it."""
+    """One turn's rendered size in tokens, as the history window prices it."""
     if is_driver_turn(turn):
         return 0
-    return _est_tokens("\n".join(_render_turns([turn])))
+    return count_tokens("\n".join(_render_turns([turn])))
 
 
 def plan_window(

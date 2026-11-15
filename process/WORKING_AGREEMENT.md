@@ -160,6 +160,10 @@ Every claim in TECH-SPEC-2026-08-25-round6 about where a daily-driver entity liv
 - **httpx:** lazy import inside the call site (matches the existing responder pattern; keeps `openai-compat` optional-extra).
 - **Failure modes:** connection refused (daemon down) → typed `DriverIntrospectionUnavailable` (fallback to config table); 404 (unknown tag) → typed `ContextTokensUnknown`; malformed body → typed `DriverIntrospectionUnavailable`. *Status: VERIFIED.*
 
+### tokenizers — VERIFIED against installed **0.23.3** (2026-11-14, sprint K352)
+- **Used for:** counting a prompt's tokens (`topologies/session/token_count.py`, session vocabulary § AG) with the Claude tokenizer file the package ships (`topologies/session/tokenizers/claude-tokenizer.json`, MIT, from Xenova/claude-tokenizer).
+- **Verified surface:** `tokenizers.Tokenizer.from_file(path: str) -> Tokenizer`; `Tokenizer.encode(sequence, pair=None, is_pretokenized=False, add_special_tokens=True) -> Encoding`; `Encoding.ids -> list[int]`. "hello world" encodes to `[9381, 2253]`, as the tokenizer's card states; 1,350,000 characters encode in 0.38 s. No network: the file is read from the package. *Status: VERIFIED.*
+
 ### python-ulid, click, rich
 - python-ulid: `run_id` generation. click: CLI parsing. rich: terminal output. Document surfaces before the CLI sprints.
 
