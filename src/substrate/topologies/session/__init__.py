@@ -494,6 +494,26 @@ def _first_message_factory(user_message: "UserMessage") -> Callable[[], Any]:
     return lambda: _first_message
 
 
+def _continued_turns(continued: dict[str, Any] | None) -> list[list[dict[str, Any]]]:
+    """§ AH (K353): a continued conversation's turns as the history groups them, for a record
+    written under v0.19-v0.20, which holds the conversation as one `continued_session` fragment.
+    The events are those § AF writes; the window numbers them from -M (the oldest) to -1 in seq,
+    below every seq of the record, as their turns run from -N to -1 in `turn_index`."""
+    if not continued:
+        return []
+    from msgspec.structs import asdict
+
+    from .session_prompt_producer import continued_session_events
+
+    events = continued_session_events(continued)
+    return _group_by_turn(
+        [
+            {"seq": i - len(events), "kind": type(e).__name__, "payload": asdict(e)}
+            for i, e in enumerate(events)
+        ]
+    )
+
+
 def _model_factory(
     *,
     driver: Responder,
@@ -505,6 +525,7 @@ def _model_factory(
     tools: dict[str, Tool],
     session_id: str = "",
     mcp: bool = False,
+    continued_turns: list[list[dict[str, Any]]] | None = None,
 ) -> Callable[[], Any]:
     """Model Producer body: build the prompt, record it, send it, record the reply (K261).
 
@@ -581,10 +602,19 @@ def _model_factory(
         # live and on replay.
         history: list[dict[str, Any]] = []
         if ticket:
-            history = [
+            from_seq = int(ticket["from_seq"])
+            # § AH (K353): a cut inside the imported turns (negative seqs) keeps the rest of them,
+            # then reads the record from its first turn.
+            imported: list[dict[str, Any]] = []
+            if from_seq < 0:
+                imported = [
+                    env for turn in continued_turns or [] for env in turn if env["seq"] >= from_seq
+                ]
+                from_seq = int(ticket.get("live_from_seq", 0))
+            history = imported + [
                 env
                 for env in api.read_range(
-                    _own_record(), ticket["from_seq"], ticket["to_seq"], resolve_blobs=True
+                    _own_record(), from_seq, ticket["to_seq"], resolve_blobs=True
                 )
                 if env.get("kind") in TURN_EVENT_KINDS
             ]
@@ -1122,6 +1152,9 @@ def session_topology(
     harness_driver = _streams(driver)
     # § AG (K352): a driver that speaks Claude Code's stream is a Claude model.
     claude_driver = getattr(driver, "stream_format", None) == CLAUDE_STREAM_JSON
+    # § AH (K353): the imported turns of a v0.19-v0.20 record, priced once.
+    continued_turns = _continued_turns(continued_session)
+    continued_plan = [(t[0]["seq"], turn_cost(t), output_savings(t)) for t in continued_turns]
 
     def _prompt_input(ctx: Any) -> dict[str, Any]:
         """What the model step builds a prompt from (K268): the session's prompt fragments, and a
@@ -1134,6 +1167,21 @@ def session_topology(
         turns = state.turns
         if not turns:
             return {"fragments": fragments, "history_ref": None}
+        # § AH (K353): in a record that holds a v0.19 `continued_session` fragment, its turns are
+        # the session's oldest history, not head: they clear and drop first, as § S has it.
+        imported = (
+            continued_plan
+            if continued_turns
+            and any(
+                f.get("source") == PromptSource.CONTINUED_SESSION and f.get("text")
+                for _q, f in fragments
+            )
+            else []
+        )
+        if imported:
+            fragments = [
+                (q, f) for q, f in fragments if f.get("source") != PromptSource.CONTINUED_SESSION
+            ]
         system_text, head_text, reminder, _seqs = head_block(seed, fragments, system_sources)
         # § AG (K352): a Claude model's count is the tokenizer's times the measured factor. Another
         # harness's comes from its first call's whole input when it reports one (K350), else 1.0,
@@ -1148,8 +1196,9 @@ def session_topology(
         head_tokens = int(
             (count_tokens(system_text) + count_tokens(head_text) + count_tokens(reminder)) * scale
         )
+        planned = list(imported) + [(a, cost, savings) for a, _b, cost, savings in turns]
         plan = plan_history(
-            [(a, cost, savings) for a, _b, cost, savings in turns],
+            planned,
             head_tokens,
             state.window or driver_context_tokens,  # § S.9: the harness's live report wins
             driver_headroom_frac,
@@ -1157,11 +1206,12 @@ def session_topology(
             scale,
         )
         keep = plan.keep_from
-        dropped = (turns[0][0], turns[keep][0] - 1) if keep > 0 else None
+        dropped = (planned[0][0], planned[keep][0] - 1) if keep > 0 else None
         return {
             "fragments": fragments,
             "history_ref": {
-                "from_seq": turns[keep][0],
+                "from_seq": planned[keep][0],
+                "live_from_seq": turns[0][0],
                 "to_seq": int(ctx.event.seq),
                 "dropped": list(dropped) if dropped else None,
                 "cleared_through": plan.cleared_through,
@@ -1296,6 +1346,7 @@ def session_topology(
                 tools=tools,
                 session_id=session_id,
                 mcp=mcp,
+                continued_turns=continued_turns,
             ),
             deterministic=model_is_deterministic,
         )
@@ -1790,11 +1841,14 @@ from .token_count import CLAUDE_FACTOR, count_tokens  # noqa: E402
 from .transcript import (  # noqa: E402
     TURN_EVENT_KINDS,
     TranscriptCompacted,
+    _group_by_turn,
     compose_model_prompt,
     head_block,
+    output_savings,
     plan_history,
     resolve_driver_context,
     resolve_driver_context_tokens,
+    turn_cost,
 )
 from .views import (  # noqa: E402
     FragmentCohort,

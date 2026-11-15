@@ -1331,3 +1331,23 @@ The head is counted at the same scale as the history. Before v0.22 the budget su
 ### Ratification signature
 
 - **v0.22** — Sprint K352, 2026-11-14, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AF byte-preserved.
+
+## AH. v0.23 — a conversation brought in before v0.21 is the session's history (2026-11-14, sprint K353; amends § AD)
+
+Found in use: the session continued on 2026-11-12 holds its conversation as one § AD fragment of 1,422,933 characters, in every prompt; at Claude's rate that alone is more than the history budget, so no compaction of the session's own turns could bring the prompt under the window. The Architect, 2026-11-14: "It simply needs to go in as the actual session history itself. Then it can be compacted normally too."
+
+### AH.1 The turns
+
+In a record that holds a `continued_session` fragment with text, and whose session names a turns file (the manifest's `continued_session`, § AD), the window leaves the fragment out of the head and plans the file's turns as the session's oldest history. They are the events § AF writes, numbered by the window from -M, the oldest, to -1 in seq, below every seq of the record, as their turns run from -N to -1 in `turn_index`. They are not written to the record.
+
+### AH.2 Compaction
+
+§ S applies to them as to any turns: their tool output clears first, oldest first, then their whole turns drop, oldest first. A cut inside them is recorded in the record's own fields with negative seqs: `cleared_through_seq`, `dropped_seq_range` and `kept_seq_start` may be below 0. `PromptComposed.fragment_seqs` no longer names the fragment.
+
+### AH.3 Replay
+
+Every input is the record and the turns file, so the plan is the same live and on replay while the file is unchanged. A session whose turns file is gone keeps the fragment in its head, as before v0.23.
+
+### Ratification signature
+
+- **v0.23** — Sprint K353, 2026-11-14, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AG byte-preserved.
