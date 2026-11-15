@@ -1,3 +1,5 @@
+**Status: RATIFIED — v0.20 (2026-11-14).** Sprint K350 amends § S.5: a harness driver's history scale comes from its first call's whole input, `ModelReply.usage.first_call_prompt_tokens` (§ AE). Additive: a reply without it reads as before. Agent-resolved.
+
 **Status: RATIFIED — v0.19 (2026-11-12).** Sprint K346 adds § AD: the `continued_session` prompt source, a conversation held elsewhere carried into a new session as its opening text (substrate-ui roadmap `2026-11-12-continue-a-session` r1). Additive: a session that names none writes the fragments it wrote before. Agent-resolved.
 
 **Status: RATIFIED — v0.18 (2026-11-08).** Sprint K344 adds § AC: `UserMessage.attachments`, the things a view added to the message (substrate-ui design D94, editor item 0(e)), recorded with the message and read by the model under it. Additive: a message with none encodes as before. Agent-resolved.
@@ -1264,4 +1266,20 @@ The caller. The kernel reads no other tool's files: the daemon reads a tool's se
 ### Ratification signature
 
 - **v0.19** — Sprint K346, 2026-11-12, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AC byte-preserved.
+
+## AE. v0.20 — a harness driver's prompt counted by its first call (2026-11-14, sprint K350; amends § S.5)
+
+Found in use: the continued session of 2026-11-14 stopped when Claude Code refused a prompt of about 1,028,535 tokens (limit 1,000,000) that the history window had counted as 585,096 and never compacted. The estimate is four characters a token; that conversation ran about 2.27. § S.5 corrects the estimate by the driver's reported prompt tokens, but held a harness driver at 1.0, because a harness reports one total for every call of its tool loop.
+
+### AE.1 The field
+
+`ModelReply.usage.first_call_prompt_tokens` (int, present only when the harness reports it): the first call's whole input as the harness reported that call. Claude Code reports each call's usage on its `assistant` events (`message.usage`: `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`); the first is the prompt the session sent, with Claude Code's own system prompt and tools.
+
+### AE.2 The scale
+
+A harness driver's history scale is `first_call_prompt_tokens` over the composed prompt's estimate, clamped as § S.5 clamps; 1.0 when no reply has reported it. Any other driver's scale is as § S.5 has it. Because the figure includes the harness's own prompt and tools (17,679 tokens for a 30-character prompt, measured 2026-11-14), a short prompt's scale reaches the clamp; the window then reads a small history as larger, well inside its budget.
+
+### Ratification signature
+
+- **v0.20** — Sprint K350, 2026-11-14, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AD byte-preserved.
 

@@ -707,6 +707,7 @@ def _model_factory(
             return
         beside_call = ""  # what the model said beside a native tool call
         reported_window: int | None = None  # § S.9: a harness's own report of its window
+        first_call: int | None = None  # § S.5 (K350): a harness's first call's whole input
         if wrap_up_reason is None and tool_mode == ToolMode.NATIVE:
             metered = getattr(driver, "achat_tools_metered", None)
             if callable(metered):
@@ -745,6 +746,7 @@ def _model_factory(
                     yield harness_event
                 reply_text, usage = box["text"], box["usage"]
                 reported_window = box.get("context_window")
+                first_call = box.get("first_call_prompt_tokens")
             else:
                 reply_text, usage = await call_responder_metered(driver, prompt, system=system_text)
             if wrap_up_reason is None and tool_mode == ToolMode.TEXT:
@@ -756,7 +758,7 @@ def _model_factory(
             yield ModelReply(
                 text=beside_call.strip(),
                 stop_reason=StopReason.TOOL_USE,
-                usage=_usage_of(usage, reported_window),
+                usage=_usage_of(usage, reported_window, first_call),
                 turn_index=turn_index,
                 step=step,
             )
@@ -766,7 +768,7 @@ def _model_factory(
         yield ModelReply(
             text=str(chosen),
             stop_reason=stop,
-            usage=_usage_of(usage, reported_window),
+            usage=_usage_of(usage, reported_window, first_call),
             turn_index=turn_index,
             step=step,
         )
@@ -954,6 +956,9 @@ async def _harness_stream(
     out["text"] = reply
     out["usage"] = usage
     out["context_window"] = counts.context_window if counts is not None else None
+    out["first_call_prompt_tokens"] = (
+        counts.first_call_prompt_tokens if counts is not None else None
+    )
 
 
 def _system_kw(system_text: str) -> dict[str, str]:
@@ -962,9 +967,12 @@ def _system_kw(system_text: str) -> dict[str, str]:
     return {"system": system_text} if system_text else {}
 
 
-def _usage_of(usage: ModelUsage, context_window: int | None = None) -> dict[str, Any]:
+def _usage_of(
+    usage: ModelUsage, context_window: int | None = None, first_call: int | None = None
+) -> dict[str, Any]:
     """ModelReply.usage: the call's ModelUsage as a plain dict, plus the model's context window
-    when the harness reported it (§ S.9; absent otherwise, so earlier records read the same)."""
+    when the harness reported it (§ S.9) and its first call's whole input (§ S.5, K350); each absent
+    otherwise, so earlier records read the same."""
     out: dict[str, Any] = {
         "model": usage.model,
         "prompt_tokens": usage.prompt_tokens,
@@ -974,6 +982,8 @@ def _usage_of(usage: ModelUsage, context_window: int | None = None) -> dict[str,
     }
     if context_window:
         out["context_window"] = int(context_window)
+    if first_call:
+        out["first_call_prompt_tokens"] = int(first_call)
     return out
 
 
@@ -1115,8 +1125,9 @@ def session_topology(
             return {"fragments": fragments, "history_ref": None}
         system_text, head_text, reminder, _seqs = head_block(seed, fragments, system_sources)
         head_tokens = _est_tokens(system_text) + _est_tokens(head_text) + _est_tokens(reminder)
-        # § S.5: a harness driver's reported counts include its own prompt and tool loop.
-        scale = 1.0 if harness_driver else state.scale
+        # § S.5: a harness driver's reported totals add every call of its tool loop, so its scale
+        # comes from its first call's whole input when it reports one (K350); else 1.0.
+        scale = (state.first_call_scale or 1.0) if harness_driver else state.scale
         plan = plan_history(
             [(a, cost, savings) for a, _b, cost, savings in turns],
             head_tokens,

@@ -43,6 +43,10 @@ class StreamUsage:
     # The model's context window, when the harness reports it (Claude Code's
     # `modelUsage.<model>.contextWindow`); session vocabulary § S.9.
     context_window: int | None = None
+    # K350 (§ S.5): the first call's whole input, as the harness reported it for that call
+    # (Claude Code's first `assistant` event's `message.usage`); None when it reports none. The
+    # totals above add every call of the run.
+    first_call_prompt_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,14 @@ def _text(content: Any) -> str:
     return "" if content is None else json.dumps(content)
 
 
+def _input_tokens(usage: dict[str, Any]) -> int:
+    """A Claude usage block's whole input: new, cache-written and cache-read tokens."""
+    return sum(
+        int(usage.get(k) or 0)
+        for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+    )
+
+
 class _Parser:
     """Feed lines in order; read `final_text` once the stream ends."""
 
@@ -112,11 +124,20 @@ class _Parser:
 
 class ClaudeStreamParser(_Parser):
     """`tool_use` parts of `assistant` messages are calls; `tool_result` parts of `user` messages
-    are results; the closing `result` event carries the reply and the token counts."""
+    are results; the closing `result` event carries the reply and the token counts. Each
+    `assistant` event's `message.usage` is that call's own input; the first is kept (K350)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._first_call: int | None = None
 
     def _event(self, event: dict[str, Any]) -> list[StreamItem]:
         kind = event.get("type")
         items: list[StreamItem] = []
+        if kind == "assistant" and self._first_call is None:
+            call_usage = (event.get("message") or {}).get("usage")
+            if isinstance(call_usage, dict):
+                self._first_call = _input_tokens(call_usage) or None
         if kind in ("assistant", "user"):
             for part in (event.get("message") or {}).get("content") or []:
                 if not isinstance(part, dict):
@@ -142,17 +163,16 @@ class ClaudeStreamParser(_Parser):
                 raise HarnessStreamError(str(event.get("result") or event.get("subtype")))
             self.final_text = str(event.get("result") or "")
             usage = event.get("usage") or {}
-            prompt = sum(
-                int(usage.get(k) or 0)
-                for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-            )
+            prompt = _input_tokens(usage)
             windows = [
                 int(m.get("contextWindow") or 0)
                 for m in (event.get("modelUsage") or {}).values()
                 if isinstance(m, dict)
             ]
             window = max(windows) if windows and max(windows) > 0 else None
-            items.append(StreamUsage(prompt, int(usage.get("output_tokens") or 0), window))
+            items.append(
+                StreamUsage(prompt, int(usage.get("output_tokens") or 0), window, self._first_call)
+            )
         return items
 
 

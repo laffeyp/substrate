@@ -47,6 +47,8 @@ class HistoryState(NamedTuple):
     dropped: tuple[int, int] | None
     scale: float
     window: int | None  # § S.9: the context window the harness last reported, if any
+    # § S.5 (K350): a harness driver's scale, its first call's whole input over the estimate.
+    first_call_scale: float | None = None
 
 
 class TurnHistory:
@@ -71,6 +73,7 @@ class TurnHistory:
         self._dropped: tuple[int, int] | None = None
         self._last_estimate = 0
         self._scale = 1.0
+        self._first_call_scale: float | None = None
         self._window: int | None = None
 
     def update(self, event: Event) -> None:
@@ -94,6 +97,10 @@ class TurnHistory:
                 self._scale = measured_scale(
                     int(usage.get("prompt_tokens") or 0), self._last_estimate
                 )
+            if isinstance(usage, dict) and isinstance(usage.get("first_call_prompt_tokens"), int):
+                self._first_call_scale = measured_scale(
+                    int(usage["first_call_prompt_tokens"]), self._last_estimate
+                )
         env = {"seq": event.seq, "kind": event.kind, "payload": event.payload}
         if event.kind == USER_MESSAGE:
             self._current = [env]
@@ -113,6 +120,7 @@ class TurnHistory:
             dropped=self._dropped,
             scale=self._scale,
             window=self._window,
+            first_call_scale=self._first_call_scale,
         )
 
 
