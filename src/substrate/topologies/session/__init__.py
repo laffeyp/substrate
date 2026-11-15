@@ -34,6 +34,7 @@ from ..tool_loop.kinds import TOOL_CALL, TOOL_RESULT, ToolCallOrigin
 from ..tool_loop.tools import Tool, ollama_tools, parse_tool_call, suite_describe
 from ...language.drift import Direction
 from .vocabulary import (
+    CONTINUED_SLASH_SOURCE,
     Attachment,
     REPORT_WRITTEN,
     RunOutcome,
@@ -1068,6 +1069,11 @@ def session_topology(
         payload = getattr(ctx.event, "payload", None) or {}
         return int(payload.get("step", 0))
 
+    def _continued(event: Any) -> bool:
+        """Whether a UserMessage is a continued session's imported one (§ AF, K351)."""
+        payload = getattr(event, "payload", None) or {}
+        return isinstance(payload, dict) and payload.get("slash_source") == CONTINUED_SLASH_SOURCE
+
     def _turn_index(ctx: Any) -> int:
         # UserMessage KindCount rides `user_turns`; the count is 1-based right after
         # the just-appended UserMessage lands, so the current turn is count-1.
@@ -1301,7 +1307,8 @@ def session_topology(
             deterministic=True,
         )
         b.view("results", api.KindBuffer(TOOL_RESULT))
-        b.view("user_turns", api.KindCount(USER_MESSAGE))
+        # § AF (K351): live messages only; a continued session's imported ones are history.
+        b.view("user_turns", LiveUserTurns())
         b.view("user_messages", api.KindBuffer(USER_MESSAGE))
         b.view("returned_turns", api.KindCount(RETURNED))
         # FragmentCohort: the session-open fragments (one slot per source) and any turn-scoped
@@ -1335,17 +1342,28 @@ def session_topology(
             length=length,
             tone=tone,
             handoff=handoff,
-            continued_session=continued_session,
         )
         # K299: always present, even with no sources, because it records every mid-session change.
         has_session_prompt = True
         if has_session_prompt:
             b.producer_kind(
                 PRODUCER_KIND_SESSION_PROMPT,
-                schemas=[PromptFragment, SessionWarning, SessionChanged],
+                # § AF (K351): a continued session's earliest turns are written here too.
+                schemas=[
+                    PromptFragment,
+                    SessionWarning,
+                    SessionChanged,
+                    UserMessage,
+                    ModelReply,
+                    HarnessToolCall,
+                    HarnessToolResult,
+                ],
                 schema_version=1,
                 factory=session_prompt_producer_factory(
-                    session_id=session_id, sources=sources, seed_warning=seed_warning
+                    session_id=session_id,
+                    sources=sources,
+                    seed_warning=seed_warning,
+                    continued_session=continued_session,
                 ),
                 deterministic=True,
             )
@@ -1356,7 +1374,7 @@ def session_topology(
             b.trigger(
                 TRIGGER_ID_SESSION_PROMPT_ON_USER_MESSAGE_CHANGE,
                 subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
-                predicate=lambda ctx: bool(_pending_changes(ctx)),
+                predicate=lambda ctx: not _continued(ctx.event) and bool(_pending_changes(ctx)),
                 starts=PRODUCER_KIND_SESSION_PROMPT,
                 input_builder=lambda ctx: {
                     "changes": _pending_changes(ctx),
@@ -1625,7 +1643,11 @@ def session_topology(
             subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
             # A `/dellm` message waits for its skill (model-on-skill-fragment); a message that
             # follows a change waits for the change run (model-on-session-prompt-change, K299).
-            predicate=lambda ctx: _skill_of(ctx.event) is None and not _pending_changes(ctx),
+            predicate=lambda ctx: (
+                not _continued(ctx.event)
+                and _skill_of(ctx.event) is None
+                and not _pending_changes(ctx)
+            ),
             starts=PRODUCER_KIND_MODEL,
             input_builder=lambda ctx: {
                 "step": 0,
@@ -1655,7 +1677,8 @@ def session_topology(
             TRIGGER_ID_END_ON_EXIT,
             subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
             predicate=lambda ctx: (
-                str(ctx.event.payload.get("text", "")).strip() == END_ON_EXIT_SENTINEL
+                not _continued(ctx.event)
+                and str(ctx.event.payload.get("text", "")).strip() == END_ON_EXIT_SENTINEL
             ),
             starts=PRODUCER_KIND_SESSION_END,
             input_builder=lambda ctx: {
@@ -1671,7 +1694,9 @@ def session_topology(
             # reason was "timeout" before K264; the cap counts turns, not time.
             TRIGGER_ID_END_ON_TURN_CAP,
             subscription=api.Subscription(kinds=frozenset({USER_MESSAGE})),
-            predicate=lambda ctx: int(ctx.views["user_turns"].value()) > max_turns,
+            predicate=lambda ctx: (
+                not _continued(ctx.event) and int(ctx.views["user_turns"].value()) > max_turns
+            ),
             starts=PRODUCER_KIND_SESSION_END,
             input_builder=lambda ctx: {
                 "reason": SessionEndReason.TURN_CAP,
@@ -1759,6 +1784,7 @@ from .transcript import (  # noqa: E402
 )
 from .views import (  # noqa: E402
     FragmentCohort,
+    LiveUserTurns,
     SessionSettings,
     TurnHistory,
     producer_kind_from_lifecycle_payload,

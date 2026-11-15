@@ -3,7 +3,7 @@
 ```yaml
 ---
 id: 351
-status: active
+status: closed
 phase: continuing a session (substrate-ui roadmap 2026-11-12-continue-a-session r3, E9)
 pass_kind: functional
 depends_on: [350]
@@ -72,3 +72,18 @@ Five files for one concept: the marker and everything that must honour it. Primi
 - [x] Written in full after sprint 350.
 - [x] Every reader of `UserMessage` named.
 - [x] Observation contract present.
+
+## close
+
+`session_prompt_producer.py`: `continued_session_events` turns the given turns into `UserMessage` (`slash_source` `continued`, `turn_index` -N..-1), `ModelReply` (usage `estimated`), `HarnessToolCall` and `HarnessToolResult`; `session_prompt` yields them after the session-open fragments, at open only; the fragment builder and its precedence are gone. `session/__init__.py`: the producer declares the four kinds; `_continued` guards model-on-user-message, the change run, end-on-exit and the turn cap; `user_turns` is `LiveUserTurns`. `views.py`: `LiveUserTurns` counts live messages. `vocabulary.py`: `CONTINUED_SLASH_SOURCE`. Session vocabulary v0.21, § AF (amends § AD; §§ A–AE byte-preserved).
+
+Two of the card's named readers needed no change, by the numbering: `_next_turn_index_from_record` takes the highest index plus one, which -N..-1 leave at 0; skill-on-user-message needs a `skill:` source. Return-on-reply and language-on-reply fire on `ModelReply`, which has no marker; they need an open turn (`returned_turns < user_turns`), and `user_turns` is 0 until the first live message, which waits for `session_prompt`. `session_registry.py` is therefore unmodified and `views.py` is modified in its place.
+
+- `tests/test_continued_as_history_351.py`: 4 passed. The events and their indices; through the registry, 30 imported turns in a 3,000-token window: imported events before the live message, one `PromptComposed` and one `Returned`, both after it, the newest imported turn in the prompt and the oldest dropped by `TranscriptCompacted`, the next index 1 in the live registry and in a restarted one; a 2-turn continuation whole in the first prompt and not imported again on the second turn; a session continuing nothing writes turn 0 alone.
+- Amended: `test_continued_session_source.py` (346: the source is read, never written; open yields fragments, then the conversation; a change run imports nothing), `test_session_continued_347.py` (the record holds the imported message and reply). substrate-ui `tests/test_continue_from_494.py`: the server's deterministic driver has a fixed 4,096-token window, so its first turn drops the imported turns, oldest first, keeping the live message; 8 passed.
+- Committed records regenerated for `session` and `daily`, whose fingerprint changed at `RunStarted`; the other 16 differed only in `run_id` and were restored. `test_bundled_topologies.py`, `test_session_topology_bundled.py`: 44 passed.
+- Wider run (1,732 tests): 1,714 passed, 14 skipped, 4 failed: the three stale records above, and `test_realmodel_demos.py::test_ensemble_real_disagreement_and_cancel`, which imports no session code and needs three temperature-0.9 draws from `llama3.2:1b` to differ.
+- Mutants: `LiveUserTurns` counting imported messages, and the model trigger without `_continued`: each fails 3 tests.
+- ruff clean; `mypy --strict` on the four source files clean.
+
+Rubber Duck Pass: at session open, after the `PromptFragment`s, the record holds `UserMessage` (`slash_source` `continued`, negative `turn_index`), `HarnessToolCall`, `HarnessToolResult` and `ModelReply` (usage `estimated`) for each imported turn, and no `continued_session` fragment. Then the live `UserMessage` at turn 0, `TranscriptCompacted` when the window is exceeded, `PromptComposed`, the live `ModelReply`, `Returned` at turn 0. Every declared emit fired; the invariants hold in the tests above. Observation: payload anomaly, an imported `HarnessToolResult` carries no `turn_index`; the live ones carry none either, so the history groups it by order, as it does live results. resolved-here, no change.

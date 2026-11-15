@@ -51,6 +51,30 @@ class HistoryState(NamedTuple):
     first_call_scale: float | None = None
 
 
+class LiveUserTurns:
+    """The count of live `UserMessage`s: a continued session's imported ones (`slash_source`
+    `continued`, § AF, K351) are history, not turns this session ran. The first message's trigger
+    waits for 0, `_turn_index` counts from it, and the turn cap reads it."""
+
+    deterministic = True
+
+    def __init__(self) -> None:
+        from .vocabulary import USER_MESSAGE
+
+        self.subscription = Subscription(kinds=frozenset({USER_MESSAGE}))
+        self._n = 0
+
+    def update(self, event: Event) -> None:
+        from .vocabulary import CONTINUED_SLASH_SOURCE
+
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if payload.get("slash_source") != CONTINUED_SLASH_SOURCE:
+            self._n += 1
+
+    def value(self) -> int:
+        return self._n
+
+
 class TurnHistory:
     """Each turn's seq span, estimated rendered size, and what clearing each of its tool results
     would save, in record order (K261, K268, K292). Also the record's last `TranscriptCompacted`

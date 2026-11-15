@@ -3,8 +3,8 @@
 """K347: a session names the conversation it continues (session vocabulary § AD).
 
 The manifest's `continued_session` is the path of a turns file; the daemon's topology factory
-reads it and gives it to `session_topology`, whose `continued_session` source writes it as the
-session's opening text. A session that names none is as before, its manifest byte for byte.
+reads it and gives it to `session_topology`, which writes it at session open as the session's
+earliest turns (K351). A session that names none is as before, its manifest byte for byte.
 """
 
 from __future__ import annotations
@@ -96,13 +96,15 @@ def test_a_session_that_names_a_continuation_opens_with_it(tmp_path: Path) -> No
     )
     assert on_disk["continued_session"] == str(turns_file)
     events = _events(manifest)
-    frags = [
-        e
+    imported = [
+        (e["kind"], e["payload"].get("text"), e["payload"].get("turn_index"))
         for e in events
-        if e["kind"] == "PromptFragment" and e["payload"]["source"] == "continued_session"
+        if e["kind"] in ("UserMessage", "ModelReply") and e["payload"].get("turn_index", 0) < 0
     ]
-    assert len(frags) == 1
-    assert frags[0]["payload"]["provenance"]["turns"] == 1
+    assert imported == [
+        ("UserMessage", "Remember the word: heron.", -1),
+        ("ModelReply", "OK, heron.", -1),
+    ]
     composed = [e for e in events if e["kind"] == "PromptComposed"]
     assert composed and "USER: Remember the word: heron." in composed[0]["payload"]["text"]
     assert "MODEL: OK, heron." in composed[0]["payload"]["text"]
@@ -116,11 +118,7 @@ def test_a_session_that_names_none_is_as_before(tmp_path: Path) -> None:
     )
     assert "continued_session" not in on_disk
     events = _events(manifest)
-    assert not [
-        e
-        for e in events
-        if e["kind"] == "PromptFragment" and e["payload"]["source"] == "continued_session"
-    ]
+    assert [e["payload"]["turn_index"] for e in events if e["kind"] == "UserMessage"] == [0]
 
 
 def test_the_manifest_round_trips(tmp_path: Path) -> None:

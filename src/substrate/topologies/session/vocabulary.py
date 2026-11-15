@@ -283,7 +283,8 @@ class PromptSource(StrEnum):
     SKILL = "skill"  # a skill's body, loaded on request and kept for the session (§ P.2, K277)
     PARENT_CONTEXT = "parent_context"
     # v0.19 (§ AD, K346): a conversation held elsewhere, carried into a new session as its opening
-    # text, rendered as this session's own history renders turns.
+    # text. Retired in v0.21 (K351): the conversation enters as history; records of v0.19–v0.20
+    # still name this source.
     CONTINUED_SESSION = "continued_session"
     TOOLS_SUITE = "tools_suite"
     CONTROL = "control"  # the Length and Tone controls' texts, at session open (§ T, K296)
@@ -572,6 +573,9 @@ DRIVER_SLASH_SOURCE: Final[str] = "driver"
 DELEGATE_SLASH_SOURCE: Final[str] = "delegate"
 # v0.14 (§ Z.2): a run session's first message, written by the topology that started it.
 RUN_SLASH_SOURCE: Final[str] = "run"
+# v0.21 (§ AF, K351): a message of a conversation held elsewhere, written at session open as this
+# session's history. No trigger acts on it; the live turn count leaves it out.
+CONTINUED_SLASH_SOURCE: Final[str] = "continued"
 
 SESSION_TRIGGER_IDS: Final[frozenset[str]] = frozenset(
     {

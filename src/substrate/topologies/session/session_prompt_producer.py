@@ -58,7 +58,6 @@ METHODOLOGY_PRECEDENCE = 5  # every link of the extends chain; seq keeps ancesto
 TOOLS_SUITE_PRECEDENCE = 20
 PARENT_CONTEXT_PRECEDENCE = 30
 PARENT_CONTEXT_CAP_BYTES = 64 * 1024
-CONTINUED_SESSION_PRECEDENCE = 30  # with parent_context: another conversation's text (§ AD)
 
 Source = Callable[[], list[PromptFragment]]
 
@@ -268,31 +267,78 @@ def parent_context_fragments(parent_context: dict[str, Any]) -> list[PromptFragm
     ]
 
 
-def continued_session_fragments(continued: dict[str, Any]) -> list[PromptFragment]:
-    """A conversation held elsewhere, as this session's opening text (§ AD, K346). `continued` is
-    `{"turns": [...], "provenance": {...}}`: the turns are events of the kinds the history renders
-    (`UserMessage`, `ModelReply`, `HarnessToolCall`, `HarnessToolResult`), each `{"kind",
-    "payload"}`, and the text is what the history's renderer writes for them, so it reads as this
-    session's own history does. Reading another tool's file into turns is the caller's."""
-    from .transcript import _group_by_turn, _render_turns
-
-    events = list(continued.get("turns") or [])
-    turns = _group_by_turn(events)
-    if not turns:
-        return []
-    provenance = dict(continued.get("provenance") or {})
-    tool = str(provenance.get("tool", "another tool"))
-    text = f"This session continues a conversation held in {tool}. The conversation so far:\n\n" + (
-        "\n".join(_render_turns(turns))
+def continued_session_events(continued: dict[str, Any]) -> list[Any]:
+    """A conversation held elsewhere, as this session's earliest turns (§ AF, K351). `continued`
+    is `{"turns": [...], "provenance": {...}}`: the turns are `{"kind", "payload"}` dicts of the
+    kinds the history renders. Each becomes its event; the imported turns are numbered from -N (the
+    oldest) to -1, so live turns keep 0, 1, 2; each `UserMessage` carries `slash_source`
+    `continued`, which no trigger acts on. Events before the first `UserMessage` belong to no turn
+    and are left out, as the history leaves them out."""
+    from . import HarnessToolCall, HarnessToolResult, ModelReply, UserMessage
+    from .vocabulary import (
+        CONTINUED_SLASH_SOURCE,
+        HARNESS_TOOL_CALL,
+        HARNESS_TOOL_RESULT,
+        MODEL_REPLY,
+        USER_MESSAGE,
     )
-    return [
-        PromptFragment(
-            source=PromptSource.CONTINUED_SESSION,
-            text=text,
-            precedence=CONTINUED_SESSION_PRECEDENCE,
-            provenance={**provenance, "turns": len(turns), "events": len(events)},
-        )
-    ]
+
+    events = [e for e in continued.get("turns") or [] if isinstance(e, dict)]
+    tool = str((continued.get("provenance") or {}).get("tool", "continued"))
+    messages = sum(1 for e in events if e.get("kind") == USER_MESSAGE)
+    index = -messages - 1
+    out: list[Any] = []
+    for event in events:
+        kind = event.get("kind")
+        payload = event.get("payload") or {}
+        if kind == USER_MESSAGE:
+            index += 1
+            text = str(payload.get("text", ""))
+            out.append(
+                UserMessage(
+                    text=text,
+                    turn_index=index,
+                    assembled_prompt=text,
+                    slash_source=CONTINUED_SLASH_SOURCE,
+                )
+            )
+        elif index < -messages:
+            continue  # before the first message
+        elif kind == MODEL_REPLY:
+            out.append(
+                ModelReply(
+                    text=str(payload.get("text", "")),
+                    stop_reason=str(payload.get("stop_reason", "end_turn")),
+                    usage={
+                        "model": tool,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "wall_ms": 0,
+                        "estimated": True,
+                    },
+                    turn_index=index,
+                    step=0,
+                )
+            )
+        elif kind == HARNESS_TOOL_CALL:
+            out.append(
+                HarnessToolCall(
+                    call_id=str(payload.get("call_id", "")),
+                    tool=str(payload.get("tool", "?")),
+                    args=dict(payload.get("args") or {}),
+                    step=0,
+                    turn_index=index,
+                )
+            )
+        elif kind == HARNESS_TOOL_RESULT:
+            out.append(
+                HarnessToolResult(
+                    call_id=str(payload.get("call_id", "")),
+                    ok=bool(payload.get("ok", True)),
+                    output=str(payload.get("output", "")),
+                )
+            )
+    return out
 
 
 def tools_suite_fragments(tools: dict[str, Tool]) -> list[PromptFragment]:
@@ -323,7 +369,6 @@ def session_prompt_sources(
     length: str | None = None,
     tone: str | None = None,
     handoff: str | None = None,
-    continued_session: dict[str, Any] | None = None,
 ) -> dict[PromptSource, Source]:
     """The sources a session names, in the order the producer runs them."""
     sources: dict[PromptSource, Source] = {}
@@ -344,10 +389,6 @@ def session_prompt_sources(
         sources[PromptSource.MEMORY] = lambda: memory_fragments(role_repo_root)
     if parent_context is not None:
         sources[PromptSource.PARENT_CONTEXT] = lambda: parent_context_fragments(parent_context)
-    if continued_session is not None:
-        sources[PromptSource.CONTINUED_SESSION] = lambda: continued_session_fragments(
-            continued_session
-        )
     if tools:
         sources[PromptSource.TOOLS_SUITE] = lambda: tools_suite_fragments(tools)
     return sources
@@ -358,13 +399,14 @@ def session_prompt_producer_factory(
     session_id: str,
     sources: dict[PromptSource, Source],
     seed_warning: SessionWarning | None,
+    continued_session: dict[str, Any] | None = None,
 ) -> Callable[[], Any]:
     """The producer body. `seed_warning` is built at topology build time, when the seed's size
     is known."""
 
     async def _session_prompt(
         inp: Any,
-    ) -> AsyncIterator[PromptFragment | SessionWarning | SessionChanged]:
+    ) -> AsyncIterator[Any]:
         # K299 (§ V): a change run records each change, then writes the sources those changes
         # rewrite (`only`, which may be empty: a date or driver change writes no text), each
         # fragment marked with the message's seq so the cohort keeps the newest generation. The
@@ -411,6 +453,11 @@ def session_prompt_producer_factory(
                         provenance={**fragment.provenance, "generation": int(generation)},
                     )
                 yield fragment
+        # § AF (K351): at session open, after the fragments, the conversation this session
+        # continues, as its earliest turns; the first live message waits for this producer.
+        if continued_session is not None and not change_run:
+            for continued_event in continued_session_events(continued_session):
+                yield continued_event
 
     return lambda: _session_prompt
 
@@ -418,7 +465,7 @@ def session_prompt_producer_factory(
 __all__ = [
     "Source",
     "bundle_methodology_fragments",
-    "continued_session_fragments",
+    "continued_session_events",
     "baseline_fragments",
     "memory_dirs",
     "memory_fragments",

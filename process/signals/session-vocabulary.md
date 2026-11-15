@@ -1283,3 +1283,31 @@ A harness driver's history scale is `first_call_prompt_tokens` over the composed
 
 - **v0.20** — Sprint K350, 2026-11-14, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AD byte-preserved.
 
+
+## AF. v0.21 — the continued conversation enters as history (2026-11-14, sprint K351; amends § AD)
+
+Found in use: § AD.1 carried a continued conversation as one session-open fragment, which every prompt holds and compaction never touches. The continued session of 2026-11-14 sent 1,422,933 characters of it on every turn, and its history window had nothing it could drop. The Architect, 2026-11-14: the conversation comes in as part of the conversation.
+
+### AF.1 The events
+
+At session open, after its fragments, `session_prompt` writes the given turns as the events they are: `UserMessage`, `ModelReply`, `HarnessToolCall`, `HarnessToolResult`, in their order. The input is § AD.1's, `{"turns": [...], "provenance": {...}}`. Events before the first `UserMessage` belong to no turn and are not written. The first live message waits for `session_prompt` (`TRIGGER_ID_FIRST_MESSAGE_ON_SESSION_PROMPT`), so the record holds the whole imported conversation before it. A change run (§ V) writes none of it.
+
+### AF.2 The marker
+
+Each imported `UserMessage` carries `slash_source` `"continued"` (`CONTINUED_SLASH_SOURCE`). Its `turn_index` runs from -N, the oldest, to -1; each imported `ModelReply` and `HarnessToolCall` carries its message's index and `step` 0. An imported `ModelReply`'s usage is `{"model": <provenance tool>, "prompt_tokens": 0, "completion_tokens": 0, "wall_ms": 0, "estimated": true}`, so § S.5's scale and § AE's ignore it.
+
+### AF.3 What passes over it
+
+No trigger acts on a continued `UserMessage`: model-on-user-message, session-prompt-on-user-message-change, end-on-exit and end-on-turn-cap test the marker; skill-fragment-on-user-message needs a `skill:` source. The `user_turns` view counts live messages only, so the first live message is turn 0, the turn cap counts live turns, and a turn is open only after a live message, which keeps return-on-reply and language-on-reply off the imported replies. The registry's next turn index is the highest `turn_index` plus one, which the negative indices leave as it was.
+
+### AF.4 The history
+
+The history reads the imported events as turns (`TURN_EVENT_KINDS`). Compaction (§ S) clears their tool output and drops their oldest turns as it does any, and records the cut in `TranscriptCompacted`.
+
+### AF.5 The retired source
+
+`PromptSource.CONTINUED_SESSION` is no longer written. It stays a session-open source so the records of v0.19–v0.20 sessions read as written. § AD.2's provenance has no event of its own: the manifest's `continued_session` names the turns file, which holds it.
+
+### Ratification signature
+
+- **v0.21** — Sprint K351, 2026-11-14, agent-resolved on the grounds recorded on `../substrate-ui/BLACKBOARD.md`, recorded by the Agent. §§ A–AE byte-preserved.

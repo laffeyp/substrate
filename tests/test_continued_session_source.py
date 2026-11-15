@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright (C) 2026 Peter Laffey
-"""K346: the `continued_session` prompt source (session vocabulary § AD, v0.19).
+"""K346, as amended by K351: where a continued conversation enters (session vocabulary § AD, § AF).
 
-A conversation held elsewhere enters a new session as its opening text: the given turns rendered
-by the history's own renderer, one fragment at precedence 30, recorded at session open.
+v0.19 wrote it as one `continued_session` fragment, opening text in every prompt. v0.21 retires
+that source for writing: `session_prompt` yields the conversation as events after the
+session-open fragments, and the history renders them. Records of v0.19–v0.20 still name the
+source, so it stays a session-open source for reading.
 """
 
 from __future__ import annotations
@@ -11,17 +13,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from substrate.topologies.session import PromptFragment
+from substrate.topologies.session import ModelReply, PromptFragment, UserMessage
 from substrate.topologies.session.session_prompt_producer import (
-    CONTINUED_SESSION_PRECEDENCE,
-    continued_session_fragments,
     session_prompt_producer_factory,
     session_prompt_sources,
-)
-from substrate.topologies.session.transcript import (
-    _group_by_turn,
-    _render_turns,
-    compose_model_prompt,
 )
 from substrate.topologies.session.vocabulary import SESSION_OPEN_SOURCES, PromptSource
 
@@ -42,76 +37,61 @@ TURNS: list[dict[str, Any]] = [
         "payload": {"text": "Two files: a.txt and b.txt.", "stop_reason": "end_turn"},
     },
 ]
-PROVENANCE = {"tool": "claude_code", "path": "/x/s.jsonl", "summary_line": 7}
+CONTINUED = {"turns": TURNS, "provenance": {"tool": "claude_code", "path": "/x/s.jsonl"}}
+BASE: dict[str, Any] = {
+    "role": None,
+    "role_repo_root": None,
+    "bundle": None,
+    "parent_context": None,
+    "tools": {},
+}
 
 
-def test_the_text_is_the_historys_own_rendering() -> None:
-    (frag,) = continued_session_fragments({"turns": TURNS, "provenance": PROVENANCE})
-    rendered = "\n".join(_render_turns(_group_by_turn(TURNS)))
-    assert frag.text == (
-        "This session continues a conversation held in claude_code. The conversation so far:\n\n"
-        + rendered
-    )
-    assert "USER: Remember the word: heron." in frag.text
-    assert "HARNESS TOOL Bash: args={'command': 'ls'}" in frag.text
-    assert "HARNESS RESULT: a.txt\nb.txt" in frag.text
-    assert "MODEL: Two files: a.txt and b.txt." in frag.text
-
-
-def test_source_precedence_and_provenance() -> None:
-    (frag,) = continued_session_fragments({"turns": TURNS, "provenance": PROVENANCE})
-    assert frag.source == PromptSource.CONTINUED_SESSION == "continued_session"
-    assert frag.precedence == CONTINUED_SESSION_PRECEDENCE == 30
-    assert frag.provenance == {**PROVENANCE, "turns": 2, "events": 6}
-
-
-def test_no_turns_no_fragment() -> None:
-    assert continued_session_fragments({"turns": [], "provenance": PROVENANCE}) == []
-    # Events before the first UserMessage belong to no turn, as in the history.
-    only_reply = [{"kind": "ModelReply", "payload": {"text": "x", "stop_reason": "end_turn"}}]
-    assert continued_session_fragments({"turns": only_reply}) == []
-
-
-def test_a_session_open_source_only_when_named() -> None:
-    assert PromptSource.CONTINUED_SESSION in SESSION_OPEN_SOURCES
-    base: dict[str, Any] = {
-        "role": None,
-        "role_repo_root": None,
-        "bundle": None,
-        "parent_context": None,
-        "tools": {},
-    }
-    assert PromptSource.CONTINUED_SESSION not in session_prompt_sources(**base)
-    on = session_prompt_sources(**base, continued_session={"turns": TURNS})
-    assert PromptSource.CONTINUED_SESSION in on
-
-
-def test_the_producer_records_it_and_the_prompt_carries_it() -> None:
-    sources = session_prompt_sources(
-        role=None,
-        role_repo_root=None,
-        bundle=None,
-        parent_context=None,
-        tools={},
-        continued_session={"turns": TURNS, "provenance": PROVENANCE},
-    )
+def _emitted(inp: Any) -> list[Any]:
     body = session_prompt_producer_factory(
-        session_id="s_test", sources=sources, seed_warning=None
+        session_id="s_test",
+        sources=session_prompt_sources(**BASE, per_turn="Be brief."),
+        seed_warning=None,
+        continued_session=CONTINUED,
     )()
 
     async def collect() -> list[Any]:
-        return [item async for item in body({})]
+        return [item async for item in body(inp)]
 
-    emitted = asyncio.run(collect())
-    frags = [e for e in emitted if isinstance(e, PromptFragment)]
-    assert [f.source for f in frags] == ["continued_session"]
-    _system, prompt, used = compose_model_prompt(
-        history=[],
-        seed="SEED",
-        fragments=[
-            (5, {"source": f.source, "text": f.text, "precedence": f.precedence}) for f in frags
-        ],
+    return asyncio.run(collect())
+
+
+def test_the_retired_source_is_read_but_never_written() -> None:
+    assert PromptSource.CONTINUED_SESSION in SESSION_OPEN_SOURCES
+    assert PromptSource.CONTINUED_SESSION not in session_prompt_sources(**BASE)
+
+
+def test_session_open_yields_the_fragments_then_the_conversation() -> None:
+    emitted = _emitted({})
+    kinds = [type(e).__name__ for e in emitted]
+    assert kinds[0] == "PromptFragment" and "continued_session" not in {
+        e.source for e in emitted if isinstance(e, PromptFragment)
+    }
+    first_message = kinds.index("UserMessage")
+    assert all(k == "PromptFragment" for k in kinds[:first_message])
+    assert kinds[first_message:] == [
+        "UserMessage",
+        "ModelReply",
+        "UserMessage",
+        "HarnessToolCall",
+        "HarnessToolResult",
+        "ModelReply",
+    ]
+    messages = [e for e in emitted if isinstance(e, UserMessage)]
+    assert [(m.text, m.turn_index) for m in messages] == [
+        ("Remember the word: heron.", -2),
+        ("List the folder.", -1),
+    ]
+    assert [e.text for e in emitted if isinstance(e, ModelReply)][-1] == (
+        "Two files: a.txt and b.txt."
     )
-    assert used == (5,)
-    assert prompt.startswith("SEED\n\nThis session continues a conversation held in claude_code.")
-    assert "MODEL: Two files: a.txt and b.txt." in prompt
+
+
+def test_a_change_run_does_not_import_it_again() -> None:
+    emitted = _emitted({"changes": [], "only": []})
+    assert not [e for e in emitted if isinstance(e, (UserMessage, ModelReply))]
