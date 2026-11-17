@@ -38,6 +38,7 @@ runs FULL_SUITE knowing it is autonomous; sandbox the run if that autonomy is un
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import urllib.parse
@@ -110,6 +111,19 @@ _MAX_GLOB_HITS = (
     200  # glob result cap — a huge match set would blob-offload the ToolResult and wedge the loop
 )
 
+
+# Sprint 513: variables the server sets at launch that a session's shell must not
+# inherit. `SUBSTRATE_PYTHONHOME` in particular leaks to `uv run python` as
+# `PYTHONHOME` and makes it import the encodings module from the wrong home.
+_SUBSTRATE_LAUNCH_VARS: Final[frozenset[str]] = frozenset(
+    {
+        "SUBSTRATE_PYTHONHOME",
+        "SUBSTRATE_HOME",
+        "SUBSTRATE_TRACE_DIR",
+        "SUBSTRATE_BOOT_ID",
+        "SUBSTRATE_PARENT_PID",
+    }
+)
 
 import contextvars as _contextvars  # noqa: E402  # kept adjacent to the _BASH_PROGRESS_CTX below
 
@@ -441,6 +455,10 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
             )
     background = len(a) > 2 and a[2] is not None and _as_bool(a[2])
     task_id, out_path, err_path = TABLE.new_files(owner)
+    # Sprint 513: a session's shell must not inherit the server's launch variables.
+    # `SUBSTRATE_PYTHONHOME` in particular leaks to `uv run python` as `PYTHONHOME`
+    # and makes it import the encodings module from the wrong home.
+    env = {k: v for k, v in os.environ.items() if k not in _SUBSTRATE_LAUNCH_VARS}
     with out_path.open("wb") as out_f, err_path.open("wb") as err_f:
         proc = subprocess.Popen(  # noqa: S602 — explicit agent shell tool (opt-in, not CI)
             command,
@@ -450,6 +468,7 @@ def _bash(root: Path, owner: str, a: list[Any]) -> dict[str, Any]:
             stderr=err_f,
             cwd=str(root),
             start_new_session=True,  # own process group: a kill reaches backgrounded children
+            env=env,
         )
     task = Task(
         task_id=task_id,
