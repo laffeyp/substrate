@@ -241,28 +241,31 @@ def result_lines(kind: str, payload: Mapping[str, Any], tool: str, seq: int) -> 
     return whole, placeholder
 
 
+def event_saving(env: Mapping[str, Any], tools: dict[str, str]) -> tuple[int, int] | None:
+    """For a tool result, its seq and the tokens clearing it saves; None for any other event.
+    `tools` maps a harness call's id to its tool, filled as the turn's calls arrive (K357)."""
+    kind = env.get("kind", "")
+    payload = env.get("payload") or {}
+    if not isinstance(payload, Mapping):
+        return None
+    if kind == HARNESS_TOOL_CALL:
+        tools[str(payload.get("call_id", ""))] = str(payload.get("tool", "?"))
+        return None
+    if kind not in (_KIND_TOOL_RESULT, HARNESS_TOOL_RESULT):
+        return None
+    tool = (
+        str(payload.get("tool", "?"))
+        if kind == _KIND_TOOL_RESULT
+        else tools.get(str(payload.get("call_id", "")), "?")
+    )
+    whole, placeholder = result_lines(kind, payload, tool, int(env.get("seq", 0)))
+    return int(env.get("seq", 0)), max(count_tokens(whole) - count_tokens(placeholder), 0)
+
+
 def output_savings(turn: list[dict[str, Any]]) -> list[tuple[int, int]]:
     """For each tool result in `turn`, its seq and the tokens clearing it saves."""
     tools: dict[str, str] = {}
-    out: list[tuple[int, int]] = []
-    for env in turn:
-        kind = env.get("kind", "")
-        payload = env.get("payload") or {}
-        if not isinstance(payload, Mapping):
-            continue
-        if kind == HARNESS_TOOL_CALL:
-            tools[str(payload.get("call_id", ""))] = str(payload.get("tool", "?"))
-        elif kind in (_KIND_TOOL_RESULT, HARNESS_TOOL_RESULT):
-            tool = (
-                str(payload.get("tool", "?"))
-                if kind == _KIND_TOOL_RESULT
-                else tools.get(str(payload.get("call_id", "")), "?")
-            )
-            whole, placeholder = result_lines(kind, payload, tool, int(env.get("seq", 0)))
-            out.append(
-                (int(env.get("seq", 0)), max(count_tokens(whole) - count_tokens(placeholder), 0))
-            )
-    return out
+    return [saving for saving in (event_saving(env, tools) for env in turn) if saving]
 
 
 def attachment_lines(attachments: Any) -> list[str]:
@@ -290,77 +293,99 @@ def _render_turns(
     session's reminder line and this step's environment updates (§ P.2, § P.4). A tool result at
     or below `cleared_through` renders as its placeholder (§ S.3)."""
     lines: list[str] = []
-    harness_tools: dict[str, str] = {}
+    state = TurnRender()
     if kept_turns:
-        first = kept_turns[0][0].get("payload") or {}
-        last = kept_turns[-1][0].get("payload") or {}
-        first_idx = int(first.get("turn_index", 0)) if isinstance(first, Mapping) else 0
-        last_idx = int(last.get("turn_index", 0)) if isinstance(last, Mapping) else 0
-        lines.append(f"[transcript: turns {first_idx}..{last_idx}]")
+        lines.append(_header(kept_turns[0], kept_turns[-1]))
     for turn_idx, turn in enumerate(kept_turns):
-        last_reply: str | None = None  # the turn's last ModelReply text
+        state.last_reply = None
+        beside = after_current_user if turn_idx == len(kept_turns) - 1 else None
         for env in turn:
-            payload = env.get("payload") or {}
-            kind = env.get("kind", "")
-            if not isinstance(payload, Mapping):
-                continue
-            if kind == _KIND_USER_MESSAGE:
-                text = str(payload.get("assembled_prompt") or payload.get("text", ""))
-                lines.append(f"USER: {text}")
-                lines.extend(attachment_lines(payload.get("attachments")))
-                if turn_idx == len(kept_turns) - 1 and after_current_user:
-                    lines.extend(after_current_user)
-            elif kind == SESSION_CHANGED:
-                lines.append(
-                    session_changed_line(
-                        str(payload.get("field", "")),
-                        str(payload.get("old", "")),
-                        str(payload.get("new", "")),
-                    )
-                )
-            elif kind == _KIND_MODEL_REPLY:
-                # v0.3 writes a ModelReply for every call. One that requests a tool is rendered by
-                # its ToolCall line; any prose the model wrote beside the call stays on the record
-                # only, as the history rendered it before v0.3.
-                if payload.get("stop_reason") == StopReason.TOOL_USE:
-                    continue
-                last_reply = str(payload.get("text", ""))
-                if last_reply:
-                    lines.append(f"MODEL: {last_reply}")
-            elif kind == _KIND_TOOL_CALL:
-                lines.append(f"TOOL {payload.get('tool', '?')}: args={payload.get('args', [])}")
-            elif kind in (_KIND_TOOL_RESULT, HARNESS_TOOL_RESULT):
-                seq = int(env.get("seq", 0))
-                tool = (
-                    str(payload.get("tool", "?"))
-                    if kind == _KIND_TOOL_RESULT
-                    else harness_tools.get(str(payload.get("call_id", "")), "?")
-                )
-                whole, placeholder = result_lines(kind, payload, tool, seq)
-                cleared = cleared_through is not None and seq <= cleared_through
-                lines.append(placeholder if cleared else whole)
-            elif kind == HARNESS_TOOL_CALL:
-                # § Q.4, § Q.6: what a harness driver did with its own tools, in record order.
-                harness_tools[str(payload.get("call_id", ""))] = str(payload.get("tool", "?"))
-                lines.append(
-                    f"HARNESS TOOL {payload.get('tool', '?')}: args={payload.get('args', {})}"
-                )
-            elif kind == BACKGROUND_TASK_ENDED:
-                # UI sprint 104: the model keeps hearing that a background task ended
-                from . import BackgroundTaskEnded, background_notice
-
-                try:
-                    lines.append(background_notice(BackgroundTaskEnded(**payload)))
-                except TypeError:
-                    lines.append(f"[background task {payload.get('task_id', '?')} ended]")
-            elif kind == _KIND_FINAL_ANSWER:
-                # Records before v0.3 (vocabulary § K.3): a plain reply wrote a ModelReply and a
-                # FinalAnswer with the same text; the driver read every answer twice (UI sprint
-                # 116). A FinalAnswer with its own text (a bail-out) still renders.
-                final = str(payload.get("text", ""))
-                if final != last_reply:
-                    lines.append(f"FINAL: {final}")
+            lines.extend(_event_lines(env, state, beside, cleared_through))
     return lines
+
+
+class TurnRender:
+    """What a rendering carries from event to event (K357): each harness call's tool, for its
+    result's placeholder, and the turn's last reply, which a FinalAnswer of the same text repeats."""
+
+    __slots__ = ("harness_tools", "last_reply")
+
+    def __init__(self) -> None:
+        self.harness_tools: dict[str, str] = {}
+        self.last_reply: str | None = None
+
+
+def _header(first_turn: list[dict[str, Any]], last_turn: list[dict[str, Any]]) -> str:
+    first = first_turn[0].get("payload") or {}
+    last = last_turn[0].get("payload") or {}
+    first_idx = int(first.get("turn_index", 0)) if isinstance(first, Mapping) else 0
+    last_idx = int(last.get("turn_index", 0)) if isinstance(last, Mapping) else 0
+    return f"[transcript: turns {first_idx}..{last_idx}]"
+
+
+def _event_lines(
+    env: Mapping[str, Any],
+    state: TurnRender,
+    after_user: list[str] | None = None,
+    cleared_through: int | None = None,
+) -> list[str]:
+    """One event's history lines (K357: `_render_turns` and the turn's count both use it).
+    `after_user` goes right after a `USER:` line: the reminder line and this step's environment
+    updates, for the current turn only."""
+    payload = env.get("payload") or {}
+    kind = env.get("kind", "")
+    if not isinstance(payload, Mapping):
+        return []
+    if kind == _KIND_USER_MESSAGE:
+        text = str(payload.get("assembled_prompt") or payload.get("text", ""))
+        return [f"USER: {text}", *attachment_lines(payload.get("attachments")), *(after_user or [])]
+    if kind == SESSION_CHANGED:
+        return [
+            session_changed_line(
+                str(payload.get("field", "")),
+                str(payload.get("old", "")),
+                str(payload.get("new", "")),
+            )
+        ]
+    if kind == _KIND_MODEL_REPLY:
+        # v0.3 writes a ModelReply for every call. One that requests a tool is rendered by its
+        # ToolCall line; any prose the model wrote beside the call stays on the record only, as
+        # the history rendered it before v0.3.
+        if payload.get("stop_reason") == StopReason.TOOL_USE:
+            return []
+        state.last_reply = str(payload.get("text", ""))
+        return [f"MODEL: {state.last_reply}"] if state.last_reply else []
+    if kind == _KIND_TOOL_CALL:
+        return [f"TOOL {payload.get('tool', '?')}: args={payload.get('args', [])}"]
+    if kind in (_KIND_TOOL_RESULT, HARNESS_TOOL_RESULT):
+        seq = int(env.get("seq", 0))
+        tool = (
+            str(payload.get("tool", "?"))
+            if kind == _KIND_TOOL_RESULT
+            else state.harness_tools.get(str(payload.get("call_id", "")), "?")
+        )
+        whole, placeholder = result_lines(kind, payload, tool, seq)
+        cleared = cleared_through is not None and seq <= cleared_through
+        return [placeholder if cleared else whole]
+    if kind == HARNESS_TOOL_CALL:
+        # § Q.4, § Q.6: what a harness driver did with its own tools, in record order.
+        state.harness_tools[str(payload.get("call_id", ""))] = str(payload.get("tool", "?"))
+        return [f"HARNESS TOOL {payload.get('tool', '?')}: args={payload.get('args', {})}"]
+    if kind == BACKGROUND_TASK_ENDED:
+        # UI sprint 104: the model keeps hearing that a background task ended
+        from . import BackgroundTaskEnded, background_notice
+
+        try:
+            return [background_notice(BackgroundTaskEnded(**payload))]
+        except TypeError:
+            return [f"[background task {payload.get('task_id', '?')} ended]"]
+    if kind == _KIND_FINAL_ANSWER:
+        # Records before v0.3 (vocabulary § K.3): a plain reply wrote a ModelReply and a
+        # FinalAnswer with the same text; the driver read every answer twice (UI sprint 116). A
+        # FinalAnswer with its own text (a bail-out) still renders.
+        final = str(payload.get("text", ""))
+        return [f"FINAL: {final}"] if final != state.last_reply else []
+    return []
 
 
 def is_driver_turn(turn: list[dict[str, Any]]) -> bool:
@@ -369,11 +394,25 @@ def is_driver_turn(turn: list[dict[str, Any]]) -> bool:
     return isinstance(payload, Mapping) and payload.get("slash_source") == DRIVER_SLASH_SOURCE
 
 
+def event_cost(env: Mapping[str, Any], state: TurnRender) -> int:
+    """One event's rendered lines in tokens, with the line break before them (K357)."""
+    lines = _event_lines(env, state)
+    return count_tokens("\n" + "\n".join(lines)) if lines else 0
+
+
+def turn_header_cost(turn: list[dict[str, Any]]) -> int:
+    """The tokens of the header a turn rendered alone carries (K357)."""
+    return count_tokens(_header(turn, turn))
+
+
 def turn_cost(turn: list[dict[str, Any]]) -> int:
-    """One turn's rendered size in tokens, as the history window prices it."""
-    if is_driver_turn(turn):
+    """One turn's rendered size in tokens, as the history window prices it: its header, then each
+    event's lines counted one event at a time (K357), so the history view adds them as the events
+    arrive and reaches the same sum."""
+    if not turn or is_driver_turn(turn):
         return 0
-    return count_tokens("\n".join(_render_turns([turn])))
+    state = TurnRender()
+    return turn_header_cost(turn) + sum(event_cost(env, state) for env in turn)
 
 
 def plan_window(

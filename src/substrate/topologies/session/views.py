@@ -92,7 +92,10 @@ class TurnHistory:
     def __init__(self, kinds: frozenset[str]) -> None:
         self.subscription = Subscription(kinds=kinds | {PROMPT_COMPOSED})
         self._turns: list[list[Any]] = []  # [from_seq, to_seq, cost, savings]
-        self._current: list[dict[str, Any]] = []
+        # K357: the current turn's rendering state; each event's count is added as it arrives.
+        self._render: Any = None
+        self._tools: dict[str, str] = {}
+        self._driver_turn = False
         self._cleared: int | None = None
         self._dropped: tuple[int, int] | None = None
         self._last_estimate = 0
@@ -101,7 +104,14 @@ class TurnHistory:
         self._window: int | None = None
 
     def update(self, event: Event) -> None:
-        from .transcript import measured_scale, output_savings, turn_cost
+        from .transcript import (
+            TurnRender,
+            event_cost,
+            event_saving,
+            is_driver_turn,
+            measured_scale,
+            turn_header_cost,
+        )
         from .vocabulary import MODEL_REPLY, TRANSCRIPT_COMPACTED, USER_MESSAGE
 
         payload = event.payload if isinstance(event.payload, dict) else {}
@@ -127,15 +137,20 @@ class TurnHistory:
                 )
         env = {"seq": event.seq, "kind": event.kind, "payload": event.payload}
         if event.kind == USER_MESSAGE:
-            self._current = [env]
-            self._turns.append([event.seq, event.seq, 0, []])
-        elif self._current:
-            self._current.append(env)
-        else:
+            self._render, self._tools = TurnRender(), {}
+            self._driver_turn = is_driver_turn([env])
+            header = 0 if self._driver_turn else turn_header_cost([env])
+            self._turns.append([event.seq, event.seq, header, []])
+        elif self._render is None:
             return  # before the first UserMessage: not part of any turn
+        # K357: one event's count, added once — `transcript.turn_cost` is the same sum. Recounting
+        # the whole turn on every event cost 5.35 s of an 11,882-envelope resume.
         self._turns[-1][1] = event.seq
-        self._turns[-1][2] = turn_cost(self._current)
-        self._turns[-1][3] = output_savings(self._current)
+        if not self._driver_turn:
+            self._turns[-1][2] += event_cost(env, self._render)
+        saving = event_saving(env, self._tools)
+        if saving is not None:
+            self._turns[-1][3].append(saving)
 
     def value(self) -> HistoryState:
         return HistoryState(
