@@ -85,6 +85,10 @@ class RunState:
     # handler and threaded into the `substrate.ProducerCancelled` payload so the
     # record carries who cancelled the producer and why (v0.3 vocabulary extension).
     cancel_reasons: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # K354: instances whose task body has begun. A task cancelled before its first step never
+    # runs its body, so it writes neither ProducerStarted nor ProducerCancelled; its done
+    # callback writes both, so the run's in-flight count falls and the run goes on.
+    began: set[str] = field(default_factory=set)
 
     next_seq: int = 0
     in_cycle: bool = False

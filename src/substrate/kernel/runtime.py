@@ -674,7 +674,23 @@ class Runtime:
             st.kind_by_instance[instance] = kind
             st.parent_by_instance[instance] = parent
 
-            def _done(t: asyncio.Task[None], inst: str = instance) -> None:
+            def _done(
+                t: asyncio.Task[None],
+                inst: str = instance,
+                ref: dict[str, Any] = {"kind": kind, "instance": instance, "parent": parent},  # noqa: B006 — one dict per task, bound at its creation
+            ) -> None:
+                # K354: cancelled before its first step, the body never ran: write the start and
+                # the cancel it would have written, so `inflight` falls and the run goes on.
+                if t.cancelled() and inst not in st.began:
+                    cancel: dict[str, Any] = {"producer": ref}
+                    reason = st.cancel_reasons.get(inst) or {}
+                    if "cause" in reason:
+                        cancel["cause"] = reason["cause"]
+                    if reason.get("caller") is not None:
+                        cancel["caller"] = reason["caller"]
+                    st.inbox.put_nowait(_Lifecycle(PRODUCER_STARTED, {"producer": ref}))
+                    st.inbox.put_nowait(_Lifecycle(PRODUCER_CANCELLED, cancel))
+                st.began.discard(inst)
                 st.tasks.discard(t)
                 st.task_by_instance.pop(inst, None)
                 st.kind_by_instance.pop(inst, None)
@@ -686,6 +702,7 @@ class Runtime:
     async def _producer_task(self, kind: str, inp: Any, instance: str, parent: str | None) -> None:
         ref = {"kind": kind, "instance": instance, "parent": parent}
         inbox = self._st.inbox
+        self._st.began.add(instance)
         inbox.put_nowait(_Lifecycle(PRODUCER_STARTED, {"producer": ref}))
         # Sprint 199 (roadmap v2 S1b fold-in): `Budget.wall_seconds` enforcement. If the
         # producer_kind declared a wall-clock cap, wrap the async-for consumer in
