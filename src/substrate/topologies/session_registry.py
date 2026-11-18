@@ -37,6 +37,7 @@ record's writer just to enumerate what exists.
 
 from __future__ import annotations
 
+import concurrent.futures
 import asyncio
 import fcntl
 import json
@@ -247,17 +248,26 @@ class TornRecordOnResume(Exception):
         self.cause = cause
 
 
+# K355: what `interrupt` returns when the turn is in flight but cannot take the cancel yet — its
+# loop is busy (a bootstrap reading the record) or not yet created. The cancel is kept and runs as
+# soon as the loop is free; the turn then ends `Returned` `interrupted` (K354).
+PENDING_INTERRUPT: dict[str, Any] = {"kind": "pending", "instance": "", "parent": None}
+
+
 class TurnHandle:
     """The running turn's event loop, task, and Runtime — populated by
     `_run_resume_sync`, read by `interrupt` to reach the worker thread's
-    event loop without holding the per-session lock."""
+    event loop without holding the per-session lock. `pending` holds an interrupt that arrived
+    before the loop existed, as (session_id, tier) (K355); the worker schedules it on the loop it
+    creates."""
 
-    __slots__ = ("loop", "task", "runtime")
+    __slots__ = ("loop", "task", "runtime", "pending")
 
     def __init__(self) -> None:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.task: asyncio.Task[Any] | None = None
         self.runtime: api.Runtime | None = None
+        self.pending: tuple[str, str] | None = None
 
 
 SessionTopologyFactory = Callable[
@@ -1066,15 +1076,22 @@ class SessionRegistry:
         """
         import concurrent.futures
 
+        if tier not in ("soft", "hard"):
+            raise ValueError(f"tier must be 'soft' or 'hard', got {tier!r}")
         handle = self._running_handles.get(session_id)
         if handle is None:
             return None
         loop = handle.loop
         parent_runtime = handle.runtime
         if loop is None or parent_runtime is None:
+            # K355: the turn is accepted and its worker has not yet made its loop. Keep the
+            # request; the worker schedules it on the loop it creates.
+            if record_root is None:
+                handle.pending = (session_id, tier)
+                if handle.loop is not None and handle.runtime is not None:
+                    _schedule_cancel(session_id, handle.runtime, handle.loop, tier)
+                return dict(PENDING_INTERRUPT)
             return None
-        if tier not in ("soft", "hard"):
-            raise ValueError(f"tier must be 'soft' or 'hard', got {tier!r}")
         # Phase 8 item 9 descent-scope routing: when the caller names a
         # `record_root`, look up the child runtime the parent's delegate
         # spawn published on the process-global registry. The parent's
@@ -1097,72 +1114,15 @@ class SessionRegistry:
         else:
             runtime = parent_runtime
 
-        fut: concurrent.futures.Future[dict[str, Any] | None] = concurrent.futures.Future()
-
-        def _do_cancel() -> None:
-            try:
-                st = getattr(runtime, "_st", None)
-                if st is None:
-                    fut.set_result(None)
-                    return
-                # Find the live model first — if the model is running, both
-                # tiers cancel it (soft stops before the next tool by
-                # returning; hard is the same verb at the primitive layer).
-                live_model = None
-                live_tool = None
-                for inst, kind in list(st.kind_by_instance.items()):
-                    if kind == "model" and live_model is None:
-                        live_model = inst
-                    elif kind == "tool" and live_tool is None:
-                        live_tool = inst
-                caller = (
-                    f"daemon:interrupt-{tier}@{record_root}"
-                    if record_root
-                    else f"daemon:interrupt-{tier}"
-                )
-                if live_model is not None:
-                    ref = runtime.cancel_producer(live_model, cause="external", caller=caller)
-                    fut.set_result(ref)
-                    return
-                if live_tool is not None:
-                    if tier == "hard":
-                        ref = runtime.cancel_producer(live_tool, cause="external", caller=caller)
-                        fut.set_result(ref)
-                        return
-                    # Soft with a live tool (Phase 8 item 7 wiring): inject
-                    # InterruptRequested onto the record via the daemon-facing
-                    # Runtime.inject_event primitive. The topology's
-                    # interrupt-fragment-on-interrupt-request trigger starts the
-                    # fragment producer, which emits a PromptFragment(source=interrupt).
-                    # On the next ToolResult, model-on-tool-result starts the model,
-                    # whose prompt carries the tool result and the interrupt
-                    # directive. The
-                    # synthetic ref reports "the request was received" so the
-                    # client renders "the model will stop after this tool"
-                    # instead of "no turn in flight."
-                    from .session import InterruptRequested
-
-                    runtime.inject_event(
-                        InterruptRequested(
-                            session_id=session_id,
-                            tier="soft",
-                            source=caller,
-                        )
-                    )
-                    fut.set_result({"kind": "signal", "instance": "soft", "parent": None})
-                    return
-                fut.set_result(None)
-            except Exception as exc:  # noqa: BLE001 — carry to the caller thread
-                fut.set_exception(exc)
-
-        try:
-            loop.call_soon_threadsafe(_do_cancel)
-        except RuntimeError:
+        fut = _schedule_cancel(session_id, runtime, loop, tier, record_root)
+        if fut is None:
             return None
         try:
             return fut.result(timeout=1.0)
         except concurrent.futures.TimeoutError:
-            return None
+            # K355: the loop is busy (a bootstrap reading the record). The cancel stays queued and
+            # runs when the loop frees; since K354 it then ends the turn.
+            return dict(PENDING_INTERRUPT)
 
     def append_event(
         self, session_id: str, event: Any, *, timeout_seconds: float = 30.0
@@ -1419,6 +1379,91 @@ def _stop_background_tasks(session_id: str, because: str) -> None:
     hold.TABLE.stop_owner(session_id)
 
 
+def _cancel_step(
+    session_id: str,
+    runtime: Any,
+    tier: str,
+    record_root: str | None,
+    fut: "concurrent.futures.Future[dict[str, Any] | None]",
+) -> Callable[[], None]:
+    """The loop-side half of `interrupt`: find the live model, else tool, and cancel it."""
+
+    def _do_cancel() -> None:
+        try:
+            st = getattr(runtime, "_st", None)
+            if st is None:
+                fut.set_result(None)
+                return
+            # Find the live model first — if the model is running, both
+            # tiers cancel it (soft stops before the next tool by
+            # returning; hard is the same verb at the primitive layer).
+            live_model = None
+            live_tool = None
+            for inst, kind in list(st.kind_by_instance.items()):
+                if kind == "model" and live_model is None:
+                    live_model = inst
+                elif kind == "tool" and live_tool is None:
+                    live_tool = inst
+            caller = (
+                f"daemon:interrupt-{tier}@{record_root}"
+                if record_root
+                else f"daemon:interrupt-{tier}"
+            )
+            if live_model is not None:
+                ref = runtime.cancel_producer(live_model, cause="external", caller=caller)
+                fut.set_result(ref)
+                return
+            if live_tool is not None:
+                if tier == "hard":
+                    ref = runtime.cancel_producer(live_tool, cause="external", caller=caller)
+                    fut.set_result(ref)
+                    return
+                # Soft with a live tool (Phase 8 item 7 wiring): inject
+                # InterruptRequested onto the record via the daemon-facing
+                # Runtime.inject_event primitive. The topology's
+                # interrupt-fragment-on-interrupt-request trigger starts the
+                # fragment producer, which emits a PromptFragment(source=interrupt).
+                # On the next ToolResult, model-on-tool-result starts the model,
+                # whose prompt carries the tool result and the interrupt
+                # directive. The
+                # synthetic ref reports "the request was received" so the
+                # client renders "the model will stop after this tool"
+                # instead of "no turn in flight."
+                from .session import InterruptRequested
+
+                runtime.inject_event(
+                    InterruptRequested(
+                        session_id=session_id,
+                        tier="soft",
+                        source=caller,
+                    )
+                )
+                fut.set_result({"kind": "signal", "instance": "soft", "parent": None})
+                return
+            fut.set_result(None)
+        except Exception as exc:  # noqa: BLE001 — carry to the caller thread
+            fut.set_exception(exc)
+
+    return _do_cancel
+
+
+def _schedule_cancel(
+    session_id: str,
+    runtime: Any,
+    loop: asyncio.AbstractEventLoop,
+    tier: str,
+    record_root: str | None = None,
+) -> "concurrent.futures.Future[dict[str, Any] | None] | None":
+    """Queue `interrupt`'s cancel on the turn's loop; the future carries its result. None when the
+    loop has closed (the turn already ended)."""
+    fut: concurrent.futures.Future[dict[str, Any] | None] = concurrent.futures.Future()
+    try:
+        loop.call_soon_threadsafe(_cancel_step(session_id, runtime, tier, record_root, fut))
+    except RuntimeError:
+        return None
+    return fut
+
+
 _STOP_GRACE_S = 10.0
 
 
@@ -1488,6 +1533,11 @@ def _run_run_sync(
                 handle_out.loop = loop
                 handle_out.task = task
                 handle_out.runtime = runtime
+                if handle_out.pending is not None:
+                    # K355: an interrupt that came before this loop existed. It runs after the
+                    # run's bootstrap, as a cancel queued during the bootstrap does.
+                    pending_sid, pending_tier = handle_out.pending
+                    _schedule_cancel(pending_sid, runtime, loop, pending_tier)
             ready.set()
             box["result"] = loop.run_until_complete(task)
         except asyncio.CancelledError:
@@ -1547,6 +1597,11 @@ def _run_resume_sync(
                 handle_out.loop = loop
                 handle_out.task = task
                 handle_out.runtime = runtime
+                if handle_out.pending is not None:
+                    # K355: an interrupt that came before this loop existed. It runs after the
+                    # run's bootstrap, as a cancel queued during the bootstrap does.
+                    pending_sid, pending_tier = handle_out.pending
+                    _schedule_cancel(pending_sid, runtime, loop, pending_tier)
             ready.set()
             box["result"] = loop.run_until_complete(task)
         except asyncio.CancelledError:
