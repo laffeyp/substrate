@@ -34,6 +34,7 @@ from .topologies.session.vocabulary import MODEL_REPLY
 from .topologies.session_registry import (
     FreshSessionRequiresUserMessage,
     NameCollision,
+    SessionBusy,
     SessionEndedMidTurn,
     SessionManifest,
     SessionRegistry,
@@ -54,6 +55,7 @@ __all__ = [
     "FreshSessionRequiresUserMessage",
     "MODEL_REPLY",
     "NameCollision",
+    "SessionBusy",
     "SessionEndedMidTurn",
     "SessionManifest",
     "SessionRegistry",

@@ -212,6 +212,11 @@ class SessionEndedMidTurn(Exception):
     """
 
 
+class SessionBusy(TimeoutError):
+    """K356: `turn_sync` waited `lock_timeout_seconds` for the session's lock and another turn
+    still held it. The shutdown sweep passes a limit so one stuck session cannot hold the quit."""
+
+
 class FreshSessionRequiresUserMessage(Exception):
     """Sprint 217a: raised by `turn_sync` when the session's record is empty
     (no envelopes on disk yet) and the resume event is not a `UserMessage`.
@@ -848,6 +853,7 @@ class SessionRegistry:
         *,
         timeout_seconds: float | None = None,
         resume_event_builder: Callable[[SessionManifest, Path], Any] | None = None,
+        lock_timeout_seconds: float | None = None,
     ) -> tuple[SessionManifest, Path]:
         """Run one turn against a standing session synchronously. Called from
         the delegate seam (sprint 213b) inside tool_loop's worker thread — NOT
@@ -883,7 +889,14 @@ class SessionRegistry:
         if manifest is None:
             raise KeyError(f"unknown session_id {session_id!r}")
         threading_lock = self._turn_threading_locks.setdefault(session_id, threading.Lock())
-        with threading_lock:
+        # K356: `lock_timeout_seconds` bounds the wait for the lock; None waits as before.
+        if not threading_lock.acquire(
+            timeout=-1 if lock_timeout_seconds is None else lock_timeout_seconds
+        ):
+            raise SessionBusy(
+                f"session {session_id!r}: another turn held its lock past {lock_timeout_seconds}s"
+            )
+        try:
             live_manifest = self._manifests.get(session_id)
             if live_manifest is None:
                 raise SessionEndedMidTurn(
@@ -994,6 +1007,8 @@ class SessionRegistry:
             if new_status == SessionStatus.ENDED:
                 _stop_background_tasks(session_id, "its session ended")
             return updated, record_root
+        finally:
+            threading_lock.release()
 
     # ── queue cap ──────────────────────────────────────────────────────────
 
@@ -1862,6 +1877,7 @@ def manifest_from_dict(d: dict[str, Any]) -> SessionManifest:
 __all__ = [
     "FreshSessionRequiresUserMessage",
     "NameCollision",
+    "SessionBusy",
     "SessionEndedMidTurn",
     "SessionManifest",
     "SessionRegistry",
