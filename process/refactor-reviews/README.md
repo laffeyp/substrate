@@ -16,3 +16,8 @@ sprints per TECHNIQUES.md #43. Nothing here dispatches until Architect ratificat
   (736 → package), plus one cross-cutting primitive extraction (`substrate.testing.run_topology_sync`
   collapses four duplicate factory shapes). Six plans, ~40 sprints, ~3 weeks of Architect-and-Agent
   time.
+
+The two repository-cleanup plans that lived here — `PLAN-2026-08-31-repo-cleanup-DEEP.md` and
+`PLAN-2026-08-31-repo-cleanup-for-public-release.md` — were not module-refactor reviews. They moved
+on 2026-11-20 to `process/planning/2026-11-20-repo-organization/superseded/`, the prior rounds of the
+repository-organization work.

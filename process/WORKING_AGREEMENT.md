@@ -294,6 +294,17 @@ The substrate's user-facing strings (CLI output, error messages, `tail`/`inspect
 - `spec_ambiguity` — a sprint needs a semantic the canonical specs underspecify (vs. a vocabulary gap). Surface with the exact spec section + the ambiguity. Resume: Architect rules, or cuts a spec revision (specs are revised additively — new draft, prior preserved).
 - `conformance_unmapped` — a sprint's artifact is needed by a conformance check but no sprint chain yet covers that check end-to-end. Surface for wave re-planning.
 
+## Documents
+
+The project keeps four kinds of document, each with its own rule for how it changes.
+
+- **Records** — `process/BLACKBOARD.md`, `process/RESEARCH.md`, `process/KIT_DIARY.md`. Append-only, newest entry last; a correction is a new entry naming the one it corrects. The BLACKBOARD is one stream, reordered from the sdd-kit-2 sectioned shape on 2026-11-20 (the sectioned original is `process/archive/BLACKBOARD-to-2026-11-20.md`); every new entry opens `- **{YYYY-MM-DD} {kind}** —`, the kinds being surfaced, user, agent-resolved, built, deferred, open question, drift.
+- **Reference files** — `README.md`, `CLAUDE.md`, this file, and the runbook at the repository top. One copy, edited in place, dated on its first line. A large change to a record or reference file puts the prior version in `process/archive/` under a dated name. The runbook is the exception: each round is a new file, `RUNBOOK-YYYY-MM-DD-project-rN.md`, and the old round moves to its planning folder's `superseded/`.
+- **Working documents** — everything under `process/planning/<piece>/`: research, design, plan, roadmap, status, postmortem. One round per file, never edited; a new round's first lines name the file it supersedes, and the old round moves to the piece's `superseded/`.
+- **Task cards** — `process/sprints/sprint-NNN-*.md`. The `status` field changes as the work moves; the rest of a closed card does not.
+
+Names carry type and date (`TYPE-YYYY-MM-DD-subject.md`, a later round adding `-rN`) and do not change on a move. A session reads the current set named in the runbook's Session-startup section; history under `superseded/`, `process/archive/` and `scripts/_deprecated/` is opened only when a current document points to it.
+
 ---
 
 *process/WORKING_AGREEMENT.md for Substrate. Project class backend/library + CLI. Strict validator-extras. Orchestration (teams + worktrees + best-of-N) layered on top of the kit as project techniques CT-1..CT-5, never bypassing the dual contract or vocabulary lock. Canonical specs: kernel v15, product DRAFT 7, technical DRAFT 5, design DRAFT 1.*
