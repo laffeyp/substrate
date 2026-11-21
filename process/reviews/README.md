@@ -25,5 +25,6 @@
 | 2026-08-28 | `REVIEW-2026-08-28-piece-b-red-team-close.md` | Piece B red-team close |
 | 2026-08-28 | `REVIEW-2026-08-28-un-reviewed-sprints-217-through-232b.md` | The un-reviewed sprints 217 through 232b |
 | 2026-08-31 | `REVIEW-2026-08-31-session-topology-vs-specs.md` | The session topology against the specs |
+| 2026-11-20 | `REVIEW-2026-11-20-se-and-code-review.md` | Software-engineering and code review of substrate; the R4 runbook |
 
 A new review is added here with a row on the day it is written.
