@@ -116,7 +116,7 @@ scripts/ci_local.sh
 
 ## Layout
 
-`src/` is the runtime. `docs/` is how to use it. `CONTRIBUTING.md` is how to develop it. `RUNBOOK-2026-11-20-substrate-r2.md` is how to build, test, release and recover it. Four specs govern the code:
+`src/` is the runtime. `docs/` is how to use it. `CONTRIBUTING.md` is how to develop it. `RUNBOOK-2026-11-20-substrate-r3.md` is how to build, test, release and recover it. Four specs govern the code:
 
 | Spec | Path |
 |---|---|
