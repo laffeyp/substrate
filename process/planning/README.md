@@ -9,7 +9,8 @@ The folder was reorganized on 2026-11-20 from 81 loose documents into the pieces
 | Folder | Piece of work | Status | The fact that set it |
 |---|---|---|---|
 | `substrate-boundary-and-runbook-2026-11-09/` | The substrate/substrate-ui boundary refactor and the substrate runbook: the design-and-boundary paper (r3), the fourteen-stage sequence, the epic/wave/card breakdown, the two round-2 reviews, and the topology-value evidence | active | The live work; its sequence orders fourteen stages not yet run |
-| `2026-11-20-planning-reorganization/` | This reorganization: the plan, the move map, the before-manifest | closed | The moves landed and the after-manifest matched by content, 2026-11-20 |
+| `2026-11-20-repo-organization/` | Applying the file-organization guide to the whole repository: the research, the plan, and the 2026-08-31 cleanup plans as its superseded prior rounds | active | Research and plan written 2026-11-20; steps 1–4 settled, the BLACKBOARD reorder held for the owner's ruling |
+| `2026-11-20-planning-reorganization/` | The planning-folder slice of the repository organization: the plan, the move map, the before-manifest | closed | The moves landed and the after-manifest matched by content, 2026-11-20 |
 | `2026-10-14-create-topology/` | The create-topology tool: research, roadmap, and the without-substrate postmortem (r2 current) | reverted | The postmortem records U188 and the build reverted at `3b2ed96`, zeroed out |
 | `2026-10-13-core-topologies/` | The core topologies the session can reach: the 2026-10-11 audit, research r1–r17, roadmaps (r3 current), the r12 review | superseded | Superseded by the boundary refactor; research r11–r17 are void per `process/BLACKBOARD.md` 2026-10-27; round 10 is the last authoritative design |
 | `2026-10-12-error-messages/` | What an error names: the standard, applied to resumed-session failures | closed | A one-off research note; no open roadmap |
